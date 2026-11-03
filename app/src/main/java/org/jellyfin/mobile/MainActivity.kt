@@ -28,6 +28,11 @@ import org.jellyfin.mobile.player.cast.Chromecast
 import org.jellyfin.mobile.player.cast.IChromecast
 import org.jellyfin.mobile.player.ui.PlayerFragment
 import org.jellyfin.mobile.nflix.NflixLoginFragment
+import org.jellyfin.mobile.nflix.NflixUpdateDialog
+import org.jellyfin.mobile.nflix.NflixUpdater
+import org.jellyfin.mobile.ui.utils.AppTheme
+import android.view.ViewGroup
+import androidx.compose.ui.platform.ComposeView
 import org.jellyfin.mobile.utils.AndroidVersion
 import org.jellyfin.mobile.utils.BackPressInterceptor
 import org.jellyfin.mobile.utils.BluetoothPermissionHelper
@@ -49,6 +54,7 @@ class MainActivity : AppCompatActivity() {
     val bluetoothPermissionHelper: BluetoothPermissionHelper = BluetoothPermissionHelper(this, get())
     val chromecast: IChromecast = Chromecast()
     private val permissionRequestHelper: PermissionRequestHelper by inject()
+    private val nflixUpdater: NflixUpdater by inject()
 
     var serviceBinder: RemotePlayerService.ServiceBinder? = null
         private set
@@ -107,6 +113,12 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        // Nflix update prompt, drawn above every screen
+        addContentView(
+            ComposeView(this).apply { setContent { AppTheme { NflixUpdateDialog(nflixUpdater) } } },
+            ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
+        )
+
         // Check WebView support
         if (!isWebViewSupported()) {
             AlertDialog.Builder(this).apply {
@@ -156,6 +168,7 @@ class MainActivity : AppCompatActivity() {
     override fun onStart() {
         super.onStart()
         orientationListener.enable()
+        lifecycleScope.launch { nflixUpdater.check() }
     }
 
     override fun onNewIntent(intent: Intent) {

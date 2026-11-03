@@ -16,6 +16,9 @@ public sealed class PluginConfiguration : BasePluginConfiguration
 
     /// <summary>Gets or sets the group required in the token (mirrors the LDAP search filter). Empty disables the check.</summary>
     public string RequiredGroup { get; set; } = "plan_standard";
+
+    /// <summary>Gets or sets the secret required to publish store releases (generated on first start).</summary>
+    public string PublishToken { get; set; } = string.Empty;
 }
 
 /// <summary>Nflix Auth plugin: exchanges a Mira Connect ID token for a Jellyfin session.</summary>
@@ -25,11 +28,16 @@ public sealed class Plugin : BasePlugin<PluginConfiguration>
     public Plugin(IApplicationPaths paths, IXmlSerializer serializer) : base(paths, serializer)
     {
         Instance = this;
-        AndroidDirectory = Path.Combine(paths.DataPath, "nflix-android");
+        StoreDirectory = Path.Combine(paths.DataPath, "mira-store");
+        if (string.IsNullOrEmpty(Configuration.PublishToken))
+        {
+            Configuration.PublishToken = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+            SaveConfiguration();
+        }
     }
 
-    /// <summary>Gets the directory holding the published Android release (manifest.json, nflix.apk, icon.png).</summary>
-    public string AndroidDirectory { get; }
+    /// <summary>Gets the root directory of the Mira store release channels.</summary>
+    public string StoreDirectory { get; }
 
     /// <summary>Gets the running instance.</summary>
     public static Plugin? Instance { get; private set; }

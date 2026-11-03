@@ -54,6 +54,7 @@ import org.jellyfin.sdk.api.client.util.AuthorizationHeaderBuilder
 import org.koin.android.ext.koin.androidApplication
 import org.jellyfin.mobile.nflix.NflixAuthRepository
 import org.jellyfin.mobile.nflix.NflixSession
+import org.jellyfin.mobile.nflix.NflixUpdater
 import org.koin.androidx.fragment.dsl.fragment
 import org.koin.core.module.dsl.viewModel
 import org.koin.core.qualifier.named
@@ -90,6 +91,7 @@ val applicationModule = module {
     // Nflix
     single { NflixSession(androidApplication()) }
     single { NflixAuthRepository(get()) }
+    single { NflixUpdater(androidApplication()) }
     viewModel { DownloadsViewModel() }
 
     // Fragments

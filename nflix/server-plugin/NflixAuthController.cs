@@ -52,41 +52,7 @@ public sealed class NflixAuthController : ControllerBase
     /// <summary>Public client configuration consumed by the Android app.</summary>
     [HttpGet("Config")]
     [AllowAnonymous]
-    public IActionResult GetConfig() => Ok(new { Config.Issuer, Config.ClientId, Version = "1.1.0" });
-
-    /// <summary>Latest Nflix Android release, consumed by Mira Connect to install and update the app.</summary>
-    [HttpGet("Android/manifest.json")]
-    [AllowAnonymous]
-    public IActionResult AndroidManifest()
-    {
-        Response.Headers.CacheControl = "no-cache";
-        return AndroidFile("manifest.json", "application/json; charset=utf-8", null);
-    }
-
-    /// <summary>Signed Nflix Android APK.</summary>
-    [HttpGet("Android/nflix.apk")]
-    [AllowAnonymous]
-    public IActionResult AndroidApk() => AndroidFile("nflix.apk", "application/vnd.android.package-archive", "Nflix.apk");
-
-    /// <summary>Nflix Android icon for store listings.</summary>
-    [HttpGet("Android/icon.png")]
-    [AllowAnonymous]
-    public IActionResult AndroidIcon()
-    {
-        Response.Headers.CacheControl = "public, max-age=86400";
-        return AndroidFile("icon.png", "image/png", null);
-    }
-
-    private IActionResult AndroidFile(string name, string contentType, string? downloadName)
-    {
-        var directory = Plugin.Instance?.AndroidDirectory;
-        if (directory is null) return NotFound();
-        var path = Path.Combine(directory, name);
-        if (!System.IO.File.Exists(path)) return NotFound(new { Message = "Aucune version Android publiée." });
-        return downloadName is null
-            ? PhysicalFile(path, contentType, enableRangeProcessing: true)
-            : PhysicalFile(path, contentType, downloadName, enableRangeProcessing: true);
-    }
+    public IActionResult GetConfig() => Ok(new { Config.Issuer, Config.ClientId, Version = "1.2.0" });
 
     /// <summary>Exchanges a Mira Connect ID token for a Jellyfin session.</summary>
     [HttpPost("Mira")]
