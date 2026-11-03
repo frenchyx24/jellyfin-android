@@ -27,6 +27,14 @@ class JellyfinApplication : Application() {
             }
         }
 
+        // Image pipeline tuned for poster-heavy screens
+        coil3.SingletonImageLoader.setSafe { context ->
+            coil3.ImageLoader.Builder(context)
+                .memoryCache { coil3.memory.MemoryCache.Builder().maxSizePercent(context, 0.25).build() }
+                .diskCache { coil3.disk.DiskCache.Builder().directory(okio.Path.Companion.run { cacheDir.resolve("nflix-images").toOkioPath() }).maxSizeBytes(250L * 1024 * 1024).build() }
+                .build()
+        }
+
         startKoin {
             androidContext(this@JellyfinApplication)
             fragmentFactory()

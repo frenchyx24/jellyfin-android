@@ -28,6 +28,8 @@ import org.jellyfin.mobile.player.cast.Chromecast
 import org.jellyfin.mobile.player.cast.IChromecast
 import org.jellyfin.mobile.player.ui.PlayerFragment
 import org.jellyfin.mobile.nflix.NflixLoginFragment
+import org.jellyfin.mobile.nflix.NflixAppFragment
+import org.jellyfin.mobile.nflix.music.NflixMusicService
 import org.jellyfin.mobile.nflix.NflixUpdateDialog
 import org.jellyfin.mobile.nflix.NflixUpdater
 import org.jellyfin.mobile.ui.utils.AppTheme
@@ -150,10 +152,10 @@ class MainActivity : AppCompatActivity() {
 
         // Load UI: native Nflix login until a session exists, then the library
         lifecycleScope.launch {
-            combine(mainViewModel.serverState, mainViewModel.userState) { server, user -> server to user }
-                .collectLatest { (server, user) ->
+            combine(mainViewModel.serverState, mainViewModel.userState, mainViewModel.webMode) { server, user, web -> Triple(server, user, web) }
+                .collectLatest { (server, user, web) ->
                     lifecycle.withStarted {
-                        handleState(server, user)
+                        handleState(server, user, web)
                     }
                 }
         }
@@ -177,18 +179,25 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleMiraIntent(intent: Intent?) {
+        if (intent?.getBooleanExtra(NflixMusicService.EXTRA_OPEN_PLAYER, false) == true) {
+            intent.removeExtra(NflixMusicService.EXTRA_OPEN_PLAYER)
+            mainViewModel.requestOpenPlayer()
+        }
         if (intent?.getBooleanExtra(NflixLoginFragment.EXTRA_MIRA_LOGIN, false) == true) {
             intent.removeExtra(NflixLoginFragment.EXTRA_MIRA_LOGIN)
             if (mainViewModel.userState.value !is UserState.Available) mainViewModel.requestMiraLogin()
         }
     }
 
-    private fun handleState(server: ServerState, user: UserState) {
+    private fun handleState(server: ServerState, user: UserState, web: Boolean) {
         with(supportFragmentManager) {
             val currentFragment = findFragmentById(R.id.fragment_container)
             when {
                 server is ServerState.Pending || user is UserState.Pending -> {
                     // Splash screen is still visible
+                }
+                server is ServerState.Available && user is UserState.Available && !web -> {
+                    if (currentFragment !is NflixAppFragment) replaceFragment<NflixAppFragment>()
                 }
                 server is ServerState.Available && user is UserState.Available -> {
                     if (currentFragment !is WebViewFragment || currentFragment.server != server.server) {

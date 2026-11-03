@@ -171,7 +171,12 @@ class WebViewFragment : Fragment(), BackPressInterceptor, JellyfinWebChromeClien
     }
 
     override fun onInterceptBackPressed(): Boolean {
-        return connected && webappFunctionChannel.goBack()
+        if (connected && webappFunctionChannel.goBack()) return true
+        if (mainViewModel.webMode.value) {
+            mainViewModel.setWebMode(false)
+            return true
+        }
+        return false
     }
 
     override fun onDestroyView() {

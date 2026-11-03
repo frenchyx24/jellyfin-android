@@ -175,6 +175,7 @@ dependencies {
     implementation(libs.androidx.webkit)
     implementation("net.openid:appauth:0.11.1")
     implementation("androidx.browser:browser:1.9.0")
+    implementation("androidx.compose.material3:material3:1.4.0")
     implementation(libs.modernandroidpreferences)
 
     // Jetpack Compose
@@ -228,7 +229,7 @@ tasks {
 
     // Testing
     withType<Test> {
-        useJUnit()
+        useJUnitPlatform()
         testLogging {
             events(
                 org.gradle.api.tasks.testing.logging.TestLogEvent.FAILED,

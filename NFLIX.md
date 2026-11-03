@@ -3,6 +3,24 @@
 Fork of [Jellyfin for Android](https://github.com/jellyfin/jellyfin-android) bound to the Nflix server
 (`https://nflix.miracloud.fr`) and to the Mira Connect (Authentik) account system.
 
+## Nflix 2.0: native app
+
+Since 2.0 the library is fully native (Jetpack Compose); jellyfin-web is only an optional "Version web" (admin, plugin pages).
+
+| Area | Native implementation | Server side kept in sync |
+| --- | --- | --- |
+| Home | Hero carousel, Reprendre/À suivre, nouveautés per library, Horus requests and trends, pinned announcement | Media Bar Enhanced rules, Home Screen Sections (when enabled), Moonfin "merge continue watching", NflixNotice / Internal Notifications |
+| Videos | Library grids (sort, filters, genres, Ma liste), detail pages, seasons/episodes, cast, similar, collections | Jellyfin Enhanced (watch progress, audio languages, remove from continue watching), favorites/played state |
+| Playback | Upstream native ExoPlayer (segments/intro skip, subtitles, Chromecast, downloads) | Playback reporting |
+| Music | Albums, artists, playlists, recently played, favourites, Media3 background service, full screen player, queue, synced lyrics | LrcLib Lyrics (Jellyfin lyrics API), playback reporting |
+| Books | Continue reading, library, native reader: PDF (PdfRenderer), EPUB, CBZ; audiobooks in the music player | Bookshelf / OPDS libraries |
+| Horus | Discover movies, series, albums, books; search; detail pages; requests (season picker, ebook/audiobook, 4K); my requests; "watch on Nflix" | Horus (Seerr fork) through the Moonfin plugin proxy, signed in with the Jellyfin session (Quick Connect SSO, no password) |
+| Search | Nflix + Horus in one screen | |
+| Branding | Server logo | LogoSwap |
+
+Code: `app/src/main/java/org/jellyfin/mobile/nflix/` (`data/` API, repositories and caches; `ui/` navigation, theme, components, screens; `music/` player).
+Navigation is a small custom stack with shared-element poster transitions and saved scroll state per screen.
+
 ## What changes compared to upstream
 
 | Area | Nflix |
@@ -50,7 +68,8 @@ nflix/scripts/release-mira.sh 0.6.0 6 "Nouveautés…"       # Mira Connect (rep
 ```
 
 They set the version, build, check the signing certificate and publish through `store-publish.sh`. Installed apps
-pick the release up by themselves.
+pick the release up by themselves. To test first, publish to the `nflix-beta` channel
+(`store-publish.sh nflix-beta …`) and promote it with `promote-nflix.sh`.
 
 ## License
 

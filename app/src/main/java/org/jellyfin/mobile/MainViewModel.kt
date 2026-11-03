@@ -24,6 +24,26 @@ class MainViewModel(
     private val _userState: MutableStateFlow<UserState> = MutableStateFlow(UserState.Pending)
     val userState: StateFlow<UserState> get() = _userState
 
+    private val _webMode = MutableStateFlow(false)
+
+    /** The classic web client is shown instead of the native app (admin pages, plugin pages). */
+    val webMode: StateFlow<Boolean> get() = _webMode
+
+    private val _openPlayerRequests = MutableStateFlow(false)
+    val openPlayerRequests: StateFlow<Boolean> get() = _openPlayerRequests
+
+    fun setWebMode(enabled: Boolean) {
+        _webMode.value = enabled
+    }
+
+    fun requestOpenPlayer() {
+        _openPlayerRequests.value = true
+    }
+
+    fun consumeOpenPlayer() {
+        _openPlayerRequests.value = false
+    }
+
     private val _miraLoginRequests = MutableStateFlow(false)
 
     /** Set when Mira Connect opened Nflix asking for an immediate Mira sign-in. */
@@ -67,6 +87,7 @@ class MainViewModel(
     }
 
     fun signOut() {
+        _webMode.value = false
         viewModelScope.launch {
             apiClientController.signOutCurrentUser()
             nflixSession.clear()
@@ -96,6 +117,8 @@ class MainViewModel(
     }
 
     private suspend fun refreshUser() {
+        // Also configures the SDK client (native player, downloads) with the saved token
+        apiClientController.loadSavedServerUser()
         val userEntity = apiClientController.loadSavedUser()?.takeIf { !it.accessToken.isNullOrBlank() }
         if (userEntity != null) {
             nflixSession.accessToken = userEntity.accessToken

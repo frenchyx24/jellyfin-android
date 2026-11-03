@@ -55,6 +55,12 @@ import org.koin.android.ext.koin.androidApplication
 import org.jellyfin.mobile.nflix.NflixAuthRepository
 import org.jellyfin.mobile.nflix.NflixSession
 import org.jellyfin.mobile.nflix.NflixUpdater
+import org.jellyfin.mobile.nflix.NflixNavViewModel
+import org.jellyfin.mobile.nflix.data.HorusRepository
+import org.jellyfin.mobile.nflix.data.JellyfinRepository
+import org.jellyfin.mobile.nflix.data.NflixApi
+import org.jellyfin.mobile.nflix.data.PluginRepository
+import org.jellyfin.mobile.nflix.music.MusicController
 import org.koin.androidx.fragment.dsl.fragment
 import org.koin.core.module.dsl.viewModel
 import org.koin.core.qualifier.named
@@ -92,6 +98,12 @@ val applicationModule = module {
     single { NflixSession(androidApplication()) }
     single { NflixAuthRepository(get()) }
     single { NflixUpdater(androidApplication()) }
+    single { NflixApi(androidApplication().cacheDir, get(), get()) }
+    single { JellyfinRepository(get()) }
+    single { PluginRepository(androidApplication(), get(), get()) }
+    single { HorusRepository(get()) }
+    single { MusicController(androidApplication(), get()) }
+    viewModel { NflixNavViewModel() }
     viewModel { DownloadsViewModel() }
 
     // Fragments
