@@ -1,3 +1,5 @@
+> **Nflix fork** — this repository builds *Nflix*, a Jellyfin for Android fork bound to `nflix.miracloud.fr` with Mira Connect sign-in. See [NFLIX.md](NFLIX.md).
+
 <h1 align="center">Jellyfin for Android</h1>
 <h3 align="center">Part of the <a href="https://jellyfin.org">Jellyfin Project</a></h3>
 

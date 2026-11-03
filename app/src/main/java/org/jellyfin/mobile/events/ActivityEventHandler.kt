@@ -106,7 +106,8 @@ class ActivityEventHandler(
                 supportFragmentManager.addFragment<SettingsFragment>()
             }
             ActivityEvent.SelectServer -> {
-                mainViewModel.resetServer()
+                // Nflix has a single server: leaving the web session means signing out
+                mainViewModel.signOut()
             }
             ActivityEvent.ExitApp -> {
                 if (serviceBinder?.isPlaying == true) {

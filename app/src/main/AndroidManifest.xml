@@ -27,6 +27,7 @@
             <data android:mimeType="*/*" />
         </intent>
 
+        <package android:name="fr.miracloud.connect" />
         <package android:name="com.mxtech.videoplayer.ad" />
         <package android:name="com.mxtech.videoplayer.pro" />
         <package android:name="is.xyz.mpv" />

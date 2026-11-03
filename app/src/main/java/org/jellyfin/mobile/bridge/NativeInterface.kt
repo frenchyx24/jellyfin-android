@@ -18,6 +18,7 @@ import kotlinx.serialization.json.put
 import org.jellyfin.mobile.BuildConfig
 import org.jellyfin.mobile.events.ActivityEvent
 import org.jellyfin.mobile.events.ActivityEventHandler
+import org.jellyfin.mobile.nflix.NflixSession
 import org.jellyfin.mobile.player.deviceprofile.DeviceProfileBuilder
 import org.jellyfin.mobile.utils.Constants
 import org.jellyfin.mobile.utils.Constants.EXTRA_ALBUM
@@ -175,6 +176,16 @@ class NativeInterface(private val context: Context) : KoinComponent {
 
     @JavascriptInterface
     fun openServerSelection() {
+        emitEvent(ActivityEvent.SelectServer)
+    }
+
+    /** Session handed to jellyfin-web before it boots, so the native login is reused. */
+    @JavascriptInterface
+    fun getNflixCredentials(): String = get<NflixSession>().webCredentials().orEmpty()
+
+    /** Called by the web client when it lands on its own login / server pages. */
+    @JavascriptInterface
+    fun nflixRequireLogin() {
         emitEvent(ActivityEvent.SelectServer)
     }
 

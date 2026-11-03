@@ -17,5 +17,8 @@ inline fun <reified T : Fragment> FragmentManager.addFragment(args: Bundle? = nu
 }
 
 inline fun <reified T : Fragment> FragmentManager.replaceFragment(args: Bundle? = null) {
-    beginTransaction().replace<T>(R.id.fragment_container, args = args).commit()
+    beginTransaction()
+        .setCustomAnimations(R.anim.nflix_screen_enter, R.anim.nflix_screen_exit)
+        .replace<T>(R.id.fragment_container, args = args)
+        .commit()
 }

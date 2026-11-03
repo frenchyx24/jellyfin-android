@@ -1,4 +1,14 @@
 (() => {
+    // Nflix: start jellyfin-web with the session opened by the native login
+    try {
+        const credentials = window.NativeInterface.getNflixCredentials();
+        if (credentials) {
+            window.localStorage.setItem('jellyfin_credentials', credentials);
+        }
+    } catch (e) {
+        console.error('Nflix credentials injection failed', e);
+    }
+
     const scripts = [
         '/native/nativeshell.js',
         '/native/EventEmitter.js',

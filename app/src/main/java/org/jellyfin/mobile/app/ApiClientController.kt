@@ -39,6 +39,15 @@ class ApiClientController(
         configureApiClientUser(userId, accessToken)
     }
 
+    /** Forgets the access token of the current user (Nflix sign out). */
+    suspend fun signOutCurrentUser() {
+        withContext(Dispatchers.IO) {
+            appPreferences.currentUserId?.let(userDao::logout)
+        }
+        appPreferences.currentUserId = null
+        resetApiClientUser()
+    }
+
     suspend fun loadSavedServer(): ServerEntity? {
         val server = withContext(Dispatchers.IO) {
             val serverId = appPreferences.currentServerId ?: return@withContext null

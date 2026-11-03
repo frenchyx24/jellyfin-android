@@ -9,7 +9,6 @@ const features = [
     "fileinput",
     "htmlaudioautoplay",
     "htmlvideoautoplay",
-    "multiserver",
     "physicalvolumecontrol",
     "remotecontrol",
     "subtitleappearancesettings",
@@ -132,3 +131,17 @@ window.NativeShell.AppHost = {
         window.NativeInterface.exitApp();
     }
 };
+
+// Nflix: the native app owns sign-in. When jellyfin-web falls back to its own
+// login or server screens (sign out, revoked token), hand control back to it.
+(() => {
+    const nflixAuthRoute = /^#!?\/(login|selectserver|addserver|startup|wizard)/i;
+    const check = () => {
+        if (nflixAuthRoute.test(window.location.hash)) {
+            window.NativeInterface.nflixRequireLogin();
+        }
+    };
+    window.addEventListener('hashchange', check);
+    window.addEventListener('popstate', check);
+    check();
+})();

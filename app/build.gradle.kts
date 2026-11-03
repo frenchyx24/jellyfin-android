@@ -12,6 +12,8 @@ plugins {
     alias(libs.plugins.android.junit5)
 }
 
+val nflixBrandingDir: File = layout.buildDirectory.dir("generated/nflix/res").get().asFile
+
 detekt {
     buildUponDefaultConfig = true
     ignoreFailures = true
@@ -31,12 +33,17 @@ android {
     compileSdk = libs.versions.android.compileSdk.get().toInt()
 
     defaultConfig {
+        applicationId = "fr.miracloud.nflix"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
         versionName = project.getVersionName()
         versionCode = getVersionCode(versionName!!)
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
+        manifestPlaceholders["appAuthRedirectScheme"] = "fr.miracloud.nflix"
+        buildConfigField("String", "NFLIX_SERVER_URL", "\"https://nflix.miracloud.fr\"")
+        buildConfigField("String", "MIRA_ISSUER", "\"https://auth.miracloud.fr/application/o/nflix-android/\"")
+        buildConfigField("String", "MIRA_CLIENT_ID", "\"C20bjJuhP51n0vq4j4lsKsuIeWkJGA4hnchvz99V\"")
     }
 
     signingConfigs {
@@ -120,9 +127,26 @@ android {
     room {
         schemaDirectory("$projectDir/schemas")
     }
+
+    // Nflix branding overlay: flavor resources override the upstream Jellyfin ones
+    sourceSets {
+        getByName("proprietary").res.srcDir(nflixBrandingDir)
+        getByName("libre").res.srcDir(nflixBrandingDir)
+    }
 }
 
-base.archivesName.set("jellyfin-android-v${project.getVersionName()}")
+val generateNflixBranding by tasks.registering {
+    val logo = rootProject.file("branding/nflix_logo.b64")
+    val mainRes = file("src/main/res")
+    inputs.file(logo)
+    inputs.dir(mainRes)
+    outputs.dir(nflixBrandingDir)
+    doLast { NflixBranding.generate(logo, mainRes, nflixBrandingDir) }
+}
+
+tasks.named("preBuild") { dependsOn(generateNflixBranding) }
+
+base.archivesName.set("nflix-android-v${project.getVersionName()}")
 
 dependencies {
     val proprietaryImplementation by configurations
@@ -149,6 +173,8 @@ dependencies {
     implementation(libs.google.material)
     implementation(libs.androidx.constraintlayout)
     implementation(libs.androidx.webkit)
+    implementation("net.openid:appauth:0.11.1")
+    implementation("androidx.browser:browser:1.9.0")
     implementation(libs.modernandroidpreferences)
 
     // Jetpack Compose

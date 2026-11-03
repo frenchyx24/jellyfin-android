@@ -32,7 +32,7 @@ import org.jellyfin.mobile.bridge.NativeInterface
 import org.jellyfin.mobile.bridge.NativePlayer
 import org.jellyfin.mobile.data.entity.ServerEntity
 import org.jellyfin.mobile.databinding.FragmentWebviewBinding
-import org.jellyfin.mobile.setup.ConnectFragment
+import org.jellyfin.mobile.nflix.NflixLoginFragment
 import org.jellyfin.mobile.utils.AndroidVersion
 import org.jellyfin.mobile.utils.BackPressInterceptor
 import org.jellyfin.mobile.utils.Constants
@@ -153,6 +153,8 @@ class WebViewFragment : Fragment(), BackPressInterceptor, JellyfinWebChromeClien
         // Setup WebView
         webView.initialize()
 
+        // Nflix is bound to a single server
+        webViewBinding!!.useDifferentServerButton.isVisible = false
         webViewBinding!!.useDifferentServerButton.setOnClickListener {
             webView.removeCallbacks(timeoutRunnable)
             webView.stopLoading()
@@ -250,7 +252,7 @@ class WebViewFragment : Fragment(), BackPressInterceptor, JellyfinWebChromeClien
                 }
                 else -> null
             }
-            parentFragmentManager.replaceFragment<ConnectFragment>(extras)
+            parentFragmentManager.replaceFragment<NflixLoginFragment>(extras)
         }
     }
 

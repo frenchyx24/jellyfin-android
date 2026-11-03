@@ -21,12 +21,13 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.withStarted
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import org.jellyfin.mobile.events.ActivityEventHandler
 import org.jellyfin.mobile.player.cast.Chromecast
 import org.jellyfin.mobile.player.cast.IChromecast
 import org.jellyfin.mobile.player.ui.PlayerFragment
-import org.jellyfin.mobile.setup.ConnectFragment
+import org.jellyfin.mobile.nflix.NflixLoginFragment
 import org.jellyfin.mobile.utils.AndroidVersion
 import org.jellyfin.mobile.utils.BackPressInterceptor
 import org.jellyfin.mobile.utils.BluetoothPermissionHelper
@@ -95,7 +96,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        installSplashScreen()
+        installSplashScreen().setKeepOnScreenCondition {
+            mainViewModel.serverState.value is ServerState.Pending || mainViewModel.userState.value is UserState.Pending
+        }
         setupKoinFragmentFactory()
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
@@ -130,13 +133,17 @@ class MainActivity : AppCompatActivity() {
         // Subscribe to activity events
         with(activityEventHandler) { subscribe() }
 
-        // Load UI
+        // Mira Connect may ask Nflix to sign in right away
+        handleMiraIntent(intent)
+
+        // Load UI: native Nflix login until a session exists, then the library
         lifecycleScope.launch {
-            mainViewModel.serverState.collectLatest { state ->
-                lifecycle.withStarted {
-                    handleServerState(state)
+            combine(mainViewModel.serverState, mainViewModel.userState) { server, user -> server to user }
+                .collectLatest { (server, user) ->
+                    lifecycle.withStarted {
+                        handleState(server, user)
+                    }
                 }
-            }
         }
 
         // Handle back presses
@@ -151,25 +158,37 @@ class MainActivity : AppCompatActivity() {
         orientationListener.enable()
     }
 
-    private fun handleServerState(state: ServerState) {
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleMiraIntent(intent)
+    }
+
+    private fun handleMiraIntent(intent: Intent?) {
+        if (intent?.getBooleanExtra(NflixLoginFragment.EXTRA_MIRA_LOGIN, false) == true) {
+            intent.removeExtra(NflixLoginFragment.EXTRA_MIRA_LOGIN)
+            if (mainViewModel.userState.value !is UserState.Available) mainViewModel.requestMiraLogin()
+        }
+    }
+
+    private fun handleState(server: ServerState, user: UserState) {
         with(supportFragmentManager) {
             val currentFragment = findFragmentById(R.id.fragment_container)
-            when (state) {
-                ServerState.Pending -> {
-                    // TODO add loading indicator
+            when {
+                server is ServerState.Pending || user is UserState.Pending -> {
+                    // Splash screen is still visible
                 }
-                is ServerState.Unset -> {
-                    if (currentFragment !is ConnectFragment) {
-                        replaceFragment<ConnectFragment>()
-                    }
-                }
-                is ServerState.Available -> {
-                    if (currentFragment !is WebViewFragment || currentFragment.server != state.server) {
+                server is ServerState.Available && user is UserState.Available -> {
+                    if (currentFragment !is WebViewFragment || currentFragment.server != server.server) {
                         replaceFragment<WebViewFragment>(
                             Bundle().apply {
-                                putParcelable(Constants.FRAGMENT_WEB_VIEW_EXTRA_SERVER, state.server)
+                                putParcelable(Constants.FRAGMENT_WEB_VIEW_EXTRA_SERVER, server.server)
                             },
                         )
+                    }
+                }
+                else -> {
+                    if (currentFragment !is NflixLoginFragment) {
+                        replaceFragment<NflixLoginFragment>()
                     }
                 }
             }

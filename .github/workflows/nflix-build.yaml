@@ -1,0 +1,46 @@
+name: Nflix build
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nflix-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Build Nflix (debug + unsigned release)
+        run: ./gradlew --no-daemon assembleProprietaryDebug assembleProprietaryRelease
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nflix-android-debug
+          path: app/build/outputs/apk/proprietary/debug/*.apk
+          if-no-files-found: error
+
+  server-plugin:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build Nflix Auth plugin
+        run: dotnet build nflix/server-plugin/NflixAuth.csproj -c Release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nflix-auth-plugin
+          path: nflix/server-plugin/bin/Release/net10.0/Jellyfin.Plugin.NflixAuth.dll
+          if-no-files-found: error
