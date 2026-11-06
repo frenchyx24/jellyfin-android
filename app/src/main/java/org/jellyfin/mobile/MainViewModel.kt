@@ -44,6 +44,19 @@ class MainViewModel(
         _openPlayerRequests.value = false
     }
 
+    private val _openItemRequests = MutableStateFlow<String?>(null)
+
+    /** Title page asked by a tapped Nflix alert. */
+    val openItemRequests: StateFlow<String?> get() = _openItemRequests
+
+    fun requestOpenItem(id: String) {
+        _openItemRequests.value = id
+    }
+
+    fun consumeOpenItem() {
+        _openItemRequests.value = null
+    }
+
     private val _miraLoginRequests = MutableStateFlow(false)
 
     /** Set when Mira Connect opened Nflix asking for an immediate Mira sign-in. */
@@ -91,6 +104,7 @@ class MainViewModel(
         viewModelScope.launch {
             apiClientController.signOutCurrentUser()
             nflixSession.clear()
+            org.jellyfin.mobile.nflix.alerts.NflixAlerts.cancel(getApplication())
             refreshUser()
         }
     }

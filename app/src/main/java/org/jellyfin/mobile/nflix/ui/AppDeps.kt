@@ -34,6 +34,8 @@ class AppDeps(
     val events: ActivityEventHandler,
     val session: NflixSession,
     val updater: NflixUpdater,
+    val alerts: org.jellyfin.mobile.nflix.alerts.AlertsRepository,
+    val alertPrefs: org.jellyfin.mobile.nflix.alerts.AlertPrefs,
     private val downloadDao: DownloadDao,
     private val storageManager: StorageManager,
     val onSignOut: () -> Unit,

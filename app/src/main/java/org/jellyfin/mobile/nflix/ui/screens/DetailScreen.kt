@@ -310,6 +310,7 @@ private fun Actions(item: Item, onChanged: () -> Unit) {
         Row(horizontalArrangement = Arrangement.SpaceEvenly, modifier = Modifier.fillMaxWidth()) {
             val favorite = data?.favorite == true
             ActionIcon(if (favorite) Icons.Rounded.Check else Icons.Rounded.Add, "Ma liste", favorite) { scope.launch { deps.jellyfin.setFavorite(item, !favorite) } }
+            if (item.type == "Series") FollowBell(item.id, item.name)
             if (!item.isBook) {
                 val played = data?.played == true
                 ActionIcon(if (played) Icons.Rounded.CheckCircle else Icons.Rounded.Visibility, if (played) "Vu" else "Marquer vu", played) {

@@ -184,6 +184,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleMiraIntent(intent: Intent?) {
+        intent?.getStringExtra(org.jellyfin.mobile.nflix.alerts.NflixAlerts.EXTRA_OPEN_ITEM)?.let { id ->
+            intent.removeExtra(org.jellyfin.mobile.nflix.alerts.NflixAlerts.EXTRA_OPEN_ITEM)
+            if (Regex("[0-9a-fA-F]{32}").matches(id)) mainViewModel.requestOpenItem(id)
+        }
         if (intent?.getBooleanExtra(NflixMusicService.EXTRA_OPEN_PLAYER, false) == true) {
             intent.removeExtra(NflixMusicService.EXTRA_OPEN_PLAYER)
             mainViewModel.requestOpenPlayer()

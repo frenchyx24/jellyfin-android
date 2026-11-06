@@ -43,6 +43,8 @@ sealed class Route(val key: String) {
     data object AdminActivity : Route("admin/activity")
     data class Saga(val name: String, val audio: Boolean) : Route("saga/$audio/$name")
     data object HorusRequests : Route("horus-requests")
+    data object Releases : Route("releases")
+    data object AlertSettings : Route("alert-settings")
 
     val isTab: Boolean get() = this is Tab
 }

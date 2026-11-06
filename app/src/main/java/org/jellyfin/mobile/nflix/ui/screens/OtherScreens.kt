@@ -26,6 +26,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Logout
+import androidx.compose.material.icons.rounded.CalendarMonth
+import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.Campaign
 import androidx.compose.material.icons.rounded.Celebration
 import androidx.compose.material.icons.rounded.Close
@@ -202,6 +204,8 @@ fun ProfileScreen() {
             item { ProfileRow(Icons.Rounded.EmojiEvents, "Mes succès", "Badges, rang, progression et vitrine") { navigator.open(Route.Badges) } }
             item { ProfileRow(Icons.Rounded.Download, "Téléchargements", "Vos films et épisodes hors ligne") { deps.openDownloads() } }
             item { ProfileRow(Icons.Rounded.Inbox, "Mes demandes Horus", "Suivi de vos demandes") { navigator.open(Route.HorusRequests) } }
+            item { ProfileRow(Icons.Rounded.CalendarMonth, "Prochaines sorties", "Calendrier des épisodes et films à venir") { navigator.open(Route.Releases) } }
+            item { ProfileRow(Icons.Rounded.NotificationsActive, "Notifications", "Demandes Horus, séries suivies, succès") { navigator.open(Route.AlertSettings) } }
             item { ProfileRow(Icons.Rounded.Campaign, "Annonces", "Les nouvelles de Nflix") { navigator.open(Route.Notices) } }
             item {
                 val event = org.jellyfin.mobile.nflix.ui.SeasonalThemes.active

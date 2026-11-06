@@ -49,6 +49,8 @@ class NflixAppFragment : Fragment() {
     private val events: ActivityEventHandler by inject()
     private val session: NflixSession by inject()
     private val updater: NflixUpdater by inject()
+    private val alerts: org.jellyfin.mobile.nflix.alerts.AlertsRepository by inject()
+    private val alertPrefs: org.jellyfin.mobile.nflix.alerts.AlertPrefs by inject()
     private val downloadDao: DownloadDao by inject()
     private val storageManager: StorageManager by inject()
 
@@ -66,9 +68,10 @@ class NflixAppFragment : Fragment() {
         horus.userName = session.userName
         val deps = AppDeps(
             api = api, jellyfin = jellyfin, plugins = plugins, horus = horus, music = music,
-            events = events, session = session, updater = updater,
+            events = events, session = session, updater = updater, alerts = alerts, alertPrefs = alertPrefs,
             downloadDao = downloadDao, storageManager = storageManager,
             onSignOut = {
+                alerts.clear()
                 lifecycleScope.launch {
                     runCatching { api.send("POST", "Sessions/Logout") }
                     music.stop()
@@ -98,6 +101,17 @@ class NflixAppFragment : Fragment() {
                 }
             }
         }
+        viewLifecycleOwner.lifecycleScope.launch {
+            mainViewModel.openItemRequests.collectLatest { id ->
+                if (id != null) {
+                    mainViewModel.consumeOpenItem()
+                    navViewModel.navigator.open(Route.Item(id))
+                }
+            }
+        }
+        // Signed in: the alerts worker runs every 15 min (Android minimum), like Mira Connect.
+        org.jellyfin.mobile.nflix.alerts.NflixAlerts.createChannel(requireContext())
+        org.jellyfin.mobile.nflix.alerts.NflixAlerts.schedule(requireContext())
     }
 
     override fun onDestroyView() {

@@ -36,6 +36,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.Campaign
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
@@ -527,6 +528,7 @@ private fun TopBar(scrolled: Boolean) {
             org.jellyfin.mobile.nflix.ui.AnimatedNflixLogo(deps.plugins.serverLogoUrl, compact = scrolled)
             Spacer(Modifier.weight(1f))
             IconButton(onClick = { navigator.open(Route.Search) }) { Icon(Icons.Rounded.Search, "Rechercher", tint = Color.White) }
+            IconButton(onClick = { navigator.open(Route.Releases) }) { Icon(Icons.Rounded.CalendarMonth, "Prochaines sorties", tint = Color.White) }
             Box {
                 IconButton(onClick = { navigator.open(Route.Notices) }) { Icon(Icons.Rounded.Notifications, "Annonces", tint = Color.White) }
                 if (unread > 0) Box(Modifier.align(Alignment.TopEnd).padding(10.dp).size(9.dp).clip(CircleShape).background(Nflix.Red))
