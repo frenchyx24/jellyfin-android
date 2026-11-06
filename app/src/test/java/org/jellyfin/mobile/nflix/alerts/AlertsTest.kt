@@ -34,6 +34,18 @@ class AlertsTest : FunSpec({
         plan.ack shouldContainExactly listOf(7L)
     }
 
+    test("a backlog older than a week never floods the tray once notifications are allowed") {
+        val plan = AlertDispatch.plan(listOf(alert(10, age = 9 * 86_400), alert(11)), { true }, canNotify = true, alreadyPosted = emptySet(), now = now)
+        plan.notify.map { it.id } shouldContainExactly listOf(11L)
+        plan.ack shouldContainExactly listOf(10L)
+    }
+
+    test("notification ids never collide with 0 and survive long ids") {
+        NflixAlerts.intId(0) shouldBe 1
+        (NflixAlerts.intId(1L) == NflixAlerts.intId(1L + (1L shl 32))) shouldBe false
+        NflixAlerts.intId(42) shouldBe 42
+    }
+
     test("unknown kinds and duplicates are consumed once") {
         val plan = AlertDispatch.plan(listOf(alert(8, "future_kind"), alert(9), alert(9)), { true }, canNotify = true, alreadyPosted = emptySet(), now = now)
         plan.notify.map { it.id } shouldContainExactly listOf(9L)

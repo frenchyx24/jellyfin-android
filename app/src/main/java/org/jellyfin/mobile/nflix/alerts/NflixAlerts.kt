@@ -21,7 +21,10 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.jellyfin.mobile.MainActivity
@@ -71,17 +74,23 @@ class AlertPrefs(context: Context) {
 
     fun setKnownBadges(ids: Set<String>) = prefs.edit { putStringSet(KEY_BADGES, ids) }
 
+    /** Server clock of the last achievement check; null until the first (silent) check. */
+    var badgeCursor: String?
+        get() = prefs.getString(KEY_BADGE_CURSOR, null)
+        set(value) = prefs.edit { putString(KEY_BADGE_CURSOR, value) }
+
     var lastRun: Long
         get() = prefs.getLong(KEY_LAST_RUN, 0)
         set(value) = prefs.edit { putLong(KEY_LAST_RUN, value) }
 
-    fun clearAccount() = prefs.edit { remove(KEY_POSTED); remove(KEY_BADGES); remove(KEY_LAST_RUN) }
+    fun clearAccount() = prefs.edit { remove(KEY_POSTED); remove(KEY_BADGES); remove(KEY_LAST_RUN); remove(KEY_BADGE_CURSOR) }
 
     private companion object {
         const val KEY_MASTER = "master"
         const val KEY_POSTED = "posted"
         const val KEY_BADGES = "known_badges"
         const val KEY_LAST_RUN = "last_run"
+        const val KEY_BADGE_CURSOR = "badge_cursor"
     }
 }
 
@@ -92,6 +101,11 @@ object NflixAlerts {
     private const val WORK = "nflix-alerts"
     private const val WORK_NOW = "nflix-alerts-now"
     private val ITEM_ID = Regex("[0-9a-fA-F]{32}")
+    const val TAG_SERVER = "nflix-alert"
+    const val TAG_LOCAL = "nflix-achievement"
+
+    /** Stable Int for a Long id, never 0 (0 is used by the player notifications' intents). */
+    fun intId(id: Long): Int = ((id xor (id ushr 32)).toInt()).let { if (it == 0) 1 else it }
 
     fun createChannel(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
@@ -112,11 +126,12 @@ object NflixAlerts {
     }
 
     /** Opens the title page of [itemId] when tapped; falls back to the app home. */
-    fun post(context: Context, alert: NflixAlert): Boolean {
+    fun post(context: Context, alert: NflixAlert, tag: String = TAG_SERVER): Boolean {
         val intent = Intent(context, MainActivity::class.java)
+            .setData(android.net.Uri.parse("nflix://alert/$tag/${alert.id}"))
             .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
         alert.itemId?.takeIf { ITEM_ID.matches(it) }?.let { intent.putExtra(EXTRA_OPEN_ITEM, it) }
-        val open = PendingIntent.getActivity(context, alert.id.toInt(), intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val open = PendingIntent.getActivity(context, intId(alert.id), intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val notification = NotificationCompat.Builder(context, CHANNEL)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(alert.title)
@@ -124,12 +139,12 @@ object NflixAlerts {
             .setStyle(NotificationCompat.BigTextStyle().bigText(alert.body))
             .setColor(0xFFE50914.toInt())
             .setCategory(NotificationCompat.CATEGORY_RECOMMENDATION)
-            .setGroup("nflix-alerts")
+            .setOnlyAlertOnce(true)
             .setContentIntent(open)
             .setAutoCancel(true)
             .build()
         @Suppress("MissingPermission")
-        return runCatching { NotificationManagerCompat.from(context).notify("nflix-alert", alert.id.toInt(), notification) }
+        return runCatching { NotificationManagerCompat.from(context).notify(tag, intId(alert.id), notification) }
             .onFailure { Timber.w(it, "Alert notification refused") }
             .isSuccess
     }
@@ -155,6 +170,19 @@ object NflixAlerts {
             cancelUniqueWork(WORK_NOW)
         }
         AlertPrefs(context).clearAccount()
+        // Posted alerts deep-link into the previous account: remove them from the tray.
+        runCatching {
+            val manager = context.getSystemService(NotificationManager::class.java)
+            manager?.activeNotifications?.filter { it.tag == TAG_SERVER || it.tag == TAG_LOCAL }?.forEach { manager.cancel(it.tag, it.id) }
+        }
+    }
+
+    /** Settings page where the user can turn Nflix notifications back on. */
+    fun openSettings(context: Context) {
+        val intent = Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+            .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { context.startActivity(intent) }
     }
 }
 
@@ -175,38 +203,72 @@ class NflixAlertWorker(context: Context, params: WorkerParameters) : CoroutineWo
     private val client: AlertsClient by inject()
     private val localSources: LocalAlertSources by inject()
 
-    override suspend fun doWork(): Result {
-        val token = runCatching { controller.loadSavedUser()?.accessToken }.getOrNull()?.takeIf { it.isNotBlank() }
-            ?: return Result.success()
+    private suspend fun currentToken(): String? = try {
+        controller.loadSavedUser()?.accessToken?.takeIf { it.isNotBlank() }
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (e: Exception) {
+        null
+    }
+
+    /** Periodic and immediate runs never overlap: the same alert is never posted twice. */
+    override suspend fun doWork(): Result = runLock.withLock { work() }
+
+    private suspend fun work(): Result {
+        val token = currentToken() ?: return Result.success()
         val context = applicationContext
         val prefs = AlertPrefs(context)
-        if (!prefs.masterEnabled) return Result.success()
         NflixAlerts.createChannel(context)
         val canNotify = NflixAlerts.canNotify(context)
         val now = System.currentTimeMillis() / 1000
         val remote = try {
             client.alerts(token)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (e: AlertsHttpException) {
             Timber.w("Alerts service answered %d", e.code)
             return if (e.code == 401) Result.success() else Result.retry()
         } catch (e: java.io.IOException) {
             return Result.retry()
+        } catch (e: IllegalArgumentException) {
+            Timber.w("Alerts answer unreadable")
+            return Result.retry()
         }
-        val plan = AlertDispatch.plan(remote, prefs::isEnabled, canNotify, prefs.posted(), now)
+        // Master switch off: alerts are consumed silently, like a disabled kind.
+        val plan = AlertDispatch.plan(remote, { prefs.isEnabled(it) }, canNotify, prefs.posted(), now)
+        // Signed out meanwhile: post nothing for the previous account.
+        if (currentToken() != token) return Result.success()
         val posted = plan.notify.filter { NflixAlerts.post(context, it) }.map { it.id }
         prefs.markPosted(posted)
         val handled = plan.ack + posted
-        runCatching { client.ack(token, handled) }
-            .onSuccess { prefs.forgetPosted(handled) }
-            .onFailure { Timber.w("Alerts ack failed, retried next run") }
-        if (canNotify) {
+        try {
+            client.ack(token, handled)
+            prefs.forgetPosted(handled)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (e: Exception) {
+            Timber.w("Alerts ack failed, retried next run")
+        }
+        if (canNotify && prefs.masterEnabled) {
             localSources.sources.forEach { source ->
-                runCatching { source.poll(token, prefs) }.getOrDefault(emptyList())
-                    .filter { prefs.isEnabled(AlertKind.of(it.kind) ?: return@filter false) }
-                    .forEach { NflixAlerts.post(context, it) }
+                val local = try {
+                    source.poll(token, prefs)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (e: Exception) {
+                    emptyList()
+                }
+                if (currentToken() == token) {
+                    local.filter { alert -> AlertKind.of(alert.kind)?.let(prefs::isEnabled) == true }
+                        .forEach { NflixAlerts.post(context, it, NflixAlerts.TAG_LOCAL) }
+                }
             }
         }
         prefs.lastRun = now
         return Result.success()
+    }
+
+    private companion object {
+        val runLock = Mutex()
     }
 }

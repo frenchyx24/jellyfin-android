@@ -165,8 +165,8 @@ object AlertDispatch {
             when {
                 alert.id in alreadyPosted -> ack += alert.id
                 kind == null || !enabled(kind) -> ack += alert.id
-                canNotify -> notify += alert
                 now - alert.createdAt > STALE_SECONDS -> ack += alert.id
+                canNotify -> notify += alert
             }
         }
         return Plan(notify, ack)

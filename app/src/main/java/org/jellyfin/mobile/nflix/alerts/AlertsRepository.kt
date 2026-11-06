@@ -17,12 +17,16 @@ class AlertsRepository(private val client: AlertsClient, private val session: Nf
     private val lock = Mutex()
     private val calendarCache = HashMap<Pair<LocalDate, LocalDate>, Pair<Long, CalendarPage>>()
 
+    /** Bumped on sign-out: answers to requests started for the previous account are dropped. */
+    @Volatile private var generation = 0
+
     private fun token(): String = session.accessToken ?: throw IllegalStateException("Session Nflix absente.")
 
     suspend fun loadFollows(force: Boolean = false): Set<String> = lock.withLock {
         _follows.value?.takeIf { !force }?.let { return it }
+        val started = generation
         val ids = client.follows(token()).mapTo(HashSet()) { normalize(it.seriesId) }
-        _follows.value = ids
+        if (started == generation) _follows.value = ids
         ids
     }
 
@@ -30,13 +34,14 @@ class AlertsRepository(private val client: AlertsClient, private val session: Nf
 
     suspend fun setFollow(seriesId: String, follow: Boolean) {
         val id = normalize(seriesId)
+        val started = generation
         val before = _follows.value.orEmpty()
         _follows.value = if (follow) before + id else before - id
         try {
             client.setFollow(token(), id, follow)
             synchronized(calendarCache) { calendarCache.clear() }
         } catch (e: Exception) {
-            _follows.value = before
+            if (started == generation) _follows.value = if (follow) _follows.value.orEmpty() - id else _follows.value.orEmpty() + id
             throw e
         }
     }
@@ -45,7 +50,9 @@ class AlertsRepository(private val client: AlertsClient, private val session: Nf
         val key = start to end
         val now = System.currentTimeMillis()
         if (!force) synchronized(calendarCache) { calendarCache[key]?.takeIf { now - it.first < 5 * 60_000 }?.let { return it.second } }
+        val started = generation
         val page = client.calendar(token(), start, end)
+        if (started != generation) return page
         synchronized(calendarCache) {
             if (calendarCache.size > 12) calendarCache.clear()
             calendarCache[key] = now to page
@@ -54,6 +61,7 @@ class AlertsRepository(private val client: AlertsClient, private val session: Nf
     }
 
     fun clear() {
+        generation++
         _follows.value = null
         synchronized(calendarCache) { calendarCache.clear() }
     }

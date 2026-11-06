@@ -33,6 +33,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -117,7 +118,10 @@ fun rememberNotificationPermission(then: (Boolean) -> Unit): () -> Unit {
         then(granted)
     }
     return {
-        if (Build.VERSION.SDK_INT >= 33 && !NflixAlerts.permissionGranted(context)) launcher.launch(Manifest.permission.POST_NOTIFICATIONS) else then(true)
+        when {
+            Build.VERSION.SDK_INT >= 33 && !NflixAlerts.permissionGranted(context) -> launcher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            else -> then(true)
+        }
     }
 }
 
@@ -128,13 +132,24 @@ fun FollowBell(seriesId: String, title: String, modifier: Modifier = Modifier) {
     val scope = rememberCoroutineScope()
     val follows by deps.alerts.follows.collectAsState()
     var error by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { runCatching { deps.alerts.loadFollows() } }
     val followed = follows?.contains(org.jellyfin.mobile.nflix.alerts.AlertsRepository.normalize(seriesId)) == true
     val toggle = {
-        scope.launch {
+        if (!busy) {
+            busy = true
             error = null
-            runCatching { deps.alerts.setFollow(seriesId, !followed) }
-                .onFailure { error = "Impossible de modifier l'alerte. Réessayez." }
+            scope.launch {
+                try {
+                    deps.alerts.setFollow(seriesId, !followed)
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    throw cancelled
+                } catch (e: Exception) {
+                    error = "Impossible de modifier l'alerte. Réessayez."
+                } finally {
+                    busy = false
+                }
+            }
         }
         Unit
     }
@@ -142,11 +157,9 @@ fun FollowBell(seriesId: String, title: String, modifier: Modifier = Modifier) {
     val tint by animateColorAsState(if (followed) Nflix.Red else Nflix.Text, label = "bell-tint")
     val bounce by animateFloatAsState(if (followed) 1.15f else 1f, spring(Spring.DampingRatioHighBouncy, Spring.StiffnessMedium), label = "bell-bounce")
     Column(
-        modifier.width(74.dp).pressable({ if (followed) toggle() else ask() }).semantics {
-            role = Role.Switch
-            selected = followed
-            stateDescription = if (followed) "Alertes activées pour $title" else "Alertes désactivées pour $title"
-        },
+        modifier.width(74.dp)
+            .toggleable(value = followed, enabled = !busy, role = Role.Switch) { if (followed) toggle() else ask() }
+            .semantics { stateDescription = if (followed) "Alertes activées pour $title" else "Alertes désactivées pour $title" },
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         AnimatedContent(followed, transitionSpec = { fadeIn(tween(200)) togetherWith fadeOut(tween(120)) }, label = "bell") { on ->
@@ -173,7 +186,7 @@ fun ReleasesScreen() {
     val range = if (monthView) CalendarModel.gridRange(shownMonth) else today.minusDays(1) to today.plusDays(60)
     val load = rememberLoad("releases", range, reloader = reloader) { force -> deps.alerts.calendar(range.first, range.second, force) }
     val page = (load as? Load.Ready)?.value
-    val events = page?.events.orEmpty().filter { CalendarModel.matches(it, filter, followedOnly) }
+    val events = page?.events.orEmpty().distinctBy { it.id }.filter { CalendarModel.matches(it, filter, followedOnly) }
     val byDay = remember(events) { CalendarModel.byDay(events) }
 
     Box(Modifier.fillMaxSize().background(Nflix.Night)) {
@@ -208,9 +221,9 @@ fun ReleasesScreen() {
                 item(key = "month") {
                     Column(Modifier.padding(horizontal = 12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            IconButton(onClick = { direction = -1; month = shownMonth.minusMonths(1).toString() }) { Icon(Icons.AutoMirrored.Rounded.KeyboardArrowLeft, "Mois précédent") }
+                            IconButton(onClick = { direction = -1; shownMonth.minusMonths(1).let { m -> month = m.toString(); selected = (if (YearMonth.from(today) == m) today else m.atDay(1)).toString() } }) { Icon(Icons.AutoMirrored.Rounded.KeyboardArrowLeft, "Mois précédent") }
                             Text(CalendarModel.monthTitle(shownMonth), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
-                            IconButton(onClick = { direction = 1; month = shownMonth.plusMonths(1).toString() }) { Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, "Mois suivant") }
+                            IconButton(onClick = { direction = 1; shownMonth.plusMonths(1).let { m -> month = m.toString(); selected = (if (YearMonth.from(today) == m) today else m.atDay(1)).toString() } }) { Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, "Mois suivant") }
                         }
                         AnimatedContent(
                             shownMonth,
@@ -360,7 +373,23 @@ fun AlertSettingsScreen() {
     val context = LocalContext.current
     val version by deps.alertPrefs.version.collectAsState()
     var allowed by remember { mutableStateOf(NflixAlerts.canNotify(context)) }
-    val ask = rememberNotificationPermission { allowed = NflixAlerts.canNotify(context) }
+    val ask = rememberNotificationPermission {
+        allowed = NflixAlerts.canNotify(context)
+        // Refused for good, or turned off in the system: only the settings page can fix it.
+        if (!allowed) NflixAlerts.openSettings(context)
+    }
+    @Suppress("DEPRECATION") val lifecycle = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycle) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                val now = NflixAlerts.canNotify(context)
+                if (now && !allowed) NflixAlerts.runNow(context)
+                allowed = now
+            }
+        }
+        lifecycle.lifecycle.addObserver(observer)
+        onDispose { lifecycle.lifecycle.removeObserver(observer) }
+    }
     val follows by deps.alerts.follows.collectAsState()
     LaunchedEffect(Unit) { runCatching { deps.alerts.loadFollows(force = true) } }
     Box(Modifier.fillMaxSize().background(Nflix.Night)) {
