@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Dark at the top (title) and bottom (seek bar, buttons), clear in the middle so the picture stays visible. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:gravity="top" android:height="160dp">
+        <shape>
+            <gradient android:angle="270" android:startColor="#D9000000" android:endColor="#00000000" />
+        </shape>
+    </item>
+    <item android:gravity="bottom" android:height="220dp">
+        <shape>
+            <gradient android:angle="90" android:startColor="#E6000000" android:centerColor="#80000000" android:endColor="#00000000" />
+        </shape>
+    </item>
+    <item>
+        <shape><solid android:color="#26000000" /></shape>
+    </item>
+</layer-list>

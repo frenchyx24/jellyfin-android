@@ -72,6 +72,11 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.jellyfin.mobile.nflix.MiraAccountBridge
+import org.jellyfin.mobile.nflix.MiraProfile
+import org.jellyfin.mobile.nflix.ui.screens.AchievementsScreen
 import org.jellyfin.mobile.nflix.ui.screens.AlbumScreen
 import org.jellyfin.mobile.nflix.ui.screens.ArtistScreen
 import org.jellyfin.mobile.nflix.ui.screens.BooksScreen
@@ -90,6 +95,9 @@ import org.jellyfin.mobile.nflix.ui.screens.PlaylistScreen
 import org.jellyfin.mobile.nflix.ui.screens.ProfileScreen
 import org.jellyfin.mobile.nflix.ui.screens.ReaderScreen
 import org.jellyfin.mobile.nflix.ui.screens.SearchScreen
+import org.jellyfin.mobile.nflix.ui.tutorial.Tutorial
+import org.jellyfin.mobile.nflix.ui.tutorial.TutorialHost
+import androidx.compose.ui.semantics.clearAndSetSemantics
 
 private data class TabSpec(val tab: Route.Tab, val label: String, val icon: ImageVector)
 
@@ -106,17 +114,43 @@ private val tabs = listOf(
 @Composable
 fun NflixRoot(deps: AppDeps, navigator: Navigator, backEnabled: Boolean = true) {
     val holder = rememberSaveableStateHolder()
+    val context = androidx.compose.ui.platform.LocalContext.current.applicationContext
     val music by deps.music.state.collectAsState()
+    remember { SeasonalThemes.init(context) }
+    LaunchedEffect(Unit) {
+        // Festive themes switch on and off with the date, even if the app stays open overnight.
+        while (true) {
+            delay(15 * 60_000L)
+            SeasonalThemes.refreshDate()
+        }
+    }
     LaunchedEffect(Unit) {
         deps.music.connect()
         deps.plugins.refreshConfigs()
         deps.plugins.refreshNotices()
+        if (deps.session.lastMethod == "mira" && deps.session.miraAvatar.isNullOrBlank()) {
+            val account = withContext(Dispatchers.IO) { MiraAccountBridge(context).account() }
+            account?.let { miraAccount ->
+                MiraProfile.fromAcceptedToken(miraAccount.idToken)?.let { claims ->
+                    deps.session.setMiraProfile(
+                        claims.copy(
+                            name = miraAccount.name.takeIf(String::isNotBlank) ?: claims.name,
+                            email = miraAccount.email.takeIf(String::isNotBlank) ?: claims.email,
+                            avatar = MiraProfile.safeAvatar(miraAccount.avatar) ?: claims.avatar,
+                            groups = miraAccount.groups.toSet().ifEmpty { claims.groups },
+                        ),
+                    )
+                }
+            }
+        }
     }
 
     CompositionLocalProvider(LocalDeps provides deps, LocalNavigator provides navigator) {
         BackHandler(enabled = backEnabled && (navigator.stack.size > 1 || navigator.current != Route.Home)) { navigator.back() }
         Box(Modifier.fillMaxSize().background(Nflix.Night)) {
-            SharedTransitionLayout(Modifier.fillMaxSize()) {
+            // While the tutorial covers the app, screen readers only see the tutorial.
+            val hiddenUnderTutorial = if (Tutorial.covering) Modifier.clearAndSetSemantics { } else Modifier
+            SharedTransitionLayout(Modifier.fillMaxSize().then(hiddenUnderTutorial)) {
                 AnimatedContent(
                     targetState = navigator.current,
                     transitionSpec = {
@@ -146,7 +180,7 @@ fun NflixRoot(deps: AppDeps, navigator: Navigator, backEnabled: Boolean = true) 
             }
 
             val showChrome = navigator.current != Route.NowPlaying && navigator.current !is Route.Reader
-            Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
+            Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().then(hiddenUnderTutorial)) {
                 AnimatedVisibility(
                     visible = showChrome && music.current != null,
                     enter = slideInVertically { it } + fadeIn(),
@@ -162,7 +196,11 @@ fun NflixRoot(deps: AppDeps, navigator: Navigator, backEnabled: Boolean = true) 
                     BottomBar(navigator)
                 }
             }
-            NoticePopup()
+            // Announcement popups wait until the tutorial is closed.
+            if (!Tutorial.covering) NoticePopup()
+            ItemMenuHost()
+            TrailerHost()
+            TutorialHost(backEnabled = backEnabled)
         }
     }
 }
@@ -188,6 +226,16 @@ private fun Screen(route: Route) {
         Route.Notices -> NoticesScreen()
         Route.Profile -> ProfileScreen()
         Route.HorusRequests -> HorusRequestsScreen()
+        Route.Badges -> AchievementsScreen()
+        is Route.Distributor -> org.jellyfin.mobile.nflix.ui.screens.DistributorScreen(route.id)
+        Route.Admin -> org.jellyfin.mobile.nflix.ui.screens.AdminScreen()
+        Route.AdminDistributors -> org.jellyfin.mobile.nflix.ui.screens.AdminDistributorsScreen()
+        is Route.AdminDistributorEdit -> org.jellyfin.mobile.nflix.ui.screens.AdminDistributorEditScreen(route.id)
+        Route.AdminRequests -> org.jellyfin.mobile.nflix.ui.screens.AdminRequestsScreen()
+        Route.AdminActivity -> org.jellyfin.mobile.nflix.ui.screens.AdminActivityScreen()
+        Route.LikedSongs -> org.jellyfin.mobile.nflix.ui.screens.LikedSongsScreen()
+        is Route.Audiobook -> org.jellyfin.mobile.nflix.ui.screens.AudiobookScreen(route.id)
+        is Route.Saga -> org.jellyfin.mobile.nflix.ui.screens.SagaScreen(route.name, route.audio)
     }
 }
 
@@ -202,42 +250,41 @@ private fun BottomBar(navigator: Navigator) {
             .fillMaxWidth()
             .background(Brush.verticalGradient(listOf(Color.Transparent, Nflix.Night.copy(alpha = 0.92f), Nflix.Night)))
             .navigationBarsPadding()
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(top = 8.dp),
     ) {
-        Surface(color = Nflix.Surface.copy(alpha = 0.96f), shape = RoundedCornerShape(26.dp), tonalElevation = 0.dp, shadowElevation = 12.dp) {
-            Row(Modifier.fillMaxWidth().padding(6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                tabs.forEach { spec ->
-                    val active = spec.tab == selected
-                    val weight by animateFloatAsState(if (active) 1.55f else 1f, spring(dampingRatio = 0.7f, stiffness = 500f), label = "tab-weight")
-                    val background by animateFloatAsState(if (active) 1f else 0f, tween(220), label = "tab-bg")
-                    Row(
-                        Modifier
-                            .weight(weight)
-                            .height(48.dp)
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(Nflix.Red.copy(alpha = 0.16f * background))
-                            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { navigator.selectTab(spec.tab) },
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        val iconScale by animateFloatAsState(if (active) 1.08f else 1f, spring(dampingRatio = 0.5f), label = "icon")
-                        Icon(
-                            spec.icon, spec.label,
-                            tint = if (active) Nflix.Red else Nflix.Muted,
-                            modifier = Modifier.size(22.dp).graphicsLayer { scaleX = iconScale; scaleY = iconScale },
-                        )
-                        AnimatedVisibility(active, enter = fadeIn() + scaleIn(initialScale = 0.8f), exit = fadeOut() + scaleOut(targetScale = 0.8f)) {
-                            Row {
-                                Spacer(Modifier.width(6.dp))
-                                Text(spec.label, style = MaterialTheme.typography.labelMedium, color = Nflix.Text, maxLines = 1)
-                            }
+        Surface(color = Nflix.Surface, shape = RoundedCornerShape(0.dp), tonalElevation = 0.dp, shadowElevation = 0.dp) {
+            Row(Modifier.fillMaxWidth().padding(4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                    tabs.forEach { spec ->
+                        val active = spec.tab == selected
+                        val background by animateFloatAsState(if (active) 1f else 0f, tween(220), label = "tab-bg")
+                        Column(
+                            Modifier
+                                .weight(1f)
+                                .height(64.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(Nflix.Red.copy(alpha = 0.16f * background))
+                                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { navigator.selectTab(spec.tab) }
+                                .padding(vertical = 5.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                        ) {
+                            val iconScale by animateFloatAsState(if (active) 1.06f else 1f, spring(dampingRatio = 0.7f), label = "icon")
+                            Icon(spec.icon, spec.label, tint = if (active) Nflix.Red else Nflix.Muted, modifier = Modifier.size(21.dp).graphicsLayer { scaleX = iconScale; scaleY = iconScale })
+                            Text(
+                                spec.label,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (active) Nflix.Text else Nflix.Muted,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Clip,
+                                modifier = Modifier.padding(top = 2.dp),
+                            )
                         }
                     }
                 }
             }
         }
     }
-}
 
 @Composable
 private fun MiniPlayer(onOpen: () -> Unit) {
@@ -257,7 +304,7 @@ private fun MiniPlayer(onOpen: () -> Unit) {
         color = Nflix.SurfaceHigh,
         shape = RoundedCornerShape(corner),
         shadowElevation = 10.dp,
-        modifier = Modifier.padding(horizontal = 14.dp).fillMaxWidth().clickable(onClick = onOpen),
+        modifier = Modifier.padding(horizontal = 14.dp).fillMaxWidth().pressable(onOpen, { ItemMenu.showPlayer() }),
     ) {
         Column {
             Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {

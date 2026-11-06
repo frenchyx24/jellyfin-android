@@ -239,7 +239,11 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application),
             Constants.NETWORK_BUFFER_EXTRA_LARGE -> DefaultLoadControl.Builder()
                 .setBufferDurationsMs(80_000, 240_000, 5_000, 10_000)
                 .build()
-            else -> DefaultLoadControl()
+            // Nflix default: deeper buffer for smooth 4K/HDR, still starts fast.
+            else -> DefaultLoadControl.Builder()
+                .setBufferDurationsMs(30_000, 90_000, 1_200, 2_500)
+                .setPrioritizeTimeOverSizeThresholds(true)
+                .build()
         }
         val appPreferences: AppPreferences = get()
         val renderersFactory = DefaultRenderersFactory(getApplication()).apply {

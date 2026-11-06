@@ -73,11 +73,15 @@ class NflixMusicService : MediaSessionService(), KoinComponent {
     private val reporter = object : Player.Listener {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             reportStop()
-            mediaItem?.mediaId?.let { reportStart(it) }
+            if (mediaItem?.mediaMetadata?.extras?.getBoolean(EXTRA_OFFLINE_LOCAL) != true) {
+                mediaItem?.mediaId?.let { reportStart(it) }
+            }
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
-            if (reportedItem == null) player.currentMediaItem?.mediaId?.let { reportStart(it) } else reportProgress()
+            if (reportedItem == null && player.currentMediaItem?.mediaMetadata?.extras?.getBoolean(EXTRA_OFFLINE_LOCAL) != true) {
+                player.currentMediaItem?.mediaId?.let { reportStart(it) }
+            } else reportProgress()
         }
     }
 
@@ -124,6 +128,7 @@ class NflixMusicService : MediaSessionService(), KoinComponent {
     companion object {
         const val SESSION_ID = "nflix-music"
         const val EXTRA_OPEN_PLAYER = "fr.miracloud.nflix.extra.OPEN_PLAYER"
+        const val EXTRA_OFFLINE_LOCAL = "fr.miracloud.nflix.extra.OFFLINE_LOCAL"
         private const val PROGRESS_INTERVAL = 10_000L
     }
 }

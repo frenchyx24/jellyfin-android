@@ -4,11 +4,31 @@
 # Usage: promote-nflix.sh "<changelog>"
 set -euo pipefail
 CHANGELOG="${1:-}"
-APK=$(mktemp --suffix=.apk)
-trap 'rm -f "$APK"' EXIT
-curl -fsS -A "MiraStorePublisher/1.0" -o "$APK" https://nflix.miracloud.fr/NflixAuth/Store/nflix-beta/app.apk
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+APK="$(mktemp --suffix=.apk)"
+STAGE="$(mktemp -d)"
+trap 'rm -f "$APK"; rm -rf "$STAGE"' EXIT
+BASE="https://nflix.miracloud.fr/NflixAuth/Store/nflix-beta"
+UA='MiraStorePublisher/1.1 (Android build tools)'
+curl -fsS -A "$UA" -o "$STAGE/manifest.json" "$BASE/manifest.json"
+curl -fsS -A "$UA" -o "$APK" "$BASE/app.apk"
+python3 - "$STAGE/manifest.json" "$APK" <<'VERIFY'
+import hashlib, json, sys
+with open(sys.argv[1]) as source:
+    manifest = json.load(source)
+with open(sys.argv[2], 'rb') as apk:
+    digest = hashlib.sha256(apk.read()).hexdigest()
+if digest.lower() != manifest.get('sha256', '').lower():
+    raise SystemExit('Refused: beta APK does not match its manifest.')
+if manifest.get('packageName') != 'fr.miracloud.nflix' or manifest.get('signerSha256', '').lower() != '3c7e2866a82adea668857ee07b46995975c0096ea1642d590689a9ec1b320a64':
+    raise SystemExit('Refused: beta package or certificate mismatch.')
+if int(manifest['versionCode']) <= 2000099:
+    raise SystemExit('Refused: beta versionCode does not exceed stable Nflix 2.0.0.')
+print(manifest.get('changelog', ''))
+VERIFY
 if [ -z "$CHANGELOG" ]; then
-  CHANGELOG=$(curl -fsS -A "MiraStorePublisher/1.0" https://nflix.miracloud.fr/NflixAuth/Store/nflix-beta/manifest.json | python3 -c 'import json,sys;print(json.load(sys.stdin).get("changelog",""))')
+  CHANGELOG="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("changelog",""))' "$STAGE/manifest.json")"
 fi
-"$HOME/nflix/store-publish.sh" nflix "$APK" "$HOME/nflix/brand/icon-512.png" \
-  E4C459E949878607AB224B790D5BC977CAF01FB238C7A0FBFADEF0243649866F "$CHANGELOG"
+curl -fsS -A "$UA" -o "$STAGE/icon.png" "$BASE/icon.png"
+NFLIX_PROMOTION=1 "$SCRIPT_DIR/store-publish.sh" nflix "$APK" "$STAGE/icon.png" \
+  3C7E2866A82ADEA668857EE07B46995975C0096EA1642D590689A9EC1B320A64 "$CHANGELOG"

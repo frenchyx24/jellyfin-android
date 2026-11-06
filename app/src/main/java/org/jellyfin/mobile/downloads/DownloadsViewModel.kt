@@ -3,10 +3,8 @@ package org.jellyfin.mobile.downloads
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -34,12 +32,6 @@ class DownloadsViewModel : ViewModel(), KoinComponent {
         .flowOn(Dispatchers.IO)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(), emptyList())
 
-    private val _storageLocation = MutableStateFlow(storageManager.getStorageLocation())
-    val storageLocation = _storageLocation.asStateFlow()
-
-    private val _storageLocationAccessible = MutableStateFlow(storageManager.isStorageLocationAccessible())
-    val storageLocationAccessible = _storageLocationAccessible.asStateFlow()
-
     fun openDownload(download: DownloadEntity) {
         when (download.item.mediaType) {
             MediaType.VIDEO -> {
@@ -57,23 +49,24 @@ class DownloadsViewModel : ViewModel(), KoinComponent {
 
             MediaType.AUDIO,
             MediaType.PHOTO,
-            MediaType.BOOK,
             MediaType.UNKNOWN -> {
                 viewModelScope.launch {
                     withContext(Dispatchers.IO) {
-                        val storageLocation = storageManager.getStorageLocation()
-                        val itemLocation = storageLocation?.findFile(download.path)
-                        if (itemLocation != null && itemLocation.isDirectory) {
-                            val filename = download.item.path?.replace(Regex("^.*[\\\\/]"), "")
-                            if (filename != null) itemLocation.findFile(filename)?.uri else null
-                        } else {
-                            null
-                        }
+                        downloadDao.getFiles(download.id)
+                            .firstOrNull { it.type == DownloadFileType.ITEM }
+                            ?.uri
+                            ?.takeIf { storageManager.documentFor(it)?.exists() == true }
                     }?.let {
-                        activityEventHandler.emit(ActivityEvent.OpenUrl(it.toString(), true))
+                        if (download.item.mediaType == MediaType.AUDIO) {
+                            activityEventHandler.emit(ActivityEvent.PlayOfflineAudio(it.toString(), download.item.name.orEmpty()))
+                        } else {
+                            activityEventHandler.emit(ActivityEvent.OpenUrl(it.toString(), true))
+                        }
                     }
                 }
             }
+
+            MediaType.BOOK -> activityEventHandler.emit(ActivityEvent.OpenOfflineBook(download.itemId.toString()))
         }
     }
 
@@ -89,9 +82,4 @@ class DownloadsViewModel : ViewModel(), KoinComponent {
         }
     }
 
-    fun changeStorageLocation(uri: android.net.Uri) {
-        storageManager.changeStorageLocation(uri)
-        _storageLocation.value = storageManager.getStorageLocation()
-        _storageLocationAccessible.value = storageManager.isStorageLocationAccessible()
-    }
 }

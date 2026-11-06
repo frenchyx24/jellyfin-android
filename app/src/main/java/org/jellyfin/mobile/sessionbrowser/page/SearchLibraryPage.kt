@@ -36,7 +36,7 @@ val SearchLibraryPage = { context: Context, api: ApiClient ->
     libraryPage<LibraryRoute.Search>(grid = true) { route, offset, limit ->
         if (route.query.isNullOrBlank()) return@libraryPage emptyList()
 
-        val (playlists, albums, artists, audioBooks) = listOf(
+        val (playlists, albums, artists, audioBooks, tracks) = listOf(
             search(api, route.query, setOf(BaseItemKind.PLAYLIST)) to { item: BaseItemDto ->
                 LibraryPageElement.baseItem(api, item, action = LibraryItemAction.Navigate(LibraryRoute.Playlist(item.id)))
             },
@@ -49,15 +49,26 @@ val SearchLibraryPage = { context: Context, api: ApiClient ->
             search(api, route.query, setOf(BaseItemKind.AUDIO_BOOK)) to { item: BaseItemDto ->
                 LibraryPageElement.baseItem(api, item, action = LibraryItemAction.Play(item))
             },
+            search(api, route.query, setOf(BaseItemKind.AUDIO)) to { item: BaseItemDto ->
+                LibraryPageElement.baseItem(api, item, action = LibraryItemAction.Play(item))
+            },
         ).map { (deferred, mapper) ->
             deferred.await().content.items.map(mapper)
         }
 
-        listOf(
+        val groups = listOf(
             LibraryPageElement.Group(context.getString(R.string.media_service_car_section_playlists), playlists),
             LibraryPageElement.Group(context.getString(R.string.media_service_car_section_albums), albums),
             LibraryPageElement.Group(context.getString(R.string.media_service_car_section_artists), artists),
             LibraryPageElement.Group(context.getString(R.string.media_service_car_section_audiobooks), audioBooks),
+            LibraryPageElement.Group("Morceaux", tracks),
         )
+        var itemOffset = 0
+        groups.mapNotNull { group ->
+            val start = itemOffset
+            itemOffset += group.items.size
+            val pageItems = group.items.filterIndexed { index, _ -> start + index in offset until offset + limit }
+            pageItems.takeIf { it.isNotEmpty() }?.let { group.copy(items = it) }
+        }
     }
 }

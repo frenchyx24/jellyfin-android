@@ -15,6 +15,7 @@ import org.jellyfin.mobile.MainActivity
 import org.jellyfin.mobile.R
 import org.jellyfin.mobile.bridge.JavascriptCallback
 import org.jellyfin.mobile.downloads.DownloadsFragment
+import org.jellyfin.mobile.nflix.NflixAppFragment
 import org.jellyfin.mobile.player.ui.PlayerFragment
 import org.jellyfin.mobile.player.ui.PlayerFullscreenHelper
 import org.jellyfin.mobile.settings.SettingsFragment
@@ -73,6 +74,17 @@ class ActivityEventHandler(
                     startActivity(intent)
                 } catch (e: ActivityNotFoundException) {
                     Timber.e("openIntent: %s", e.message)
+                }
+            }
+            is ActivityEvent.PlayOfflineAudio -> {
+                supportFragmentManager.fragments.filterIsInstance<NflixAppFragment>().firstOrNull()
+                    ?.playOfflineAudio(event.uri, event.title)
+            }
+            is ActivityEvent.OpenOfflineBook -> {
+                val nflix = supportFragmentManager.fragments.filterIsInstance<NflixAppFragment>().firstOrNull()
+                if (nflix != null) {
+                    supportFragmentManager.popBackStackImmediate()
+                    nflix.openOfflineBook(event.itemId)
                 }
             }
             is ActivityEvent.DownloadItems -> {

@@ -105,6 +105,7 @@ class DownloadManager(
 
     suspend fun delete(id: Long, deleteFiles: Boolean) = withContext(Dispatchers.IO) {
         val download = downloadDao.getDownload(id) ?: return@withContext
+        val files = downloadDao.getFiles(id)
 
         downloadDao.delete(id)
 
@@ -114,7 +115,8 @@ class DownloadManager(
 
         if (deleteFiles) {
             val storageLocation = storageManager.getStorageLocation()
-            storageLocation?.findFile(download.path)?.delete()
+            storageLocation.findFile(download.path)?.delete()
+            files.forEach { file -> storageManager.documentFor(file.uri)?.delete() }
         }
     }
 }

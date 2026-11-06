@@ -63,9 +63,31 @@ data class HorusMedia(
     val tracks: List<HorusTrack> = emptyList(),
     val runtime: Int? = null,
     val tagline: String? = null,
+    /** Full release or first air date (yyyy-MM-dd) when Horus knows it. */
+    val date: String? = null,
 ) {
     val requestable: Boolean get() = type != HorusType.Person && status in setOf(HorusStatus.Unknown, HorusStatus.Deleted, HorusStatus.Partial)
 }
+
+/** One item of the Sonarr/Radarr queue as reported by Horus' download tracker. */
+@Immutable
+data class HorusDownload(
+    val title: String,
+    val size: Long,
+    val sizeLeft: Long,
+    val status: String?,
+    val timeLeft: String?,
+    val eta: String?,
+    val season: Int?,
+    val episode: Int?,
+    val episodeTitle: String?,
+) {
+    /** 0..1, or null when the client does not report a size yet. */
+    val progress: Float? get() = if (size > 0) ((size - sizeLeft).coerceIn(0, size).toFloat() / size) else null
+}
+
+@Immutable
+data class HorusRequestedSeason(val number: Int, val status: Int)
 
 @Immutable
 data class HorusRequest(
@@ -75,7 +97,21 @@ data class HorusRequest(
     val media: HorusMedia,
     val createdAt: String,
     val is4k: Boolean,
+    val updatedAt: String = "",
+    val requestedBy: String? = null,
+    val seasons: List<HorusRequestedSeason> = emptyList(),
+    val downloads: List<HorusDownload> = emptyList(),
 ) {
+    val downloading: Boolean get() = downloads.isNotEmpty()
+
+    /** Overall progress across every queued file, weighted by size. */
+    val progress: Float?
+        get() {
+            val total = downloads.sumOf { it.size }
+            if (total <= 0) return null
+            return downloads.sumOf { it.size - it.sizeLeft.coerceIn(0, it.size) }.toFloat() / total
+        }
+
     val statusLabel: String
         get() = when (status) {
             1 -> "En attente de validation"
@@ -128,9 +164,9 @@ internal object HorusParser {
             status = HorusStatus.of(info?.int("status")),
             status4k = HorusStatus.of(info?.int("status4k")),
             jellyfinId = info?.str("jellyfinMediaId"),
-            genres = json.arr("genres")?.mapNotNull { g ->
+            genres = (json.arr("genres") ?: json.arr("subjects"))?.mapNotNull { g ->
                 (g as? JsonObject)?.str("name") ?: (g as? JsonPrimitive)?.contentOrNull
-            }.orEmpty(),
+            }.orEmpty().take(8),
             seasons = json.arr("seasons")?.mapNotNull { s ->
                 val season = s as? JsonObject ?: return@mapNotNull null
                 val number = season.int("seasonNumber") ?: return@mapNotNull null
@@ -143,6 +179,7 @@ internal object HorusParser {
             }.orEmpty(),
             runtime = json.int("runtime"),
             tagline = json.str("tagline"),
+            date = (json.str("releaseDate") ?: json.str("firstAirDate"))?.takeIf { it.length >= 10 }?.take(10),
         )
     }
 
@@ -158,6 +195,7 @@ internal object HorusParser {
         val mediaJson = request.obj("media") ?: return@mapNotNull null
         val type = HorusType.of(request.str("type")) ?: HorusType.of(mediaJson.str("mediaType")) ?: return@mapNotNull null
         val title = mediaJson.str("metadataTitle")
+        val is4k = (request["is4k"] as? JsonPrimitive)?.booleanOrNull == true
         val media = HorusMedia(
             id = mediaJson.str("tmdbId") ?: mediaJson.str("mbId") ?: mediaJson.str("openLibraryId") ?: mediaJson.str("id") ?: "",
             type = type,
@@ -178,9 +216,32 @@ internal object HorusParser {
             status = request.int("status") ?: 0,
             media = media,
             createdAt = request.str("createdAt").orEmpty(),
-            is4k = (request["is4k"] as? JsonPrimitive)?.booleanOrNull == true,
+            is4k = is4k,
+            updatedAt = request.str("updatedAt").orEmpty(),
+            requestedBy = request.obj("requestedBy")?.let { it.str("displayName") ?: it.str("jellyfinUsername") ?: it.str("username") },
+            seasons = request.arr("seasons")?.mapNotNull { s ->
+                val season = s as? JsonObject ?: return@mapNotNull null
+                HorusRequestedSeason(season.int("seasonNumber") ?: return@mapNotNull null, season.int("status") ?: 0)
+            }.orEmpty().filter { it.number > 0 }.sortedBy { it.number },
+            downloads = downloads(mediaJson.arr(if (is4k) "downloadStatus4k" else "downloadStatus")),
         )
     }.orEmpty()
+
+    fun downloads(json: JsonArray?): List<HorusDownload> = json?.mapNotNull { d ->
+        val item = d as? JsonObject ?: return@mapNotNull null
+        val episode = item.obj("episode")
+        HorusDownload(
+            title = item.str("title").orEmpty(),
+            size = (item["size"] as? JsonPrimitive)?.contentOrNull?.toDoubleOrNull()?.toLong() ?: 0L,
+            sizeLeft = (item["sizeLeft"] as? JsonPrimitive)?.contentOrNull?.toDoubleOrNull()?.toLong() ?: 0L,
+            status = item.str("status"),
+            timeLeft = item.str("timeLeft"),
+            eta = item.str("estimatedCompletionTime"),
+            season = episode?.int("seasonNumber"),
+            episode = episode?.int("episodeNumber"),
+            episodeTitle = episode?.str("title"),
+        )
+    }?.sortedWith(compareBy({ it.season ?: 0 }, { it.episode ?: 0 })).orEmpty()
 
     @Suppress("unused")
     fun firstArray(json: JsonObject, key: String) = json[key]?.jsonArray

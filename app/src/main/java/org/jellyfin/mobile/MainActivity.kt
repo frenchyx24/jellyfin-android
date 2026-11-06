@@ -117,7 +117,12 @@ class MainActivity : AppCompatActivity() {
 
         // Nflix update prompt, drawn above every screen
         addContentView(
-            ComposeView(this).apply { setContent { AppTheme { NflixUpdateDialog(nflixUpdater) } } },
+            ComposeView(this).apply {
+                setContent {
+                    // Waits for the first-run tutorial to close instead of covering it.
+                    AppTheme { if (!org.jellyfin.mobile.nflix.ui.tutorial.Tutorial.covering) NflixUpdateDialog(nflixUpdater) }
+                }
+            },
             ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
         )
 

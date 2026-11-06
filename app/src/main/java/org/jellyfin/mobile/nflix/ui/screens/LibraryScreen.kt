@@ -14,10 +14,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -47,15 +49,18 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import org.jellyfin.mobile.nflix.data.Item
@@ -84,34 +89,9 @@ internal fun typesFor(collectionType: String?): String? = when (collectionType) 
     else -> null
 }
 
-private const val FAVORITES = "favorites"
-
 @Composable
 fun LibraryScreen() {
-    val deps = LocalDeps.current
-    val views = rememberLoad("views") { deps.jellyfin.views(it) }.value.orEmpty()
-        .filter { it.collectionType !in setOf("music", "books", "livetv") }
-    var selected by rememberSaveable { mutableStateOf<String?>(null) }
-    val current = selected ?: views.firstOrNull()?.id
-    Column(Modifier.fillMaxSize()) {
-        ScreenTitle("Vidéos")
-        LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(views.distinctBy { it.id }, key = { it.id }) { view ->
-                NChip(view.name, view.id == current) { selected = view.id }
-            }
-            item(key = FAVORITES) { NChip("Ma liste", current == FAVORITES, Icons.Rounded.Favorite) { selected = FAVORITES } }
-        }
-        AnimatedContent(current, transitionSpec = { fadeIn(tween(250)) togetherWith fadeOut(tween(150)) }, label = "library-view") { id ->
-            when (id) {
-                null -> Box(Modifier.fillMaxSize())
-                FAVORITES -> BrowseGrid(viewId = null, types = "Movie,Series,BoxSet,Episode", initialFilter = LibraryFilter.Favorites, key = FAVORITES)
-                else -> {
-                    val view = views.firstOrNull { it.id == id }
-                    BrowseGrid(viewId = id, types = typesFor(view?.collectionType), key = id)
-                }
-            }
-        }
-    }
+    VideoHomeScreen()
 }
 
 @Composable
@@ -142,6 +122,8 @@ fun NChip(label: String, selected: Boolean, icon: androidx.compose.ui.graphics.v
         selected = selected,
         onClick = onClick,
         label = { Text(label) },
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier.heightIn(min = 48.dp),
         leadingIcon = if (selected) { { Icon(Icons.Rounded.Check, null, Modifier.size(16.dp)) } } else icon?.let { { Icon(it, null, Modifier.size(16.dp)) } },
         colors = FilterChipDefaults.filterChipColors(
             selectedContainerColor = Nflix.Red.copy(alpha = 0.2f),
@@ -179,28 +161,52 @@ fun BrowseGrid(
     val items = remember(key, sort, filter, selectedGenre) { mutableStateListOf<Item>() }
     var total by remember(key, sort, filter, selectedGenre) { mutableIntStateOf(-1) }
     var loading by remember(key, sort, filter, selectedGenre) { mutableStateOf(false) }
+    var loadError by remember(key, sort, filter, selectedGenre) { mutableStateOf<String?>(null) }
+    var requestVersion by remember(key, sort, filter, selectedGenre) { mutableLongStateOf(0L) }
     val genres = rememberLoad("genres", viewId) { deps.jellyfin.genres(viewId) }.value.orEmpty()
     val grid = rememberLazyGridState()
+    val scope = rememberCoroutineScope()
     val userData by deps.jellyfin.userDataChanges.collectAsState()
 
     suspend fun loadMore() {
         if (loading || (total >= 0 && items.size >= total)) return
         loading = true
-        runCatching {
-            deps.jellyfin.items(parentId = viewId, includeTypes = types, sort = sort, filter = filter, start = items.size, limit = PAGE, genre = selectedGenre, personId = personId)
-        }.onSuccess { page ->
-            total = page.total
-            items.addAll(page.items.filter { new -> items.none { it.id == new.id } })
-        }.onFailure { if (total < 0) total = 0 }
-        loading = false
+        loadError = null
+        val request = ++requestVersion
+        val start = items.size
+        try {
+            val page = deps.jellyfin.items(parentId = viewId, includeTypes = types, sort = sort, filter = filter, start = start, limit = PAGE, genre = selectedGenre, personId = personId)
+            if (request == requestVersion) {
+                total = page.total
+                val existing = items.asSequence().map { it.id }.toHashSet()
+                val additions = page.items.filter { existing.add(it.id) }
+                items.addAll(additions)
+                if (additions.isEmpty() && items.size < total) loadError = "Le serveur n'a renvoyé aucun nouveau titre. Réessayez."
+            }
+        } catch (error: Exception) {
+            if (request == requestVersion) loadError = error.message ?: "Impossible de charger les titres. Réessayez."
+        } finally {
+            if (request == requestVersion) loading = false
+        }
     }
 
-    LaunchedEffect(key, sort, filter, selectedGenre) { loadMore() }
-    LaunchedEffect(grid, key, sort, filter, selectedGenre) {
-        snapshotFlow { grid.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0 }
+    LaunchedEffect(key, sort, filter, selectedGenre) {
+        items.clear()
+        total = -1
+        loadError = null
+        loading = false
+        requestVersion++
+        loadMore()
+    }
+    LaunchedEffect(grid, key, sort, filter, selectedGenre, items.size, total, loadError, loading) {
+        snapshotFlow { grid.layoutInfo.visibleItemsInfo.lastOrNull()?.index }
             .distinctUntilChanged()
-            .filter { it >= grid.layoutInfo.totalItemsCount - 18 }
-            .collect { loadMore() }
+            .filter { it != null }
+            .collect { index ->
+                val last = index ?: return@collect
+                val contentCount = items.size + if (total < 0) 12 else 1 + if (loadError != null) 1 else 0
+                if (last >= contentCount - 18) loadMore()
+            }
     }
     val countLabel by remember { derivedStateOf { if (total > 0) "$total titres" else "" } }
 
@@ -258,10 +264,18 @@ fun BrowseGrid(
                 modifier = Modifier.fillMaxWidth(),
             )
         }
-        if (total < 0) {
+        if (total < 0 && loading) {
             items(12, key = { "sk-$it" }) { Skeleton(Modifier.fillMaxWidth().aspectRatio(if (square) 1f else 2f / 3f)) }
-        } else if (total == 0) {
+        } else if (total == 0 && loadError == null) {
             item(key = "empty", span = { GridItemSpan(maxLineSpan) }) { EmptyState(Icons.Rounded.VideoLibrary, "Rien ici pour le moment", "Changez les filtres ou revenez plus tard.") }
+        }
+        if (loadError != null) {
+            item(key = "load-error", span = { GridItemSpan(maxLineSpan) }) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    EmptyState(Icons.Rounded.VideoLibrary, "Chargement interrompu", loadError)
+                    NChip("Réessayer", false) { scope.launch { loadMore() } }
+                }
+            }
         }
         item(key = "end", span = { GridItemSpan(maxLineSpan) }) { Spacer(Modifier.width(1.dp)) }
     }

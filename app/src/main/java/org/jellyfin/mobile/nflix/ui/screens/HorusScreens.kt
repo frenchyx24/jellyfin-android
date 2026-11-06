@@ -207,13 +207,12 @@ fun HorusDetailScreen(type: HorusType, id: String) {
     val load = rememberLoad(type, id, reloader = reloader) { force -> deps.horus.details(type, id, force) }
     var message by remember { mutableStateOf<String?>(null) }
     var sending by remember { mutableStateOf(false) }
-    var seasonSheet by remember { mutableStateOf(false) }
 
     fun send(media: HorusMedia, seasons: List<Int>? = null, alternate: Boolean = false) {
         sending = true
         message = null
         scope.launch {
-            message = runCatching { deps.horus.request(media, seasons, alternate); "Demande envoyée ! Vous serez prévenu dès que c'est disponible." }
+            message = runCatching { deps.horus.request(media, seasons, alternate); "Demande envoyée. Vous serez prévenu dès que c’est disponible." }
                 .getOrElse { it.message ?: "Demande impossible." }
             sending = false
             reloader.reload()
@@ -267,7 +266,8 @@ fun HorusDetailScreen(type: HorusType, id: String) {
                                         RequestButton("Livre numérique", Icons.AutoMirrored.Rounded.MenuBook, sending, Modifier.weight(1f)) { send(media) }
                                         RequestButton("Livre audio", Icons.Rounded.Headphones, sending, Modifier.weight(1f), tonal = true) { send(media, alternate = true) }
                                     }
-                                    HorusType.Tv -> RequestButton("Demander la série", Icons.Rounded.Send, sending, Modifier.fillMaxWidth()) { seasonSheet = true }
+                                    // Series and anime: every season at once, the default quality; no choice to make.
+                                    HorusType.Tv -> RequestButton("Demander la série complète", Icons.Rounded.Send, sending, Modifier.fillMaxWidth()) { send(media) }
                                     else -> RequestButton(if (media.type == HorusType.Music) "Demander l'album" else "Demander le film", Icons.Rounded.Send, sending, Modifier.fillMaxWidth()) { send(media) }
                                 }
                             } else if (media.status in setOf(HorusStatus.Pending, HorusStatus.Processing)) {
@@ -322,7 +322,6 @@ fun HorusDetailScreen(type: HorusType, id: String) {
                         }
                     }
                 }
-                if (seasonSheet) SeasonSheet(media, onDismiss = { seasonSheet = false }) { seasons -> seasonSheet = false; send(media, seasons) }
             }
         }
         BackButton()
@@ -339,72 +338,6 @@ private fun RequestButton(label: String, icon: androidx.compose.ui.graphics.vect
     }
     if (tonal) FilledTonalButton(onClick = onClick, enabled = !sending, modifier = modifier.height(52.dp)) { content() }
     else Button(onClick = onClick, enabled = !sending, colors = ButtonDefaults.buttonColors(containerColor = Nflix.Red), modifier = modifier.height(52.dp)) { content() }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun SeasonSheet(media: HorusMedia, onDismiss: () -> Unit, onConfirm: (List<Int>?) -> Unit) {
-    val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val requestable = media.seasons.filter { it.status in setOf(HorusStatus.Unknown, HorusStatus.Deleted) }
-    val chosen = remember { mutableStateListOf<Int>().apply { addAll(requestable.map { it.number }) } }
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet, containerColor = Nflix.SurfaceHigh) {
-        Column(Modifier.navigationBarsPadding().padding(horizontal = 20.dp, vertical = 8.dp)) {
-            Text("Quelles saisons ?", style = MaterialTheme.typography.titleLarge)
-            Spacer(Modifier.height(8.dp))
-            requestable.forEach { season ->
-                Row(Modifier.fillMaxWidth().clickable { if (season.number in chosen) chosen.remove(season.number) else chosen.add(season.number) }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(checked = season.number in chosen, onCheckedChange = null, colors = CheckboxDefaults.colors(checkedColor = Nflix.Red))
-                    Spacer(Modifier.width(8.dp))
-                    Text(season.name, modifier = Modifier.weight(1f))
-                    Text("${season.episodes} épisodes", style = MaterialTheme.typography.bodySmall, color = Nflix.Muted)
-                }
-            }
-            if (requestable.isEmpty()) Text("Toutes les saisons sont déjà disponibles ou demandées.", color = Nflix.Muted)
-            Spacer(Modifier.height(16.dp))
-            Button(
-                onClick = { onConfirm(if (chosen.size == media.seasons.size) null else chosen.sorted()) },
-                enabled = chosen.isNotEmpty(),
-                colors = ButtonDefaults.buttonColors(containerColor = Nflix.Red),
-                modifier = Modifier.fillMaxWidth().height(52.dp),
-            ) { Icon(Icons.Rounded.Check, null); Spacer(Modifier.width(8.dp)); Text("Demander ${chosen.size} saison(s)") }
-            Spacer(Modifier.height(12.dp))
-        }
-    }
-}
-
-@Composable
-fun HorusRequestsScreen() {
-    val deps = LocalDeps.current
-    val navigator = LocalNavigator.current
-    val requests = rememberLoad("my-requests") { deps.horus.myRequests(true) }
-    Box(Modifier.fillMaxSize()) {
-        LazyColumn(contentPadding = PaddingValues(bottom = ContentBottomPadding)) {
-            item { Text("Mes demandes", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.statusBarsPadding().padding(start = 64.dp, top = 14.dp, bottom = 12.dp)) }
-            when (requests) {
-                Load.Loading -> items(5) { Skeleton(Modifier.padding(horizontal = 16.dp, vertical = 6.dp).fillMaxWidth().height(96.dp)) }
-                is Load.Failed -> item { EmptyState(Icons.Rounded.Inbox, "Horus est injoignable", requests.message) }
-                is Load.Ready -> {
-                    if (requests.value.isEmpty()) item { EmptyState(Icons.Rounded.Inbox, "Aucune demande", "Demandez un film, une série, un album ou un livre depuis l'onglet Horus.") }
-                    items(requests.value.distinctBy { it.id }, key = { it.id }) { request ->
-                        Row(
-                            Modifier.padding(horizontal = 16.dp, vertical = 6.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Nflix.Surface)
-                                .clickable { navigator.open(Route.HorusDetail(request.type, request.media.id)) }.padding(10.dp).appear(),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            NImage(request.media.poster, Modifier.width(56.dp).aspectRatio(if (request.type == HorusType.Music) 1f else 2f / 3f).clip(RoundedCornerShape(8.dp)))
-                            Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-                                Text(request.media.title.ifBlank { request.type.label }, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                Text(listOfNotNull(request.type.label, request.media.subtitle, if (request.is4k) (if (request.type == HorusType.Book) "Audio" else "4K") else null).joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = Nflix.Muted)
-                                Text(request.statusLabel, style = MaterialTheme.typography.labelMedium, color = if (request.status == 3) Nflix.Red else Nflix.Success)
-                            }
-                            HorusStatusBadge(request.media.status)
-                        }
-                    }
-                }
-            }
-        }
-        BackButton()
-    }
 }
 
 @Suppress("unused")

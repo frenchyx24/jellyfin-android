@@ -1,5 +1,6 @@
 package org.jellyfin.mobile.nflix
 
+import android.net.Uri
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -15,6 +16,8 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import org.jellyfin.mobile.MainViewModel
 import org.jellyfin.mobile.events.ActivityEventHandler
+import org.jellyfin.mobile.app.StorageManager
+import org.jellyfin.mobile.data.dao.DownloadDao
 import org.jellyfin.mobile.nflix.data.HorusRepository
 import org.jellyfin.mobile.nflix.data.JellyfinRepository
 import org.jellyfin.mobile.nflix.data.NflixApi
@@ -46,6 +49,8 @@ class NflixAppFragment : Fragment() {
     private val events: ActivityEventHandler by inject()
     private val session: NflixSession by inject()
     private val updater: NflixUpdater by inject()
+    private val downloadDao: DownloadDao by inject()
+    private val storageManager: StorageManager by inject()
 
     /** Back is only handled natively while no player or settings screen sits on top. */
     private val onTop = mutableStateOf(true)
@@ -53,11 +58,16 @@ class NflixAppFragment : Fragment() {
         onTop.value = parentFragmentManager.backStackEntryCount == 0
     }
 
+    fun playOfflineAudio(uri: String, title: String) = music.playLocal(Uri.parse(uri), title)
+
+    fun openOfflineBook(id: String) = navViewModel.navigator.open(Route.Reader(id))
+
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         horus.userName = session.userName
         val deps = AppDeps(
             api = api, jellyfin = jellyfin, plugins = plugins, horus = horus, music = music,
             events = events, session = session, updater = updater,
+            downloadDao = downloadDao, storageManager = storageManager,
             onSignOut = {
                 lifecycleScope.launch {
                     runCatching { api.send("POST", "Sessions/Logout") }

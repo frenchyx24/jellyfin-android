@@ -10,6 +10,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -72,14 +73,41 @@ import org.jellyfin.mobile.nflix.data.Item
 
 /** Network image with crossfade and a soft placeholder. */
 @Composable
-fun NImage(url: String?, modifier: Modifier = Modifier, contentScale: ContentScale = ContentScale.Crop, description: String? = null, placeholderIcon: ImageVector? = Icons.Rounded.Movie) {
+fun NImage(
+    url: String?,
+    modifier: Modifier = Modifier,
+    contentScale: ContentScale = ContentScale.Crop,
+    description: String? = null,
+    placeholderIcon: ImageVector? = Icons.Rounded.Movie,
+    background: Color = Nflix.SurfaceHigh,
+) {
     val context = LocalPlatformContext.current
-    Box(modifier.background(Nflix.SurfaceHigh), contentAlignment = Alignment.Center) {
+    Box(modifier.background(background), contentAlignment = Alignment.Center) {
         if (url == null) {
             if (placeholderIcon != null) Icon(placeholderIcon, null, tint = Nflix.Muted.copy(alpha = 0.4f), modifier = Modifier.size(28.dp))
         } else {
-            val request = remember(url) { ImageRequest.Builder(context).data(url).crossfade(220).build() }
+            val request = remember(context, url) { ImageRequest.Builder(context).data(url).crossfade(220).build() }
             AsyncImage(model = request, contentDescription = description, contentScale = contentScale, modifier = Modifier.fillMaxSize())
+        }
+    }
+}
+
+/** User photo: HTTPS URL or inline data URI (decoded once), drawn over [fallback]. */
+@Composable
+fun AvatarImage(source: String?, modifier: Modifier = Modifier, fallback: @Composable () -> Unit = {}) {
+    val context = LocalPlatformContext.current
+    val model: Any? = remember(source) {
+        when {
+            source == null -> null
+            source.startsWith("data:") -> org.jellyfin.mobile.nflix.MiraProfile.inlineBytes(source)
+            else -> source
+        }
+    }
+    Box(modifier, contentAlignment = Alignment.Center) {
+        fallback()
+        if (model != null) {
+            val request = remember(context, model) { ImageRequest.Builder(context).data(model).crossfade(220).build() }
+            AsyncImage(model = request, contentDescription = "Photo de profil", contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         }
     }
 }
@@ -131,11 +159,13 @@ fun PosterCard(
     played: Boolean = item.userData?.played == true,
     favorite: Boolean = item.userData?.favorite == true,
     subtitle: String? = item.year?.toString(),
+    typeLabel: String? = null,
     onLongClick: (() -> Unit)? = null,
 ) {
-    Column(modifier.width(width).pressable(onClick, onLongClick)) {
-        Box(Modifier.fillMaxWidth().aspectRatio(aspect).clip(RoundedCornerShape(12.dp))) {
+    Column(modifier.width(width).pressable(onClick, onLongClick ?: { ItemMenu.show(item) })) {
+        Box(Modifier.fillMaxWidth().aspectRatio(aspect).clip(RoundedCornerShape(8.dp)).border(1.dp, Nflix.Outline, RoundedCornerShape(8.dp))) {
             NImage(imageUrl, Modifier.fillMaxSize().sharedPoster(origin), description = item.name)
+            if (typeLabel != null) Badge(typeLabel, Color.Black.copy(alpha = 0.78f), Modifier.align(Alignment.TopStart).padding(6.dp))
             Row(Modifier.align(Alignment.TopEnd).padding(6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 if (favorite) Icon(Icons.Rounded.Favorite, null, tint = Nflix.Red, modifier = Modifier.size(16.dp))
                 if (played) Icon(Icons.Rounded.CheckCircle, null, tint = Color.White, modifier = Modifier.size(16.dp))
@@ -143,7 +173,7 @@ fun PosterCard(
             }
             ProgressBar(item.progress, Modifier.align(Alignment.BottomCenter))
         }
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(8.dp))
         Text(item.name, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, color = Nflix.Text)
         if (!subtitle.isNullOrBlank()) Text(subtitle, style = MaterialTheme.typography.bodySmall, color = Nflix.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
@@ -161,11 +191,13 @@ fun WideCard(
     modifier: Modifier = Modifier,
     width: Dp = 240.dp,
     onLongClick: (() -> Unit)? = null,
+    typeLabel: String? = null,
     overlay: @Composable BoxScope.() -> Unit = {},
 ) {
     Column(modifier.width(width).pressable(onClick, onLongClick)) {
-        Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(12.dp))) {
+        Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(8.dp)).border(1.dp, Nflix.Outline, RoundedCornerShape(8.dp))) {
             NImage(imageUrl, Modifier.fillMaxSize().sharedPoster(origin), description = title)
+            if (typeLabel != null) Badge(typeLabel, Color.Black.copy(alpha = 0.72f), Modifier.align(Alignment.TopStart).padding(6.dp))
             overlay()
             ProgressBar(progress, Modifier.align(Alignment.BottomCenter))
         }
@@ -192,7 +224,7 @@ fun HorusStatusBadge(status: HorusStatus, modifier: Modifier = Modifier) {
 fun HorusCard(media: HorusMedia, onClick: () -> Unit, modifier: Modifier = Modifier, width: Dp = 120.dp) {
     val square = media.type == org.jellyfin.mobile.nflix.data.HorusType.Music
     Column(modifier.width(width).pressable(onClick)) {
-        Box(Modifier.fillMaxWidth().aspectRatio(if (square) 1f else 2f / 3f).clip(RoundedCornerShape(12.dp))) {
+        Box(Modifier.fillMaxWidth().aspectRatio(if (square) 1f else 2f / 3f).clip(RoundedCornerShape(8.dp)).border(1.dp, Nflix.Outline, RoundedCornerShape(8.dp))) {
             NImage(media.poster, Modifier.fillMaxSize().sharedPoster("horus-${media.type.api}-${media.id}"), description = media.title)
             HorusStatusBadge(media.status, Modifier.align(Alignment.TopStart).padding(6.dp))
             Badge(media.type.label, Color.Black.copy(alpha = 0.55f), Modifier.align(Alignment.BottomStart).padding(6.dp))
@@ -206,15 +238,21 @@ fun HorusCard(media: HorusMedia, onClick: () -> Unit, modifier: Modifier = Modif
 @Composable
 fun SectionHeader(title: String, modifier: Modifier = Modifier, action: String? = null, onAction: (() -> Unit)? = null) {
     Row(
-        modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 22.dp, bottom = 10.dp),
+        modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 22.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+        Text(
+            title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = Nflix.Text,
+            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+        )
         if (onAction != null) {
-            Row(Modifier.clip(CircleShape).clickable(onClick = onAction).padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(action ?: "Tout voir", style = MaterialTheme.typography.labelMedium, color = Nflix.Muted)
-                Spacer(Modifier.width(4.dp))
-                Icon(Icons.AutoMirrored.Rounded.ArrowForwardIos, null, tint = Nflix.Muted, modifier = Modifier.size(11.dp))
+            Row(
+                Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onAction).padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(action ?: "Tout voir", style = MaterialTheme.typography.labelMedium, color = Nflix.Text)
+                Spacer(Modifier.width(5.dp))
+                Icon(Icons.AutoMirrored.Rounded.ArrowForwardIos, null, tint = Nflix.Red, modifier = Modifier.size(10.dp))
             }
         }
     }

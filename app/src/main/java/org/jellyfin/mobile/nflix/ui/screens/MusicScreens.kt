@@ -8,7 +8,10 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -40,7 +43,9 @@ import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Lyrics
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.Person
@@ -51,6 +56,7 @@ import androidx.compose.material.icons.rounded.RepeatOne
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
+import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
@@ -103,81 +109,8 @@ import org.jellyfin.mobile.nflix.ui.rowSection
 import org.jellyfin.mobile.nflix.ui.sharedPoster
 import org.jellyfin.mobile.nflix.ui.value
 
-private enum class MusicTab(val label: String) { Home("Accueil"), Albums("Albums"), Artists("Artistes"), Playlists("Playlists") }
-
 @Composable
-fun MusicScreen() {
-    val deps = LocalDeps.current
-    val views = rememberLoad("views") { deps.jellyfin.views(it) }.value.orEmpty()
-    val music = views.firstOrNull { it.collectionType == "music" }
-    val playlists = views.firstOrNull { it.collectionType == "playlists" }
-    var tab by rememberSaveable { mutableStateOf(MusicTab.Home) }
-    Column(Modifier.fillMaxSize()) {
-        ScreenTitle("Musique")
-        androidx.compose.foundation.lazy.LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(MusicTab.entries.size) { i -> val t = MusicTab.entries[i]; NChip(t.label, t == tab) { tab = t } }
-        }
-        AnimatedContent(tab, transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(140)) }, label = "music-tab") { current ->
-            when {
-                music == null && views.isNotEmpty() -> EmptyState(Icons.Rounded.MusicNote, "Pas de bibliothèque musicale", null)
-                music == null -> Box(Modifier.fillMaxSize())
-                current == MusicTab.Home -> MusicHome(music.id)
-                current == MusicTab.Albums -> BrowseGrid(viewId = music.id, types = "MusicAlbum", key = "albums-${music.id}", square = true)
-                current == MusicTab.Artists -> ArtistsGrid(music.id)
-                else -> BrowseGrid(viewId = playlists?.id, types = "Playlist", key = "playlists", square = true)
-            }
-        }
-    }
-}
-
-@Composable
-private fun MusicHome(viewId: String) {
-    val deps = LocalDeps.current
-    val navigator = LocalNavigator.current
-    val scope = rememberCoroutineScope()
-    val latest = rememberLoad("music-latest", viewId) { deps.jellyfin.latest(viewId, 24, force = it) }.value.orEmpty()
-    val recent = rememberLoad("music-recent", viewId) {
-        deps.jellyfin.items(parentId = viewId, includeTypes = "Audio", sort = org.jellyfin.mobile.nflix.data.LibrarySort.Played, limit = 20, extra = mapOf("isPlayed" to true)).items
-    }.value.orEmpty()
-    val favorites = rememberLoad("music-fav", viewId) {
-        deps.jellyfin.items(parentId = viewId, includeTypes = "Audio", filter = org.jellyfin.mobile.nflix.data.LibraryFilter.Favorites, limit = 50, sort = org.jellyfin.mobile.nflix.data.LibrarySort.Random).items
-    }.value.orEmpty()
-    val random = rememberLoad("music-random", viewId) {
-        deps.jellyfin.items(parentId = viewId, includeTypes = "MusicAlbum", sort = org.jellyfin.mobile.nflix.data.LibrarySort.Random, limit = 16).items
-    }.value.orEmpty()
-    LazyColumn(contentPadding = PaddingValues(bottom = ContentBottomPadding)) {
-        item(key = "quick") {
-            Row(Modifier.padding(horizontal = 20.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Button(
-                    onClick = {
-                        scope.launch {
-                            val tracks = deps.jellyfin.items(parentId = viewId, includeTypes = "Audio", sort = org.jellyfin.mobile.nflix.data.LibrarySort.Random, limit = 100).items
-                            deps.music.play(tracks)
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Nflix.Red),
-                    modifier = Modifier.weight(1f).height(50.dp),
-                ) { Icon(Icons.Rounded.Shuffle, null); Spacer(Modifier.width(8.dp)); Text("Aléatoire") }
-                FilledTonalButton(onClick = { if (favorites.isNotEmpty()) deps.music.play(favorites) }, modifier = Modifier.weight(1f).height(50.dp), enabled = favorites.isNotEmpty()) {
-                    Icon(Icons.Rounded.Favorite, null); Spacer(Modifier.width(8.dp)); Text("Coups de cœur")
-                }
-            }
-        }
-        rowSection("latest-albums", "Nouveaux albums", latest, { it.id }) { album ->
-            PosterCard(album, deps.jellyfin.primary(album, 300), "music-latest/${album.id}", { navigator.open(Route.Album(album.id)) }, width = 140.dp, aspect = 1f, subtitle = album.albumArtist)
-        }
-        if (recent.isNotEmpty()) {
-            item(key = "recent-header") { org.jellyfin.mobile.nflix.ui.SectionHeader("Écoutés récemment") }
-            itemsIndexed(recent.distinctBy { it.id }.take(8), key = { _, t -> "recent-${t.id}" }) { index, track -> TrackRow(track, index + 1, showArt = true) { deps.music.play(recent, index) } }
-        }
-        rowSection("discover-albums", "À découvrir", random, { it.id }) { album ->
-            PosterCard(album, deps.jellyfin.primary(album, 300), "music-random/${album.id}", { navigator.open(Route.Album(album.id)) }, width = 140.dp, aspect = 1f, subtitle = album.albumArtist)
-        }
-    }
-}
-
-@Composable
-private fun ArtistsGrid(viewId: String) {
+internal fun ArtistsGrid(viewId: String) {
     val deps = LocalDeps.current
     val navigator = LocalNavigator.current
     val artists = rememberLoad("artists", viewId) { deps.jellyfin.artists(viewId, 0, 300).items }
@@ -199,8 +132,9 @@ private fun ArtistsGrid(viewId: String) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun TrackRow(track: Item, number: Int, showArt: Boolean = false, onClick: () -> Unit) {
+fun TrackRow(track: Item, number: Int, showArt: Boolean = false, playlistId: String? = null, onClick: () -> Unit) {
     val deps = LocalDeps.current
     val scope = rememberCoroutineScope()
     val state by deps.music.state.collectAsState()
@@ -208,7 +142,9 @@ fun TrackRow(track: Item, number: Int, showArt: Boolean = false, onClick: () -> 
     val favorite = (userData[track.id] ?: track.userData)?.favorite == true
     val playing = state.current?.id == track.id
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 8.dp),
+        Modifier.fillMaxWidth()
+            .combinedClickable(onClick = onClick, onLongClick = { org.jellyfin.mobile.nflix.ui.ItemMenu.show(track, playlistId) })
+            .padding(horizontal = 20.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (showArt) {
@@ -229,29 +165,40 @@ fun TrackRow(track: Item, number: Int, showArt: Boolean = false, onClick: () -> 
         IconButton(onClick = { scope.launch { deps.jellyfin.setFavorite(track, !favorite) } }) {
             Icon(if (favorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder, "Favori", tint = if (favorite) Nflix.Red else Nflix.Muted, modifier = Modifier.size(20.dp))
         }
-        IconButton(onClick = { deps.music.enqueue(listOf(track), next = true) }) {
-            Icon(Icons.Rounded.PlaylistAdd, "Lire ensuite", tint = Nflix.Muted, modifier = Modifier.size(20.dp))
+        IconButton(onClick = { org.jellyfin.mobile.nflix.ui.ItemMenu.show(track, playlistId) }) {
+            Icon(Icons.Rounded.MoreVert, "Plus d'options", tint = Nflix.Muted, modifier = Modifier.size(20.dp))
         }
     }
 }
 
 @Composable
-private fun CollectionHeader(title: String, subtitle: String?, image: String?, origin: String, round: Boolean = false, onPlay: () -> Unit, onShuffle: () -> Unit, extra: @Composable () -> Unit = {}) {
+internal fun CollectionHeader(title: String, subtitle: String?, image: String?, origin: String, round: Boolean = false, kind: String? = null, onMore: (() -> Unit)? = null, onPlay: () -> Unit, onShuffle: () -> Unit, extra: @Composable () -> Unit = {}) {
     Box(Modifier.fillMaxWidth()) {
-        NImage(image, Modifier.fillMaxWidth().height(380.dp).blur(40.dp).graphicsLayer { alpha = 0.55f }, placeholderIcon = null)
-        Box(Modifier.fillMaxWidth().height(380.dp).background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color.Transparent, Nflix.Night))))
-        Column(Modifier.statusBarsPadding().padding(top = 56.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-            NImage(image, Modifier.size(210.dp).clip(if (round) CircleShape else RoundedCornerShape(18.dp)).sharedPoster(origin), placeholderIcon = Icons.Rounded.Album)
-            Spacer(Modifier.height(16.dp))
-            Text(title, style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 24.dp), maxLines = 2, overflow = TextOverflow.Ellipsis)
-            subtitle?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = Nflix.Muted, textAlign = TextAlign.Center) }
-            extra()
-            Spacer(Modifier.height(14.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Button(onClick = onPlay, colors = ButtonDefaults.buttonColors(containerColor = Nflix.Red), modifier = Modifier.height(48.dp)) {
-                    Icon(Icons.Rounded.PlayArrow, null); Spacer(Modifier.width(6.dp)); Text("Lecture", fontWeight = FontWeight.Bold)
-                }
-                FilledTonalButton(onClick = onShuffle, modifier = Modifier.height(48.dp)) { Icon(Icons.Rounded.Shuffle, null); Spacer(Modifier.width(6.dp)); Text("Aléatoire") }
+        // Colour wash from the artwork itself, fading into the page.
+        NImage(image, Modifier.fillMaxWidth().height(420.dp).blur(60.dp).graphicsLayer { alpha = 0.7f }, placeholderIcon = null)
+        Box(Modifier.fillMaxWidth().height(420.dp).background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.2f), Nflix.Night))))
+        Column(Modifier.statusBarsPadding().padding(top = 56.dp).fillMaxWidth()) {
+            NImage(
+                image,
+                Modifier.align(Alignment.CenterHorizontally).size(230.dp).clip(if (round) CircleShape else RoundedCornerShape(6.dp)).sharedPoster(origin),
+                placeholderIcon = if (round) Icons.Rounded.Person else Icons.Rounded.Album,
+            )
+            Spacer(Modifier.height(20.dp))
+            Column(Modifier.padding(horizontal = 20.dp)) {
+                kind?.let { Text(it.uppercase(), style = MaterialTheme.typography.labelSmall, color = Nflix.Muted, fontWeight = FontWeight.Bold) }
+                Text(title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                subtitle?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = Nflix.Text.copy(alpha = 0.75f)) }
+                extra()
+            }
+            Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 20.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (onMore != null) IconButton(onClick = onMore) { Icon(Icons.Rounded.MoreVert, "Plus d'options", tint = Nflix.Text) }
+                Spacer(Modifier.weight(1f))
+                IconButton(onClick = onShuffle, modifier = Modifier.size(52.dp)) { Icon(Icons.Rounded.Shuffle, "Lecture aléatoire", Modifier.size(28.dp), tint = Nflix.Text) }
+                Spacer(Modifier.width(8.dp))
+                Box(
+                    Modifier.size(60.dp).clip(CircleShape).background(Nflix.Red).pressable(onPlay),
+                    contentAlignment = Alignment.Center,
+                ) { Icon(Icons.Rounded.PlayArrow, "Lecture", Modifier.size(36.dp), tint = Color.White) }
             }
         }
     }
@@ -271,11 +218,13 @@ fun AlbumScreen(id: String) {
                     subtitle = listOfNotNull(album?.albumArtist, album?.year?.toString()).joinToString(" · "),
                     image = album?.let { deps.jellyfin.primary(it, 600) },
                     origin = "grid-albums/$id",
+                    kind = "Album",
+                    onMore = album?.let { a -> { org.jellyfin.mobile.nflix.ui.ItemMenu.show(a) } },
                     onPlay = { tracks?.let { deps.music.play(it) } },
                     onShuffle = { tracks?.let { deps.music.play(it, shuffle = true) } },
                     extra = {
                         album?.albumArtists?.firstOrNull()?.let { artist ->
-                            Text("Voir l'artiste", color = Nflix.Red, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 6.dp).clickable { navigator.open(Route.Artist(artist.id)) })
+                            Text("Voir l'artiste", color = Nflix.Red, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 6.dp).clip(RoundedCornerShape(6.dp)).clickable { navigator.open(Route.Artist(artist.id)) }.padding(vertical = 4.dp))
                         }
                     },
                 )
@@ -307,7 +256,8 @@ fun ArtistScreen(id: String) {
             item(span = { GridItemSpan(maxLineSpan) }, key = "header") {
                 CollectionHeader(
                     title = artist?.name ?: "", subtitle = "${albums.size} albums",
-                    image = artist?.let { deps.jellyfin.primary(it, 600) }, origin = "artist/$id", round = true,
+                    image = artist?.let { deps.jellyfin.primary(it, 600) }, origin = "artist/$id", round = true, kind = "Artiste",
+                    onMore = artist?.let { a -> { org.jellyfin.mobile.nflix.ui.ItemMenu.show(a) } },
                     onPlay = { if (top.isNotEmpty()) deps.music.play(top) else artist?.let { a -> deps.play(scope, a) } },
                     onShuffle = { artist?.let { a -> deps.play(scope, a) } },
                 )
@@ -335,21 +285,22 @@ fun PlaylistScreen(id: String) {
     val deps = LocalDeps.current
     val scope = rememberCoroutineScope()
     val playlist = rememberLoad("playlist", id, initial = deps.jellyfin.cachedItem(id)) { deps.jellyfin.item(id, it) }.value
-    val items = rememberLoad("playlist-items", id) { deps.jellyfin.playlistItems(id) }.value
+    val items = rememberLoad("playlist-items", id, org.jellyfin.mobile.nflix.ui.ItemMenu.revision) { deps.jellyfin.playlistItems(id) }.value
     Box(Modifier.fillMaxSize()) {
         LazyColumn(contentPadding = PaddingValues(bottom = ContentBottomPadding)) {
             item(key = "header") {
                 CollectionHeader(
                     title = playlist?.name ?: "", subtitle = items?.let { "${it.size} éléments" },
-                    image = playlist?.let { deps.jellyfin.primary(it, 600) }, origin = "grid-playlists/$id",
+                    image = playlist?.let { deps.jellyfin.primary(it, 600) }, origin = "grid-playlists/$id", kind = "Playlist",
+                    onMore = playlist?.let { p -> { org.jellyfin.mobile.nflix.ui.ItemMenu.show(p) } },
                     onPlay = { playlist?.let { deps.play(scope, it) } },
                     onShuffle = { items?.let { list -> if (list.any { it.type == "Audio" }) deps.music.play(list, shuffle = true) else playlist?.let { deps.play(scope, it) } } },
                 )
             }
             items?.let { list ->
                 itemsIndexed(list, key = { i, t -> "$i-${t.id}" }) { index, entry ->
-                    if (entry.type == "Audio") TrackRow(entry, index + 1, showArt = true) { deps.music.play(list, index) }
-                    else TrackRow(entry, index + 1, showArt = true) { deps.play(scope, entry) }
+                    if (entry.type == "Audio") TrackRow(entry, index + 1, showArt = true, playlistId = id) { deps.music.play(list, index) }
+                    else TrackRow(entry, index + 1, showArt = true, playlistId = id) { deps.play(scope, entry) }
                 }
             }
         }
@@ -381,32 +332,34 @@ fun NowPlayingScreen() {
         return
     }
     val lyrics = rememberLoad("lyrics", track.id) { deps.jellyfin.lyrics(track.id) }.value
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val visualPrefs = remember { context.getSharedPreferences("nflix_player", android.content.Context.MODE_PRIVATE) }
+    var vinyl by remember { mutableStateOf(visualPrefs.getBoolean("vinyl", true)) }
     Box(Modifier.fillMaxSize().background(Nflix.Night)) {
-        NImage(track.artwork, Modifier.fillMaxSize().blur(60.dp).graphicsLayer { alpha = 0.5f }, placeholderIcon = null)
-        Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Nflix.Night.copy(alpha = 0.3f), Nflix.Night.copy(alpha = 0.9f)))))
+        AmbientBackground(track.artwork, state.isPlaying)
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(horizontal = 24.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = { navigator.back() }) { Icon(Icons.Rounded.ExpandMore, "Réduire", modifier = Modifier.size(30.dp)) }
                 Text(track.album ?: "En lecture", style = MaterialTheme.typography.labelLarge, color = Nflix.Muted, modifier = Modifier.weight(1f), textAlign = TextAlign.Center, maxLines = 1)
-                IconButton(onClick = { track.albumId?.let { navigator.open(Route.Album(it)) } }) { Icon(Icons.Rounded.Album, "Album") }
+                IconButton(onClick = { org.jellyfin.mobile.nflix.ui.ItemMenu.showPlayer() }) { Icon(Icons.Rounded.MoreVert, "Plus d'options") }
             }
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 AnimatedContent(panel, transitionSpec = { fadeIn(tween(250)) togetherWith fadeOut(tween(150)) }, label = "np-panel") { p ->
                     when (p) {
                         1 -> LyricsPanel(lyrics, position)
                         2 -> QueuePanel()
-                        else -> {
-                            val scale by animateFloatAsState(if (state.isPlaying) 1f else 0.86f, spring(dampingRatio = 0.6f), label = "art-scale")
-                            NImage(track.artwork, Modifier.fillMaxWidth().aspectRatio(1f).graphicsLayer { scaleX = scale; scaleY = scale }.clip(RoundedCornerShape(22.dp)).sharedPoster("now-playing-art"), placeholderIcon = Icons.Rounded.MusicNote)
-                        }
+                        else -> AnimatedArtwork(track.artwork, state.isPlaying, vinyl, Modifier.sharedPoster("now-playing-art"))
                     }
                 }
             }
             Spacer(Modifier.height(16.dp))
             AnimatedContent(track.id, transitionSpec = { fadeIn(tween(300)) togetherWith fadeOut(tween(200)) }, label = "np-title") { _ ->
-                Column {
-                    Text(track.title, style = MaterialTheme.typography.headlineSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(track.artist, style = MaterialTheme.typography.bodyLarge, color = Nflix.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(track.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.basicMarquee())
+                        Text(track.artist, style = MaterialTheme.typography.bodyLarge, color = Nflix.Text.copy(alpha = 0.7f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    EqualizerBars(state.isPlaying)
                 }
             }
             Spacer(Modifier.height(8.dp))
@@ -437,8 +390,12 @@ fun NowPlayingScreen() {
                 }
             }
             Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
+                IconButton(onClick = { vinyl = !vinyl; visualPrefs.edit().putBoolean("vinyl", vinyl).apply(); panel = 0 }) {
+                    Icon(if (vinyl) Icons.Rounded.Album else Icons.Rounded.Image, if (vinyl) "Afficher la pochette" else "Afficher le vinyle", tint = if (panel == 0) Nflix.Red else Nflix.Muted)
+                }
                 IconButton(onClick = { panel = if (panel == 1) 0 else 1 }) { Icon(Icons.Rounded.Lyrics, "Paroles", tint = if (panel == 1) Nflix.Red else Nflix.Muted) }
                 IconButton(onClick = { panel = if (panel == 2) 0 else 2 }) { Icon(Icons.AutoMirrored.Rounded.QueueMusic, "File d'attente", tint = if (panel == 2) Nflix.Red else Nflix.Muted) }
+                IconButton(onClick = { deps.music.stop() }) { Icon(Icons.Rounded.Stop, "Arrêter la musique", tint = Nflix.Muted) }
             }
         }
     }

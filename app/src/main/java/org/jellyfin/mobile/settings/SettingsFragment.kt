@@ -7,7 +7,6 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.fragment.app.Fragment
 import de.Maxr1998.modernpreferences.Preference
 import de.Maxr1998.modernpreferences.PreferencesAdapter
@@ -24,7 +23,6 @@ import de.Maxr1998.modernpreferences.preferences.CheckBoxPreference
 import de.Maxr1998.modernpreferences.preferences.choice.SelectionItem
 import org.jellyfin.mobile.R
 import org.jellyfin.mobile.app.AppPreferences
-import org.jellyfin.mobile.app.StorageManager
 import org.jellyfin.mobile.databinding.FragmentSettingsBinding
 import org.jellyfin.mobile.downloads.DownloadMethod
 import org.jellyfin.mobile.utils.BackPressInterceptor
@@ -38,20 +36,6 @@ import org.koin.android.ext.android.inject
 class SettingsFragment : Fragment(), BackPressInterceptor {
 
     private val appPreferences: AppPreferences by inject()
-    private val storageManager: StorageManager by inject()
-
-    private val storageLocationPicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-        if (uri != null) {
-            val changed = storageManager.changeStorageLocation(uri)
-
-            // Update preference
-            if (changed && ::downloadLocationPreference.isInitialized) {
-                downloadLocationPreference.summary = storageManager.getStorageLocation()?.name
-                downloadLocationPreference.requestRebindAndHighlight()
-            }
-        }
-    }
-
     private val settingsAdapter: PreferencesAdapter by lazy { PreferencesAdapter(buildSettingsScreen()) }
     private lateinit var startLandscapeVideoInLandscapePreference: CheckBoxPreference
     private lateinit var swipeGesturesPreference: CheckBoxPreference
@@ -62,7 +46,6 @@ class SettingsFragment : Fragment(), BackPressInterceptor {
     private lateinit var directPlayAssPreference: Preference
     private lateinit var networkBufferPreference: Preference
     private lateinit var externalPlayerChoicePreference: Preference
-    private lateinit var downloadLocationPreference: Preference
 
     init {
         Preference.Config.titleMaxLines = 2
@@ -104,34 +87,6 @@ class SettingsFragment : Fragment(), BackPressInterceptor {
         categoryHeader(PREF_CATEGORY_VIDEO_PLAYER) {
             titleRes = R.string.pref_category_video_player
         }
-        val videoPlayerOptions = listOf(
-            SelectionItem(VideoPlayerType.WEB_PLAYER, R.string.video_player_web, R.string.video_player_web_description),
-            SelectionItem(
-                VideoPlayerType.EXO_PLAYER,
-                R.string.video_player_integrated,
-                R.string.video_player_native_description,
-            ),
-            SelectionItem(
-                VideoPlayerType.EXTERNAL_PLAYER,
-                R.string.video_player_external,
-                R.string.video_player_external_description,
-            ),
-        )
-        singleChoice(Constants.PREF_VIDEO_PLAYER_TYPE, videoPlayerOptions) {
-            titleRes = R.string.pref_video_player_type_title
-            initialSelection = VideoPlayerType.EXO_PLAYER
-            defaultOnSelectionChange { selection ->
-                startLandscapeVideoInLandscapePreference.enabled = selection == VideoPlayerType.EXO_PLAYER
-                swipeGesturesPreference.enabled = selection == VideoPlayerType.EXO_PLAYER
-                rememberBrightnessPreference.enabled = selection == VideoPlayerType.EXO_PLAYER && swipeGesturesPreference.checked
-                pressSpeedUpPreference.enabled = selection == VideoPlayerType.EXO_PLAYER
-                backgroundAudioPreference.enabled = selection == VideoPlayerType.EXO_PLAYER
-                horizontalGesturePreference.enabled = selection == VideoPlayerType.EXO_PLAYER
-                directPlayAssPreference.enabled = selection == VideoPlayerType.EXO_PLAYER
-                networkBufferPreference.enabled = selection == VideoPlayerType.EXO_PLAYER
-                externalPlayerChoicePreference.enabled = selection == VideoPlayerType.EXTERNAL_PLAYER
-            }
-        }
         startLandscapeVideoInLandscapePreference = checkBox(Constants.PREF_EXOPLAYER_START_LANDSCAPE_VIDEO_IN_LANDSCAPE) {
             titleRes = R.string.pref_exoplayer_start_landscape_video_in_landscape
             enabled = appPreferences.videoPlayerType == VideoPlayerType.EXO_PLAYER
@@ -171,6 +126,7 @@ class SettingsFragment : Fragment(), BackPressInterceptor {
         directPlayAssPreference = checkBox(Constants.PREF_EXOPLAYER_DIRECT_PLAY_ASS) {
             titleRes = R.string.pref_exoplayer_direct_play_ass
             summaryRes = R.string.pref_exoplayer_direct_play_ass_description
+            defaultValue = true
             enabled = appPreferences.videoPlayerType == VideoPlayerType.EXO_PLAYER
         }
         val networkBufferOptions = listOf(
@@ -240,7 +196,8 @@ class SettingsFragment : Fragment(), BackPressInterceptor {
 
         externalPlayerChoicePreference = singleChoice(Constants.PREF_EXTERNAL_PLAYER_APP, externalPlayerOptions) {
             titleRes = R.string.external_player_app
-            enabled = appPreferences.videoPlayerType == VideoPlayerType.EXTERNAL_PLAYER
+            enabled = false
+            visible = false
         }
         val subtitleSettingsIntent = Intent(Settings.ACTION_CAPTIONING_SETTINGS)
         if (subtitleSettingsIntent.resolveActivity(requireContext().packageManager) != null) {
@@ -278,17 +235,6 @@ class SettingsFragment : Fragment(), BackPressInterceptor {
             initialSelection = DownloadMethod.DEFAULT.intValue
         }
 
-        downloadLocationPreference = pref(Constants.PREF_STORAGE_LOCATION) {
-            val location = storageManager.getStorageLocation()
-
-            titleRes = R.string.pref_download_location
-            summary = location?.name ?: getString(R.string.menu_item_none)
-
-            onClick {
-                storageLocationPicker.launch(location?.uri ?: storageManager.defaultStorageLocation)
-                false
-            }
-        }
     }
 
     companion object {

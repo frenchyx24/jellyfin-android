@@ -18,7 +18,13 @@ import java.time.LocalDate
  * Media Bar Enhanced (hero), Home Screen Sections, NflixNotice / Internal Notifications (announcements),
  * Jellyfin Enhanced (progress, languages, continue watching), Moonfin (synced preferences), LogoSwap (logo).
  */
-class PluginRepository(context: Context, private val api: NflixApi, private val jellyfin: JellyfinRepository) {
+class PluginRepository(
+    context: Context,
+    private val api: NflixApi,
+    private val jellyfin: JellyfinRepository,
+    /** Mira groups of the signed-in user, read from the identity token already on the device. */
+    private val miraGroups: () -> Set<String> = { emptySet() },
+) {
     private val prefs = context.getSharedPreferences("nflix_plugins", Context.MODE_PRIVATE)
     private val heroCache = TtlCache<List<Item>>(10 * 60_000L)
 
@@ -27,6 +33,8 @@ class PluginRepository(context: Context, private val api: NflixApi, private val 
 
     private val _dismissed = MutableStateFlow(prefs.getStringSet(KEY_DISMISSED, emptySet()).orEmpty())
     val dismissed: StateFlow<Set<String>> = _dismissed.asStateFlow()
+    private val _seen = MutableStateFlow(prefs.getStringSet(KEY_SEEN, emptySet()).orEmpty())
+    val seen: StateFlow<Set<String>> = _seen.asStateFlow()
 
     var enhanced: EnhancedConfig = EnhancedConfig()
         private set
@@ -91,6 +99,9 @@ class PluginRepository(context: Context, private val api: NflixApi, private val 
         val notices = mutableListOf<Notice>()
         runCatching { notices += api.get("Plugins/NflixNotice/Feed", ListSerializer(Notice.serializer())) }
             .onFailure { Timber.d(it, "NflixNotice unavailable") }
+        // Announcements pushed by Mira Connect to the NflixAuth plugin (server to server).
+        runCatching { notices += MiraNotices.visible(api.get("NflixAuth/Announcements/Feed", ListSerializer(Notice.serializer())), miraGroups()) }
+            .onFailure { Timber.d(it, "Mira announcements unavailable") }
         runCatching {
             val config = api.getJson("InternalNotifications/config").obj()
             (config?.get("Messages") as? JsonArray)?.forEachIndexed { index, element ->
@@ -104,6 +115,12 @@ class PluginRepository(context: Context, private val api: NflixApi, private val 
         _notices.value = notices.sortedWith(compareByDescending<Notice> { it.pinned }.thenByDescending { it.createdAt })
     }
 
+    fun markSeen(notices: List<Notice>) {
+        val next = _seen.value + notices.map { it.id }
+        _seen.value = next
+        prefs.edit { putStringSet(KEY_SEEN, next) }
+    }
+
     fun dismiss(notice: Notice) {
         val next = _dismissed.value + notice.id
         _dismissed.value = next
@@ -112,5 +129,6 @@ class PluginRepository(context: Context, private val api: NflixApi, private val 
 
     private companion object {
         const val KEY_DISMISSED = "dismissed_notices"
+        const val KEY_SEEN = "seen_notices"
     }
 }

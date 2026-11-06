@@ -65,6 +65,7 @@ data class NameId(@SerialName("Id") val id: String = "", @SerialName("Name") val
 data class Item(
     @SerialName("Id") val id: String,
     @SerialName("Name") val name: String = "",
+    @SerialName("OriginalTitle") val originalTitle: String? = null,
     @SerialName("Type") val type: String = "",
     @SerialName("CollectionType") val collectionType: String? = null,
     @SerialName("Overview") val overview: String? = null,
@@ -94,6 +95,8 @@ data class Item(
     @SerialName("UserData") val userData: UserData? = null,
     @SerialName("Genres") val genres: List<String> = emptyList(),
     @SerialName("Studios") val studios: List<NameId> = emptyList(),
+    @SerialName("Tags") val tags: List<String> = emptyList(),
+    @SerialName("ProductionLocations") val productionLocations: List<String> = emptyList(),
     @SerialName("People") val people: List<Person> = emptyList(),
     @SerialName("MediaStreams") val mediaStreams: List<MediaStream> = emptyList(),
     @SerialName("MediaSources") val mediaSources: List<MediaSource> = emptyList(),
@@ -110,6 +113,8 @@ data class Item(
     @SerialName("PrimaryImageAspectRatio") val primaryAspectRatio: Double? = null,
     @SerialName("Container") val container: String? = null,
     @SerialName("Path") val path: String? = null,
+    @SerialName("ParentId") val parentId: String? = null,
+    @SerialName("PlaylistItemId") val playlistItemId: String? = null,
     @SerialName("MediaType") val mediaType: String? = null,
     @SerialName("Status") val status: String? = null,
     @SerialName("LocalTrailerCount") val localTrailerCount: Int? = null,
@@ -167,6 +172,10 @@ data class Notice(
     @SerialName("Dismissible") val dismissible: Boolean = true,
     @SerialName("ShowPopup") val showPopup: Boolean = false,
     @SerialName("Pinned") val pinned: Boolean = false,
+    @SerialName("ExpiresAt") val expiresAt: String? = null,
+    /** Mira audience groups (plan_standard, plan_pro, plan_dieu…); empty = everyone. */
+    @SerialName("Groups") val groups: List<String> = emptyList(),
+    @SerialName("Source") val source: String = "",
 )
 
 /** Subset of the Media Bar Enhanced plugin configuration used by the native hero carousel. */

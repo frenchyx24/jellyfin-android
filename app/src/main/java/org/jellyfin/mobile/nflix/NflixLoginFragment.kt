@@ -11,9 +11,14 @@ import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.ensureActive
+import kotlin.coroutines.coroutineContext
 import net.openid.appauth.AuthorizationException
 import net.openid.appauth.AuthorizationRequest
 import net.openid.appauth.AuthorizationResponse
@@ -37,6 +42,9 @@ import timber.log.Timber
 class NflixLoginFragment : Fragment() {
     private val mainViewModel: MainViewModel by activityViewModel()
     private val repository: NflixAuthRepository by inject()
+    private val nflixSession: NflixSession by inject()
+    private val miraBridge by lazy { MiraAccountBridge(requireContext().applicationContext) }
+    private var silentMiraAttempted = false
     private val activityEventHandler: ActivityEventHandler by inject()
     private val state = NflixLoginUiState()
     private var authService: AuthorizationService? = null
@@ -74,6 +82,7 @@ class NflixLoginFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        if (savedInstanceState == null && !state.connectionError) trySilentMiraLogin()
         // Mira Connect can open Nflix with a request to sign in right away
         viewLifecycleOwner.lifecycleScope.launch {
             mainViewModel.miraLoginRequests.collectLatest { requested ->
@@ -89,6 +98,24 @@ class NflixLoginFragment : Fragment() {
         authService?.dispose()
         authService = null
         super.onDestroy()
+    }
+
+    private fun trySilentMiraLogin() {
+        if (silentMiraAttempted || !miraBridge.isMiraInstalled()) return
+        silentMiraAttempted = true
+        state.busy = LoginBusy.Mira
+        viewLifecycleOwner.lifecycleScope.launch {
+            attemptLogin {
+                val account = withContext(Dispatchers.IO) { miraBridge.account() }
+                if (!isAdded || account == null) {
+                    state.busy = LoginBusy.None
+                    return@attemptLogin
+                }
+                coroutineContext.ensureActive()
+                val login = repository.signInWithMira(account.idToken)
+                complete(login, METHOD_MIRA, accountProfile(account.idToken, account.name, account.email, account.avatar, account.groups))
+            }
+        }
     }
 
     private fun startMiraLogin() {
@@ -140,9 +167,10 @@ class NflixLoginFragment : Fragment() {
                 return@performTokenRequest
             }
             lifecycleScope.launch {
-                runCatching { repository.signInWithMira(idToken) }
-                    .onSuccess { complete(it, METHOD_MIRA) }
-                    .onFailure { state.fail(it.userMessage()) }
+                attemptLogin {
+                    val login = repository.signInWithMira(idToken)
+                    complete(login, METHOD_MIRA, MiraProfile.fromAcceptedToken(idToken))
+                }
             }
         }
     }
@@ -151,13 +179,26 @@ class NflixLoginFragment : Fragment() {
         state.error = null
         state.busy = LoginBusy.Password
         lifecycleScope.launch {
-            runCatching { repository.signInWithPassword(username, password) }
-                .onSuccess { complete(it, METHOD_PASSWORD) }
-                .onFailure { state.fail(it.userMessage()) }
+            attemptLogin {
+                complete(repository.signInWithPassword(username, password), METHOD_PASSWORD)
+            }
         }
     }
 
-    private suspend fun complete(login: NflixLogin, method: String) {
+    private suspend fun attemptLogin(block: suspend () -> Unit) {
+        try {
+            block()
+        } catch (error: CancellationException) {
+            state.success = false
+            state.busy = LoginBusy.None
+            throw error
+        } catch (error: Exception) {
+            state.success = false
+            state.fail(error.userMessage())
+        }
+    }
+
+    private suspend fun complete(login: NflixLogin, method: String, profile: MiraProfile? = null) {
         val server = (mainViewModel.serverState.value as? ServerState.Available)?.server
         if (server == null) {
             state.fail("Serveur Nflix non configuré. Relancez l'application.")
@@ -166,7 +207,25 @@ class NflixLoginFragment : Fragment() {
         state.success = true
         // Let the success animation play before switching to the library
         delay(SUCCESS_DELAY)
-        mainViewModel.completeNflixLogin(server.id, login, method)
+        try {
+            mainViewModel.completeNflixLogin(server.id, login, method)
+            nflixSession.setMiraProfile(profile)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            nflixSession.clear()
+            throw error
+        }
+    }
+
+    private fun accountProfile(token: String, name: String, email: String, avatar: String?, groups: List<String>): MiraProfile {
+        val claims = MiraProfile.fromAcceptedToken(token)
+        return MiraProfile(
+            name = name.takeIf(String::isNotBlank) ?: claims?.name,
+            email = email.takeIf(String::isNotBlank) ?: claims?.email,
+            avatar = MiraProfile.safeAvatar(avatar) ?: claims?.avatar,
+            groups = groups.toSet().ifEmpty { claims?.groups.orEmpty() },
+        )
     }
 
     private fun isMiraConnectInstalled(): Boolean = runCatching {

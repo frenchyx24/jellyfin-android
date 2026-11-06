@@ -77,7 +77,9 @@ class NflixApi(cacheDir: File, private val session: NflixSession, private val ap
             .header("Authorization", authorization())
             .header("Accept", "application/json")
             .apply {
-                val payload = body?.toRequestBody("application/json; charset=utf-8".toMediaType())
+                // Bytes keep the media type verbatim: the Moonfin Seerr proxy rejects "application/json; charset=utf-8"
+                // (FormatException → HTTP 500), and JSON is UTF-8 by definition.
+                val payload = body?.toByteArray(Charsets.UTF_8)?.toRequestBody("application/json".toMediaType())
                 when (method) {
                     "GET" -> get()
                     "DELETE" -> if (payload != null) delete(payload) else delete()
@@ -105,6 +107,21 @@ class NflixApi(cacheDir: File, private val session: NflixSession, private val ap
     suspend fun send(method: String, path: String, query: Map<String, Any?> = emptyMap(), body: JsonElement? = null): JsonElement? {
         val text = raw(method, url(path, query), body?.toString())
         return if (text.isBlank()) null else withContext(Dispatchers.Default) { runCatching { json.parseToJsonElement(text) }.getOrNull() }
+    }
+
+    /** Sends raw bytes (image uploads); the media type is sent verbatim. */
+    suspend fun sendBytes(method: String, path: String, bytes: ByteArray, mediaType: String, query: Map<String, Any?> = emptyMap()): JsonElement? = withContext(Dispatchers.IO) {
+        val target = url(path, query)
+        val request = Request.Builder().url(target)
+            .header("Authorization", authorization())
+            .header("Accept", "application/json")
+            .method(method, bytes.toRequestBody(mediaType.toMediaType()))
+            .build()
+        client.newCall(request).execute().use { response ->
+            val text = response.body?.string().orEmpty()
+            if (!response.isSuccessful) throw NflixHttpException(response.code, "HTTP ${response.code} ${target.encodedPath}")
+            if (text.isBlank()) null else runCatching { json.parseToJsonElement(text) }.getOrNull()
+        }
     }
 
     fun imageUrl(itemId: String?, type: String = "Primary", tag: String? = null, maxWidth: Int = 400, index: Int? = null): String? {

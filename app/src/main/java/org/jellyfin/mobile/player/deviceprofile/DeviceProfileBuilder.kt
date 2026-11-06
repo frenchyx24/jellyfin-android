@@ -66,7 +66,7 @@ class DeviceProfileBuilder(
                         }
                     }
                     is DeviceCodec.Audio -> {
-                        if (audioCodecs.containsKey(mimeType)) {
+                        if (audioCodecs.containsKey(name)) {
                             audioCodecs[name] = audioCodecs[name]!!.mergeCodec(codec)
                         } else {
                             audioCodecs[name] = codec
@@ -299,7 +299,7 @@ class DeviceProfileBuilder(
          */
         private val AVAILABLE_AUDIO_CODECS = arrayOf(
             // mp4
-            arrayOf("mp1", "mp2", "mp3", "aac", "alac", "ac3", "opus"),
+            arrayOf("mp1", "mp2", "mp3", "aac", "alac", "ac3", "eac3", "opus", "flac"),
             // fmp4
             arrayOf("mp3", "aac", "ac3", "eac3"),
             // webm
@@ -341,13 +341,13 @@ class DeviceProfileBuilder(
          * Taken from Jellyfin Web:
          * https://github.com/jellyfin/jellyfin-web/blob/de690740f03c0568ba3061c4c586bd78b375d882/src/scripts/browserDeviceProfile.js#L276
          */
-        private const val MAX_STREAMING_BITRATE = 120000000
+        private const val MAX_STREAMING_BITRATE = 200000000
 
         /**
          * Taken from Jellyfin Web:
          * https://github.com/jellyfin/jellyfin-web/blob/de690740f03c0568ba3061c4c586bd78b375d882/src/scripts/browserDeviceProfile.js#L372
          */
-        private const val MAX_STATIC_BITRATE = 100000000
+        private const val MAX_STATIC_BITRATE = 200000000
 
         /**
          * Taken from Jellyfin Web:

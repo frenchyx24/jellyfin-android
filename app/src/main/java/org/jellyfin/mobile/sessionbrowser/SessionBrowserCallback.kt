@@ -44,6 +44,9 @@ import org.jellyfin.sdk.api.client.ApiClient
 import org.jellyfin.sdk.api.client.extensions.universalAudioApi
 import org.jellyfin.sdk.api.client.extensions.userLibraryApi
 import org.jellyfin.sdk.model.api.MediaStreamProtocol
+import org.jellyfin.sdk.model.api.BaseItemKind
+import org.jellyfin.sdk.model.api.ImageType
+import org.jellyfin.sdk.api.client.extensions.itemsApi
 import org.jellyfin.sdk.model.extensions.ticks
 import timber.log.Timber
 
@@ -413,6 +416,32 @@ class SessionBrowserCallback(
                             (Json.decodeFromString<LibraryMediaId>(it.mediaId) as? LibraryMediaId.Item)?.itemId == libraryMediaId.itemId
                         }
                         .coerceAtLeast(0)
+                }
+
+                libraryMediaId is LibraryMediaId.Route -> {
+                    val route = libraryMediaId.route
+                    if (route is LibraryRoute.Artist) {
+                        val result by api.itemsApi.getItems(
+                            artistIds = listOf(route.artistId),
+                            includeItemTypes = listOf(BaseItemKind.AUDIO),
+                            imageTypeLimit = 1,
+                            enableImageTypes = listOf(ImageType.PRIMARY),
+                            recursive = true,
+                            limit = MAX_PAGE_SIZE,
+                        )
+                        expandedItems = result.items.map { item ->
+                            LibraryPageElement.baseItem(api, item, action = LibraryItemAction.Play(item))
+                                .toMediaItem(route)
+                        }
+                    } else {
+                        @Suppress("UNCHECKED_CAST")
+                        expandedItems = (route.page as? LibraryPage<LibraryRoute>)
+                            ?.getContent(route, 0, MAX_PAGE_SIZE)
+                            ?.toMediaItems(route)
+                            .orEmpty()
+                            .filter { it.mediaMetadata.isPlayable == true }
+                    }
+                    newStartIndex = 0
                 }
             }
         }

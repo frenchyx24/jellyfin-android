@@ -14,6 +14,17 @@ import com.google.common.util.concurrent.ListenableFuture
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.jellyfin.mobile.app.StorageManager
+import org.jellyfin.mobile.data.dao.DownloadDao
+import org.jellyfin.mobile.data.entity.DownloadFiles
+import org.jellyfin.mobile.downloads.DownloadFileType
+import org.jellyfin.mobile.downloads.DownloadStatus
 import org.jellyfin.mobile.nflix.data.Item
 import org.jellyfin.mobile.nflix.data.JellyfinRepository
 
@@ -40,13 +51,19 @@ data class MusicState(
 )
 
 /** UI side of the music player: a MediaController bound to [NflixMusicService]. */
-class MusicController(private val context: Context, private val repository: JellyfinRepository) {
+class MusicController(
+    private val context: Context,
+    private val repository: JellyfinRepository,
+    private val downloadDao: DownloadDao,
+    private val storageManager: StorageManager,
+) {
     private var future: ListenableFuture<MediaController>? = null
     private var controller: MediaController? = null
     private val pending = mutableListOf<(MediaController) -> Unit>()
 
     private val _state = MutableStateFlow(MusicState())
     val state: StateFlow<MusicState> = _state.asStateFlow()
+    private val offlineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private fun withController(action: (MediaController) -> Unit) {
         controller?.let { return action(it) }
@@ -102,28 +119,64 @@ class MusicController(private val context: Context, private val repository: Jell
 
     fun duration(): Long = controller?.duration?.takeIf { it > 0 } ?: (_state.value.current?.durationMs ?: 0L)
 
-    private fun Item.toMediaItem(): MediaItem {
+    private fun Item.toMediaItem(localUri: Uri? = null, localArtwork: Uri? = null): MediaItem {
         val metadata = MediaMetadata.Builder()
             .setTitle(name)
             .setArtist(artistItems.joinToString { it.name }.ifBlank { albumArtist ?: "" })
             .setAlbumTitle(album)
-            .setArtworkUri(repository.primary(this, 600)?.let(Uri::parse))
+            .setArtworkUri(localArtwork ?: repository.primary(this, 600)?.let(Uri::parse))
             .setDurationMs(runTimeTicks?.div(10_000))
             .setExtras(android.os.Bundle().apply { putString(EXTRA_ALBUM_ID, albumId) })
             .setIsPlayable(true)
             .build()
-        return MediaItem.Builder().setMediaId(id).setUri(repository.audioStreamUrl(id)).setMediaMetadata(metadata).build()
+        return MediaItem.Builder().setMediaId(id).setUri(localUri ?: Uri.parse(repository.audioStreamUrl(id))).setMediaMetadata(metadata).build()
     }
 
-    fun play(items: List<Item>, startIndex: Int = 0, shuffle: Boolean = false) {
+    fun play(items: List<Item>, startIndex: Int = 0, shuffle: Boolean = false, startPositionMs: Long = 0L) {
         val tracks = items.filter { it.type == "Audio" || it.type == "AudioBook" }
         if (tracks.isEmpty()) return
-        withController { player ->
-            player.shuffleModeEnabled = shuffle
-            player.setMediaItems(tracks.map { it.toMediaItem() }, if (shuffle) (tracks.indices).random() else startIndex.coerceIn(0, tracks.lastIndex), 0L)
-            player.prepare()
-            player.play()
+        offlineScope.launch {
+            val mediaItems = tracks.map { item ->
+                val local = runCatching {
+                    val id = java.util.UUID.fromString(item.id)
+                    val download = downloadDao.getDownloadByItemId(id) ?: return@runCatching null
+                    if (download.status != DownloadStatus.DOWNLOADED) return@runCatching null
+                    val files = downloadDao.getFiles(download.id)
+                    if (!storageManager.verify(DownloadFiles(download, files))) return@runCatching null
+                    val audio = files.firstOrNull { it.type == DownloadFileType.ITEM }?.uri ?: return@runCatching null
+                    val artwork = files.firstOrNull { it.type == DownloadFileType.IMAGE_PRIMARY }?.uri
+                    audio to artwork
+                }.getOrNull()
+                item.toMediaItem(local?.first, local?.second)
+            }
+            withContext(Dispatchers.Main) {
+                withController { player ->
+                    player.shuffleModeEnabled = shuffle
+                    player.setMediaItems(
+                        mediaItems,
+                        if (shuffle) (tracks.indices).random() else startIndex.coerceIn(0, tracks.lastIndex),
+                        if (shuffle) 0L else startPositionMs.coerceAtLeast(0L),
+                    )
+                    player.prepare()
+                    player.play()
+                }
+            }
         }
+    }
+
+    fun playLocal(uri: Uri, title: String) = withController { player ->
+        val mediaItem = MediaItem.Builder()
+            .setMediaId(uri.toString())
+            .setUri(uri)
+            .setMediaMetadata(
+                MediaMetadata.Builder().setTitle(title).setIsPlayable(true)
+                    .setExtras(android.os.Bundle().apply { putBoolean(NflixMusicService.EXTRA_OFFLINE_LOCAL, true) })
+                    .build(),
+            )
+            .build()
+        player.setMediaItem(mediaItem)
+        player.prepare()
+        player.play()
     }
 
     fun enqueue(items: List<Item>, next: Boolean = false) = withController { player ->

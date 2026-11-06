@@ -23,4 +23,10 @@
     <style name="ThemeOverlay.App.BackButton" parent="">
         <item name="colorControlNormal">?android:textColorPrimary</item>
     </style>
+    <!-- Nflix player: bold white title over the top scrim. -->
+    <style name="TextAppearance.Nflix.PlayerTitle" parent="TextAppearance.AppCompat.Widget.ActionBar.Title">
+        <item name="android:textSize">18sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:textColor">@android:color/white</item>
+    </style>
 </resources>

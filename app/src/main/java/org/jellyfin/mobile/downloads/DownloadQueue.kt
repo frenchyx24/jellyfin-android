@@ -96,7 +96,7 @@ class DownloadQueue(
 
         // Verify downloaded files and skip if valid
         if (file.status == DownloadStatus.DOWNLOADED && file.size > 0) {
-            val documentFile = DocumentFile.fromSingleUri(context, file.uri)
+            val documentFile = storageManager.documentFor(file.uri)
             if (documentFile?.exists() == true && documentFile.length() == file.size) return
         }
 
@@ -116,7 +116,7 @@ class DownloadQueue(
             // Update file record with final size and status
             downloadDao.updateFile(
                 file.copy(
-                    size = DocumentFile.fromSingleUri(context, file.uri)?.length() ?: 0L,
+                    size = storageManager.documentFor(file.uri)?.length() ?: 0L,
                     status = DownloadStatus.DOWNLOADED,
                 ),
             )
@@ -131,8 +131,8 @@ class DownloadQueue(
 
     private suspend fun prepareFiles(api: ApiClient, downloadWithFiles: DownloadFiles): List<QueuedFile> {
         val storageLocation = storageManager.getStorageLocation()
-        val itemLocation = storageLocation?.findFile(downloadWithFiles.download.path)
-            ?: storageLocation?.createDirectory(downloadWithFiles.download.path)
+        val itemLocation = storageLocation.findFile(downloadWithFiles.download.path)
+            ?: storageLocation.createDirectory(downloadWithFiles.download.path)
             ?: error("Unable to find or create folder ${downloadWithFiles.download.path}")
 
         return buildList {

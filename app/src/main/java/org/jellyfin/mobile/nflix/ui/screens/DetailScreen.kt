@@ -7,6 +7,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -74,6 +75,10 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
@@ -150,45 +155,89 @@ private fun DetailHeader(item: Item, origin: String?, scroll: Float) {
     val deps = LocalDeps.current
     val navigator = LocalNavigator.current
     val portraitType = item.isBook || item.isAudioBook
-    Box(Modifier.fillMaxWidth().height(if (portraitType) 470.dp else 440.dp)) {
+    if (portraitType) {
+        BookHeader(item, origin, scroll)
+        return
+    }
+    // Full-bleed artwork, title centred over a deep fade: the layout of a streaming title page.
+    Box(Modifier.fillMaxWidth().height(540.dp)) {
         NImage(
-            if (portraitType) deps.jellyfin.primary(item, 900) else deps.jellyfin.backdrop(item),
+            deps.jellyfin.backdrop(item) ?: deps.jellyfin.primary(item, 900),
+            Modifier.fillMaxSize().sharedPoster(origin ?: "detail/${item.id}")
+                .graphicsLayer { translationY = scroll * 0.4f; alpha = (1f - scroll / 1400f).coerceIn(0.3f, 1f) },
+            contentScale = ContentScale.Crop,
+            placeholderIcon = null,
+        )
+        Box(Modifier.fillMaxWidth().height(160.dp).background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.7f), Color.Transparent))))
+        Box(
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth().fillMaxHeight(0.65f)
+                .background(Brush.verticalGradient(listOf(Color.Transparent, Nflix.Night.copy(alpha = 0.75f), Nflix.Night))),
+        )
+        Column(
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            item.seriesName?.let { series ->
+                Text(
+                    series.uppercase(), style = MaterialTheme.typography.labelLarge, color = Nflix.Red, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { item.seriesId?.let { navigator.open(Route.Item(it)) } }.padding(4.dp),
+                )
+            }
+            val logo = deps.jellyfin.logo(item)
+            if (logo != null && item.type != "Episode") {
+                NImage(logo, Modifier.fillMaxWidth(0.75f).height(96.dp), contentScale = ContentScale.Fit, placeholderIcon = null, background = Color.Transparent)
+            } else {
+                Text(
+                    if (item.type == "Episode") listOfNotNull(item.episodeLabel, item.name).joinToString(" · ") else item.name,
+                    style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black, textAlign = TextAlign.Center,
+                    maxLines = 3, overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+            MetaLine(item, centered = true)
+        }
+    }
+}
+
+@Composable
+private fun BookHeader(item: Item, origin: String?, scroll: Float) {
+    val deps = LocalDeps.current
+    Box(Modifier.fillMaxWidth().height(470.dp)) {
+        NImage(
+            deps.jellyfin.primary(item, 900),
             Modifier.fillMaxSize().graphicsLayer { translationY = scroll * 0.45f; alpha = (1f - scroll / 1400f).coerceIn(0.3f, 1f) }.bottomScrim(0.2f),
             contentScale = ContentScale.Crop,
         )
-        if (portraitType) Box(Modifier.fillMaxSize().background(Nflix.Night.copy(alpha = 0.55f)))
-        Row(Modifier.align(Alignment.BottomStart).padding(horizontal = 20.dp), verticalAlignment = Alignment.Bottom) {
+        Box(Modifier.fillMaxSize().background(Nflix.Night.copy(alpha = 0.6f)))
+        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             NImage(
                 deps.jellyfin.primary(item, 400),
-                Modifier.width(if (portraitType) 140.dp else 110.dp).aspectRatio(2f / 3f).clip(RoundedCornerShape(14.dp)).sharedPoster(origin ?: "detail/${item.id}"),
+                Modifier.width(150.dp).aspectRatio(2f / 3f).clip(RoundedCornerShape(10.dp)).border(1.dp, Nflix.Outline, RoundedCornerShape(10.dp)).sharedPoster(origin ?: "detail/${item.id}"),
             )
-            Spacer(Modifier.width(16.dp))
-            Column(Modifier.weight(1f).padding(bottom = 4.dp)) {
-                item.seriesName?.let { series ->
-                    Text(series, style = MaterialTheme.typography.labelLarge, color = Nflix.Red, modifier = Modifier.clickable { item.seriesId?.let { navigator.open(Route.Item(it)) } })
-                }
-                val logo = deps.jellyfin.logo(item)
-                if (logo != null && item.type != "Episode") {
-                    NImage(logo, Modifier.fillMaxWidth().height(70.dp).background(Color.Transparent), contentScale = ContentScale.Fit, placeholderIcon = null)
-                } else {
-                    Text(item.name, style = MaterialTheme.typography.headlineSmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
-                }
-                Spacer(Modifier.height(8.dp))
-                MetaLine(item)
-            }
+            Spacer(Modifier.height(14.dp))
+            Text(item.name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, maxLines = 3, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.height(8.dp))
+            MetaLine(item, centered = true)
         }
     }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun MetaLine(item: Item) {
+private fun MetaLine(item: Item, centered: Boolean = false) {
     val deps = LocalDeps.current
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    FlowRow(
+        horizontalArrangement = if (centered) Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally) else Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+        modifier = if (centered) Modifier.fillMaxWidth() else Modifier,
+    ) {
+        if (item.genres.isNotEmpty() && centered) {
+            Text(item.genres.take(3).joinToString(" • "), style = MaterialTheme.typography.labelMedium, color = Nflix.Text, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
+        }
         item.communityRating?.let {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Rounded.Star, null, tint = Nflix.Warning, modifier = Modifier.size(14.dp))
-                Text(" %.1f".format(it), style = MaterialTheme.typography.labelMedium)
+                Text(" %.1f".format(it), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
             }
         }
         item.year?.let { Text(it.toString(), style = MaterialTheme.typography.labelMedium, color = Nflix.Muted) }
@@ -215,23 +264,48 @@ private fun Actions(item: Item, onChanged: () -> Unit) {
     Column(Modifier.padding(horizontal = 20.dp, vertical = 16.dp)) {
         Button(
             onClick = { if (item.isBook) navigator.open(Route.Reader(item.id)) else deps.play(scope, item, navigator = navigator) },
-            colors = ButtonDefaults.buttonColors(containerColor = Nflix.Red, contentColor = Color.White),
-            shape = RoundedCornerShape(14.dp),
-            modifier = Modifier.fillMaxWidth().height(54.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black),
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier.fillMaxWidth().height(52.dp),
         ) {
-            Icon(if (item.isBook) Icons.AutoMirrored.Rounded.MenuBook else Icons.Rounded.PlayArrow, null)
+            Icon(if (item.isBook) Icons.AutoMirrored.Rounded.MenuBook else Icons.Rounded.PlayArrow, null, Modifier.size(28.dp))
             Spacer(Modifier.width(8.dp))
             Text(
                 when {
                     item.isBook -> "Lire"
-                    resumable -> "Reprendre · ${formatTicks(data!!.positionTicks)}"
-                    item.type == "Series" -> "Lecture"
+                    resumable -> "Reprendre"
                     else -> "Lecture"
                 },
-                fontWeight = FontWeight.Bold,
+                fontWeight = FontWeight.Bold, fontSize = 17.sp,
             )
         }
-        if (resumable && deps.plugins.enhanced.showWatchProgress) ProgressBar(item.progress, Modifier.padding(top = 8.dp).clip(CircleShape))
+        if (item.isPlayableVideo || item.type == "Season") {
+            Spacer(Modifier.height(10.dp))
+            Button(
+                onClick = { deps.download(item) },
+                colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.14f), contentColor = Color.White),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+            ) {
+                Icon(Icons.Rounded.Download, null)
+                Spacer(Modifier.width(8.dp))
+                Text(if (item.type == "Season") "Télécharger la saison" else "Télécharger", fontWeight = FontWeight.SemiBold)
+            }
+        }
+        if (resumable && deps.plugins.enhanced.showWatchProgress) {
+            Spacer(Modifier.height(12.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f).height(4.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.18f))) {
+                    Box(Modifier.fillMaxHeight().fillMaxWidth(item.progress).background(Nflix.Red))
+                }
+                Spacer(Modifier.width(10.dp))
+                val left = item.runtimeMinutes?.let { (it * (1f - item.progress)).toInt() }?.takeIf { it > 0 }
+                Text(
+                    left?.let { "Reste ${formatRuntime(it)}" } ?: formatTicks(data!!.positionTicks),
+                    style = MaterialTheme.typography.labelMedium, color = Nflix.Muted,
+                )
+            }
+        }
         Spacer(Modifier.height(14.dp))
         Row(horizontalArrangement = Arrangement.SpaceEvenly, modifier = Modifier.fillMaxWidth()) {
             val favorite = data?.favorite == true
@@ -243,11 +317,21 @@ private fun Actions(item: Item, onChanged: () -> Unit) {
                 }
             }
             if (resumable) ActionIcon(Icons.Rounded.Replay, "Du début") { deps.play(scope, item, fromStart = true) }
-            item.trailers.firstOrNull()?.let { trailer -> ActionIcon(Icons.Rounded.Movie, "Bande-annonce") { deps.openUrl(trailer.url) } }
-            if (item.isPlayableVideo || item.type == "Season" || item.isBook) {
-                ActionIcon(Icons.Rounded.Download, "Télécharger") {
-                    if (item.isBook) deps.openUrl(deps.jellyfin.downloadUrl(item)) else deps.download(item)
+            val remoteTrailer = item.trailers.firstNotNullOfOrNull { org.jellyfin.mobile.nflix.ui.TrailerSource.youtubeId(it.url) }
+            if ((item.localTrailerCount ?: 0) > 0 || remoteTrailer != null) {
+                ActionIcon(Icons.Rounded.Movie, "Bande-annonce") {
+                    scope.launch {
+                        // Server copy first: full quality, native player, no third-party ads.
+                        val local = if ((item.localTrailerCount ?: 0) > 0) runCatching { deps.jellyfin.localTrailers(item.id) }.getOrDefault(emptyList()) else emptyList()
+                        when {
+                            local.isNotEmpty() -> deps.playVideos(scope, local.map { it.id }, 0, null)
+                            remoteTrailer != null -> org.jellyfin.mobile.nflix.ui.TrailerSource.show(remoteTrailer, item.name)
+                        }
+                    }
                 }
+            }
+            if (item.isBook || item.isPlayableVideo || item.type in setOf("Series", "Season", "MusicAlbum", "MusicArtist", "Playlist")) {
+                ActionIcon(Icons.Rounded.Download, "Télécharger") { scope.launch { deps.downloadComplete(item) } }
             }
             if (resumable && deps.plugins.enhanced.removeContinueWatching) {
                 ActionIcon(Icons.Rounded.RemoveCircleOutline, "Retirer") { scope.launch { deps.jellyfin.removeFromResume(item); onChanged() } }
@@ -350,11 +434,11 @@ private fun EpisodeList(seriesId: String, seasonId: String) {
             val episode = userData[base.id]?.let { base.copy(userData = it) } ?: base
             Row(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Nflix.Surface)
-                    .clickable { navigator.open(Route.Item(episode.id, "episode/${episode.id}")) }.padding(8.dp).appear(i * 40),
+                    .pressable({ navigator.open(Route.Item(episode.id, "episode/${episode.id}")) }, { org.jellyfin.mobile.nflix.ui.ItemMenu.show(episode) }).padding(8.dp).appear(i * 40),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Box(Modifier.width(150.dp).aspectRatio(16f / 9f).clip(RoundedCornerShape(10.dp)).pressable({
-                    deps.playVideos(list.orEmpty().map { it.id }, i, episode.userData?.positionTicks)
+                    deps.playVideos(scope, list.orEmpty().map { it.id }, i, episode.userData?.positionTicks)
                 })) {
                     NImage(deps.jellyfin.thumb(episode, 400), Modifier.fillMaxSize().sharedPoster("episode/${episode.id}"))
                     Box(Modifier.align(Alignment.Center).size(34.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.5f)), contentAlignment = Alignment.Center) {

@@ -37,6 +37,7 @@ class JellyfinRepository(private val api: NflixApi) {
     private val listFields = listOf(
         "PrimaryImageAspectRatio", "Overview", "Genres", "ProductionYear", "CommunityRating", "OfficialRating",
         "ParentId", "ChildCount", "MediaSourceCount", "RemoteTrailers", "Taglines",
+        "Studios", "Tags", "ProductionLocations", "OriginalTitle",
     )
     private val detailFields = listFields + listOf("People", "Studios", "MediaSources", "MediaStreams", "ProviderIds", "Path", "CriticRating", "LocalTrailerCount", "DateCreated")
     private val imageTypes = "Primary,Backdrop,Logo,Thumb,Banner"
@@ -139,13 +140,34 @@ class JellyfinRepository(private val api: NflixApi) {
         api.get("Items/$id/SpecialFeatures", ListSerializer(Item.serializer()), mapOf("userId" to api.userId))
     }.getOrDefault(emptyList())
 
-    suspend fun search(term: String, limit: Int = 40): List<Item> = page(
-        "Items",
-        baseQuery() + mapOf(
-            "userId" to api.userId, "searchTerm" to term, "recursive" to true, "limit" to limit,
-            "includeItemTypes" to "Movie,Series,Episode,MusicAlbum,MusicArtist,Audio,Book,AudioBook,BoxSet,Playlist,Person",
-        ),
-    ).items
+    /**
+     * Global search. Each family is its own request so one slow or rejected query (persons, artists)
+     * never blanks the others; it fails only when every request fails.
+     */
+    suspend fun search(term: String, limit: Int = 40): List<Item> = coroutineScope {
+        fun items(types: String) = async {
+            runCatching {
+                page("Items", baseQuery() + mapOf("userId" to api.userId, "searchTerm" to term, "recursive" to true, "limit" to limit, "includeItemTypes" to types)).items
+            }
+        }
+        val requests = listOf(
+            items("Movie,Series,BoxSet"),
+            items("Episode"),
+            items("MusicAlbum,Audio,Playlist"),
+            items("Book,AudioBook"),
+            async { runCatching { page("Artists", baseQuery() + mapOf("userId" to api.userId, "searchTerm" to term, "limit" to 20)).items.map { it.copy(type = "MusicArtist") } } },
+            async { runCatching { page("Persons", mapOf("userId" to api.userId, "searchTerm" to term, "limit" to 20, "enableImageTypes" to "Primary", "imageTypeLimit" to 1)).items.map { it.copy(type = "Person") } } },
+        ).map { it.await() }
+        if (requests.all { it.isFailure }) throw requests.first().exceptionOrNull() ?: IllegalStateException("Recherche indisponible")
+        requests.flatMap { it.getOrDefault(emptyList()) }.distinctBy { it.id }
+    }
+
+    suspend fun genres(parentId: String?, includeTypes: String?): List<String> = runCatching {
+        api.get("Genres", ItemsPage.serializer(), mapOf("userId" to api.userId, "parentId" to parentId, "includeItemTypes" to includeTypes, "sortBy" to "SortName", "recursive" to true)).items.map { it.name }
+    }.getOrDefault(emptyList())
+
+    suspend fun localTrailers(id: String): List<Item> =
+        api.get("Items/$id/LocalTrailers", ListSerializer(Item.serializer()), mapOf("userId" to api.userId))
 
     suspend fun artists(parentId: String?, start: Int = 0, limit: Int = 60) = page(
         "Artists/AlbumArtists",
@@ -213,6 +235,52 @@ class JellyfinRepository(private val api: NflixApi) {
     fun invalidateAll() {
         pageCache.invalidate()
         itemCache.invalidate()
+    }
+
+    /** Audio playlists the user can open: their own, plus any shared with them. */
+    suspend fun audioPlaylists(force: Boolean = false): List<Item> =
+        page("Items", baseQuery() + mapOf("userId" to api.userId, "includeItemTypes" to "Playlist", "recursive" to true, "sortBy" to "SortName", "mediaTypes" to "Audio"), force).items
+
+    /**
+     * Creates a private playlist: Jellyfin shows a non-public playlist only to its owner and the users it is
+     * shared with, so no plugin is needed for per-user music playlists.
+     */
+    suspend fun createPlaylist(name: String, itemIds: List<String>): String? {
+        val result = api.send(
+            "POST", "Playlists",
+            body = kotlinx.serialization.json.buildJsonObject {
+                put("Name", kotlinx.serialization.json.JsonPrimitive(name))
+                put("UserId", kotlinx.serialization.json.JsonPrimitive(api.userId))
+                put("MediaType", kotlinx.serialization.json.JsonPrimitive("Audio"))
+                put("IsPublic", kotlinx.serialization.json.JsonPrimitive(false))
+                put("Ids", kotlinx.serialization.json.JsonArray(itemIds.map { kotlinx.serialization.json.JsonPrimitive(it) }))
+            },
+        )
+        pageCache.invalidate()
+        return ((result as? kotlinx.serialization.json.JsonObject)?.get("Id") as? kotlinx.serialization.json.JsonPrimitive)?.content
+    }
+
+    suspend fun addToPlaylist(playlistId: String, itemIds: List<String>) {
+        api.send("POST", "Playlists/$playlistId/Items", mapOf("ids" to itemIds, "userId" to api.userId))
+        pageCache.invalidate()
+    }
+
+    /** [entryIds] are the PlaylistItemId values of the entries, not the media ids. */
+    suspend fun removeFromPlaylist(playlistId: String, entryIds: List<String>) {
+        api.send("DELETE", "Playlists/$playlistId/Items", mapOf("entryIds" to entryIds))
+        pageCache.invalidate()
+    }
+
+    suspend fun renamePlaylist(playlistId: String, name: String) {
+        api.send("POST", "Playlists/$playlistId", body = kotlinx.serialization.json.buildJsonObject { put("Name", kotlinx.serialization.json.JsonPrimitive(name)) })
+        pageCache.invalidate()
+        itemCache.invalidate(playlistId)
+    }
+
+    suspend fun deletePlaylist(playlistId: String) {
+        api.send("DELETE", "Items/$playlistId")
+        pageCache.invalidate()
+        itemCache.invalidate(playlistId)
     }
 
     suspend fun <A, B> both(a: suspend () -> A, b: suspend () -> B): Pair<A, B> = coroutineScope {

@@ -100,9 +100,9 @@ val applicationModule = module {
     single { NflixUpdater(androidApplication()) }
     single { NflixApi(androidApplication().cacheDir, get(), get()) }
     single { JellyfinRepository(get()) }
-    single { PluginRepository(androidApplication(), get(), get()) }
+    single { PluginRepository(androidApplication(), get(), get()) { get<org.jellyfin.mobile.nflix.NflixSession>().miraGroups } }
     single { HorusRepository(get()) }
-    single { MusicController(androidApplication(), get()) }
+    single { MusicController(androidApplication(), get(), get(), get()) }
     viewModel { NflixNavViewModel() }
     viewModel { DownloadsViewModel() }
 

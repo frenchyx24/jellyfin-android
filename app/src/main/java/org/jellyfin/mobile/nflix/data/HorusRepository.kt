@@ -52,6 +52,9 @@ class HorusRepository(private val api: NflixApi) {
 
     var userName: String? = null
 
+    /** Raw Horus call for features built on top of the repository (admin tools). */
+    suspend fun api(method: String, path: String, query: Map<String, Any?> = emptyMap(), body: JsonElement? = null): JsonElement? = call(method, path, query, body)
+
     private suspend fun call(method: String, path: String, query: Map<String, Any?> = emptyMap(), body: JsonElement? = null): JsonElement? {
         ensureSession(userName)
         return try {
@@ -114,7 +117,10 @@ class HorusRepository(private val api: NflixApi) {
             HorusType.Book -> "book/$id"
             HorusType.Person -> "person/$id"
         }
-        HorusParser.media(call("GET", path, mapOf("language" to "fr")).obj() ?: throw HorusException("Titre introuvable."), type)
+        // Horus validates query strings against its OpenAPI spec: album and book routes accept no
+        // "language" parameter and answer HTTP 400 when one is sent.
+        val query = if (type == HorusType.Music || type == HorusType.Book) emptyMap() else mapOf("language" to "fr")
+        HorusParser.media(call("GET", path, query).obj() ?: throw HorusException("Titre introuvable."), type)
             ?: throw HorusException("Titre introuvable.")
     }
 
@@ -150,31 +156,47 @@ class HorusRepository(private val api: NflixApi) {
             )
         }
         details.invalidate("${media.type.api}/${media.id}")
-        cache.invalidate("requests")
+        cachedRequests = null
+        requestsAt = 0L
     }
 
     suspend fun myRequests(force: Boolean = false): List<HorusRequest> {
-        val key = "requests"
         cachedRequests?.takeIf { !force && System.currentTimeMillis() - requestsAt < 60_000 }?.let { return it }
         val me = call("GET", "auth/me").obj()
-        val userId = (me?.get("id") as? JsonPrimitive)?.contentOrNull
-        val raw = HorusParser.requests(
-            call("GET", if (userId != null) "user/$userId/requests" else "request", mapOf("take" to 40, "skip" to 0)).obj()
-                ?: JsonObject(emptyMap()),
-        )
+        val userId = (me?.get("id") as? JsonPrimitive)?.contentOrNull?.toIntOrNull()
+            ?: throw HorusException("Impossible d'identifier votre compte Horus.")
+        val response = call("GET", "user/$userId/requests", mapOf("take" to 40, "skip" to 0)).obj()
+            ?: throw HorusException("Réponse de Horus invalide.")
+        if (response["results"] !is JsonArray) throw HorusException("Liste de demandes Horus invalide.")
+        val raw = HorusParser.requests(response)
         // Movie and series requests only carry TMDB ids: enrich them with titles and posters
         val enriched = coroutineScope {
             raw.map { request ->
                 async {
-                    if (request.media.title.isNotBlank() || request.type !in setOf(HorusType.Movie, HorusType.Tv)) request
-                    else runCatching { request.copy(media = details(request.type, request.media.id).copy(status = request.media.status, jellyfinId = request.media.jellyfinId)) }.getOrDefault(request)
+                    // Movies and series always get TMDB details (backdrop, per-season status and episode counts).
+                    if (request.type !in setOf(HorusType.Movie, HorusType.Tv)) request
+                    else runCatching {
+                        val full = details(request.type, request.media.id)
+                        request.copy(media = full.copy(status = request.media.status, status4k = request.media.status4k, jellyfinId = request.media.jellyfinId ?: full.jellyfinId))
+                    }.getOrDefault(request)
                 }
             }.awaitAll()
         }
         cachedRequests = enriched
         requestsAt = System.currentTimeMillis()
-        cache.put(key, HorusPage(emptyList(), 1, 1))
         return enriched
+    }
+
+    /** Withdraws one of the user's own requests; Horus only allows it while the request is still pending. */
+    suspend fun cancel(request: HorusRequest) {
+        try {
+            call("DELETE", "request/${request.id}")
+        } catch (e: NflixHttpException) {
+            throw HorusException(if (e.code == 403) "Horus n'autorise plus l'annulation de cette demande." else "Annulation refusée par Horus (${e.code}).")
+        }
+        details.invalidate("${request.type.api}/${request.media.id}")
+        cachedRequests = null
+        requestsAt = 0L
     }
 
     @Volatile private var cachedRequests: List<HorusRequest>? = null

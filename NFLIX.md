@@ -3,7 +3,7 @@
 Fork of [Jellyfin for Android](https://github.com/jellyfin/jellyfin-android) bound to the Nflix server
 (`https://nflix.miracloud.fr`) and to the Mira Connect (Authentik) account system.
 
-## Nflix 2.0: native app
+## Nflix 3.0: native app
 
 Since 2.0 the library is fully native (Jetpack Compose); jellyfin-web is only an optional "Version web" (admin, plugin pages).
 

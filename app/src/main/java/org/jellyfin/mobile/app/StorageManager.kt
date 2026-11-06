@@ -1,54 +1,32 @@
 package org.jellyfin.mobile.app
 
 import android.content.Context
-import android.content.Intent
 import android.net.Uri
-import android.os.Environment
-import androidx.core.net.toUri
 import androidx.documentfile.provider.DocumentFile
-import org.jellyfin.mobile.R
 import org.jellyfin.mobile.data.entity.DownloadFiles
 import org.jellyfin.mobile.downloads.DownloadStatus
-import timber.log.Timber
+import java.io.File
 
 class StorageManager(
     private val context: Context,
     private val appPreferences: AppPreferences
 ) {
-    val defaultStorageLocation
-        get() = Environment.getExternalStorageDirectory().resolve(context.getString(R.string.app_name_short)).toUri()
-
-    fun getStorageLocation() = appPreferences.storageLocation?.toUri()?.let {
-        DocumentFile.fromTreeUri(context, it)
+    init {
+        appPreferences.storageLocation = null
     }
 
-    fun isStorageLocationAccessible(): Boolean {
-        val documentFile = getStorageLocation()
-        return documentFile != null && documentFile.exists() && documentFile.canWrite()
-    }
+    private val offlineRoot: File
+        get() = File(context.filesDir, "offline").apply { mkdirs() }
 
-    fun changeStorageLocation(location: Uri): Boolean {
-        if (appPreferences.storageLocation?.toUri() == location) return true
-
-        return runCatching {
-            context.contentResolver.takePersistableUriPermission(
-                location,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
-            )
-
-            appPreferences.storageLocation = location.toString()
-            getStorageLocation()?.let(::ensureNoMedia)
-        }.onFailure { err ->
-            Timber.e(err, "Failed to change storage location to $location")
-        }.isFailure
-    }
+    /** App-private storage keeps offline media out of public file pickers and galleries. */
+    fun getStorageLocation(): DocumentFile = DocumentFile.fromFile(offlineRoot)
 
     fun verify(download: DownloadFiles): Boolean {
         if (download.files.isEmpty()) return false
 
         for (file in download.files) {
             if (file.status != DownloadStatus.DOWNLOADED) return false
-            val documentFile = DocumentFile.fromSingleUri(context, file.uri)
+            val documentFile = documentFor(file.uri)
             if (documentFile == null || !documentFile.exists() || documentFile.length() != file.size) {
                 return false
             }
@@ -57,10 +35,10 @@ class StorageManager(
         return true
     }
 
-    private fun ensureNoMedia(documentFile: DocumentFile) {
-        if (documentFile.findFile(NOMEDIA_FILE) == null) {
-            documentFile.createFile("", NOMEDIA_FILE)
-        }
+    fun documentFor(uri: Uri): DocumentFile? = if (uri.scheme == "file") {
+        uri.path?.let { DocumentFile.fromFile(File(it)) }
+    } else {
+        DocumentFile.fromSingleUri(context, uri)
     }
 
     companion object {

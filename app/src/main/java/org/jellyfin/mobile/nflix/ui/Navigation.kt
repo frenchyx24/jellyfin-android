@@ -32,6 +32,16 @@ sealed class Route(val key: String) {
     data object NowPlaying : Route("nowplaying")
     data object Notices : Route("notices")
     data object Profile : Route("profile")
+    data object Badges : Route("badges")
+    data class Audiobook(val id: String) : Route("audiobook/$id")
+    data object LikedSongs : Route("liked-songs")
+    data class Distributor(val id: String) : Route("distributor/$id")
+    data object Admin : Route("admin")
+    data object AdminDistributors : Route("admin/distributors")
+    data class AdminDistributorEdit(val id: String?) : Route("admin/distributor/${id ?: "new"}")
+    data object AdminRequests : Route("admin/requests")
+    data object AdminActivity : Route("admin/activity")
+    data class Saga(val name: String, val audio: Boolean) : Route("saga/$audio/$name")
     data object HorusRequests : Route("horus-requests")
 
     val isTab: Boolean get() = this is Tab

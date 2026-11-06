@@ -27,6 +27,10 @@ import androidx.fragment.app.viewModels
 import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.Player
 import androidx.media3.ui.PlayerView
+import coil3.ImageLoader
+import coil3.request.ImageRequest
+import coil3.request.allowHardware
+import coil3.toBitmap
 import io.github.peerless2012.ass.media.AssHandler
 import io.github.peerless2012.ass.media.widget.AssSubtitleView
 import kotlinx.coroutines.Job
@@ -53,6 +57,9 @@ import org.jellyfin.mobile.utils.extensions.getParcelableCompat
 import org.jellyfin.mobile.utils.extensions.isLandscape
 import org.jellyfin.mobile.utils.extensions.keepScreenOn
 import org.jellyfin.mobile.utils.toast
+import org.jellyfin.sdk.api.client.ApiClient
+import org.jellyfin.sdk.api.client.extensions.imageApi
+import org.jellyfin.sdk.model.api.ImageType
 import org.jellyfin.sdk.model.api.MediaSegmentDto
 import org.jellyfin.sdk.model.api.MediaStream
 import org.koin.android.ext.android.inject
@@ -63,11 +70,14 @@ import androidx.media3.ui.R as Media3R
 class PlayerFragment : Fragment(), BackPressInterceptor {
     private val appPreferences: AppPreferences by inject()
     private val assHandler: AssHandler by inject()
+    private val imageLoader: ImageLoader by inject()
+    private val apiClient: ApiClient by inject()
     private val viewModel: PlayerViewModel by viewModels()
     private var _playerBinding: FragmentPlayerBinding? = null
     private val playerBinding: FragmentPlayerBinding get() = _playerBinding!!
     private val playerView: PlayerView get() = playerBinding.playerView
     private val playerOverlay: View get() = playerBinding.playerOverlay
+    private val pauseScreen: View get() = playerBinding.pauseScreen
     private val loadingIndicator: View get() = playerBinding.loadingIndicator
     private var _playerControlsBinding: ExoPlayerControlViewBinding? = null
     private val playerControlsBinding: ExoPlayerControlViewBinding get() = _playerControlsBinding!!
@@ -75,6 +85,9 @@ class PlayerFragment : Fragment(), BackPressInterceptor {
     private val toolbar: Toolbar get() = playerControlsBinding.toolbar
     private val fullscreenSwitcher: ImageButton get() = playerControlsBinding.fullscreenSwitcher
     private var playerMenus: PlayerMenus? = null
+    private val nflixUi = NflixPlayerUiState()
+    private val qualityOptionsProvider: org.jellyfin.mobile.player.qualityoptions.QualityOptionsProvider by inject()
+    private var pauseArtworkJob: Job? = null
 
     private lateinit var playerFullscreenHelper: PlayerFullscreenHelper
     lateinit var playerLockScreenHelper: PlayerLockScreenHelper
@@ -102,6 +115,8 @@ class PlayerFragment : Fragment(), BackPressInterceptor {
         // Observe ViewModel
         viewModel.player.observe(this) { player ->
             playerView.player = player
+            player?.addListener(pauseStateListener)
+            updatePauseScreen()
             // Automatically close fragment, unless we're in PiP mode
             if (player == null && !(AndroidVersion.isAtLeastN && requireActivity().isInPictureInPictureMode)) {
                 parentFragmentManager.popBackStack()
@@ -111,8 +126,11 @@ class PlayerFragment : Fragment(), BackPressInterceptor {
             val isPlaying = viewModel.playerOrNull?.isPlaying == true
             requireActivity().window.keepScreenOn = isPlaying
             loadingIndicator.isVisible = playerState == Player.STATE_BUFFERING
+            nflixUi.buffering = playerState == Player.STATE_BUFFERING
+            updatePauseScreen()
         }
         viewModel.decoderType.observe(this) { type ->
+            nflixUi.decoder = type
             playerMenus?.updatedSelectedDecoder(type)
         }
         viewModel.error.observe(this) { message ->
@@ -130,7 +148,12 @@ class PlayerFragment : Fragment(), BackPressInterceptor {
 
             // Update title and player menus
             toolbar.title = mediaSource.getName(requireContext())
+            bindPauseArtwork(mediaSource)
+            bindPauseMetadata(mediaSource)
             playerMenus?.onQueueItemChanged(mediaSource, viewModel.queueManager.hasNext())
+            nflixUi.source = mediaSource
+            nflixUi.hasNext = viewModel.queueManager.hasNext()
+            nflixUi.revision++
         }
 
         // Handle fragment arguments, extract playback options and start playback
@@ -227,6 +250,139 @@ class PlayerFragment : Fragment(), BackPressInterceptor {
         fullscreenSwitcher.setOnClickListener {
             toggleFullscreen()
         }
+        playerBinding.pauseResumeButton.setOnClickListener {
+            viewModel.playerOrNull?.play()
+        }
+
+        setupNflixInterface()
+    }
+
+    private fun setupNflixInterface() {
+        playerView.setControllerVisibilityListener(
+            PlayerView.ControllerVisibilityListener { visibility -> nflixUi.controlsVisible = visibility == View.VISIBLE },
+        )
+        val thumbnails = TrickplayThumbnails(requireContext(), apiClient, imageLoader)
+        playerBinding.nflixPlayerUi.apply {
+            setViewCompositionStrategy(androidx.compose.ui.platform.ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+            setContent { NflixPlayerUi(nflixUi, nflixActions, thumbnails) }
+        }
+    }
+
+    private val nflixActions = object : NflixPlayerActions {
+        override fun player(): Player? = viewModel.playerOrNull
+        override fun back() { parentFragmentManager.popBackStack() }
+        override fun keepAlive() { if (playerView.useController) playerView.showController() }
+        override fun holdControls(hold: Boolean) {
+            suppressControllerAutoHide(hold)
+            if (!hold) keepAlive()
+        }
+        override fun showControls() { if (playerView.useController) playerView.showController() }
+        override fun rewind() = onRewind()
+        override fun forward() = onFastForward()
+        override fun seekTo(positionMs: Long) { viewModel.playerOrNull?.seekTo(positionMs) }
+        override fun next() = onSkipToNext()
+        override fun previous() = onSkipToPrevious()
+        override fun lock() {
+            playerView.hideController()
+            playerLockScreenHelper.lockScreen()
+        }
+        override fun rotate() = toggleFullscreen()
+        override fun pip() = onUserLeaveHint()
+        override fun setResizeMode(mode: Int) {
+            playerView.resizeMode = mode
+            nflixUi.resizeMode = mode
+        }
+        override fun selectAudio(index: Int) {
+            onAudioTrackSelected(index) { nflixUi.revision++ }
+        }
+        override fun selectSubtitle(index: Int) {
+            onSubtitleSelected(index) { nflixUi.revision++ }
+        }
+        override fun setSpeed(speed: Float) {
+            if (onSpeedSelected(speed)) nflixUi.speed = speed
+        }
+        override fun setBitrate(bitrate: Int?) {
+            onBitrateChanged(bitrate) { nflixUi.revision++ }
+        }
+        override fun setDecoder(type: DecoderType) = onDecoderSelected(type)
+        override fun qualityOptions(): List<org.jellyfin.mobile.player.qualityoptions.QualityOption> {
+            val video = viewModel.mediaSourceOrNull?.selectedVideoStream
+            val width = video?.width ?: return emptyList()
+            val height = video.height ?: return emptyList()
+            return qualityOptionsProvider.getApplicableQualityOptions(width, height)
+        }
+        override fun imageUrl(source: org.jellyfin.mobile.player.source.JellyfinMediaSource, kind: ArtKind): String? {
+            val item = source.item ?: return null
+            return when (kind) {
+                ArtKind.Poster -> {
+                    val seriesId = item.seriesId
+                    val seriesTag = item.seriesPrimaryImageTag
+                    if (seriesId != null && seriesTag != null) {
+                        apiClient.imageApi.getItemImageUrl(itemId = seriesId, imageType = ImageType.PRIMARY, tag = seriesTag, maxHeight = 900)
+                    } else {
+                        item.imageTags?.get(ImageType.PRIMARY)?.let { apiClient.imageApi.getItemImageUrl(itemId = source.itemId, imageType = ImageType.PRIMARY, tag = it, maxHeight = 900) }
+                    }
+                }
+                ArtKind.Logo -> when {
+                    item.imageTags?.get(ImageType.LOGO) != null ->
+                        apiClient.imageApi.getItemImageUrl(itemId = source.itemId, imageType = ImageType.LOGO, tag = item.imageTags?.get(ImageType.LOGO), maxWidth = 800)
+                    item.parentLogoItemId != null && item.parentLogoImageTag != null ->
+                        apiClient.imageApi.getItemImageUrl(itemId = item.parentLogoItemId!!, imageType = ImageType.LOGO, tag = item.parentLogoImageTag, maxWidth = 800)
+                    else -> null
+                }
+                ArtKind.Backdrop -> item.backdropImageTags?.firstOrNull()?.let {
+                    apiClient.imageApi.getItemImageUrl(itemId = source.itemId, imageType = ImageType.BACKDROP, tag = it, maxWidth = 1920)
+                }
+            }
+        }
+    }
+
+    private val pauseStateListener = object : Player.Listener {
+        override fun onIsPlayingChanged(isPlaying: Boolean) = updatePauseScreen()
+        override fun onPlaybackStateChanged(playbackState: Int) = updatePauseScreen()
+    }
+
+    private fun updatePauseScreen() {
+        if (_playerBinding == null) return
+        val player = viewModel.playerOrNull
+        // The Compose interface draws the pause screen now.
+        pauseScreen.isVisible = false
+        if (pauseScreen.isVisible) {
+            val position = android.text.format.DateUtils.formatElapsedTime((player?.currentPosition ?: 0L).coerceAtLeast(0L) / 1_000L)
+            val item = viewModel.mediaSourceOrNull?.item
+            val metadata = listOfNotNull(item?.productionYear?.toString(), item?.officialRating).joinToString(" · ")
+            playerBinding.pauseSubtitle.text = listOf(metadata.takeIf { it.isNotBlank() }, "Reprise à $position")
+                .filterNotNull()
+                .joinToString("  ·  ")
+        }
+    }
+
+    private fun bindPauseMetadata(mediaSource: org.jellyfin.mobile.player.source.JellyfinMediaSource) {
+        playerBinding.pauseTitle.text = mediaSource.getName(requireContext())
+        val item = mediaSource.item
+        playerBinding.pauseSubtitle.text = listOfNotNull(item?.productionYear?.toString(), item?.officialRating)
+            .joinToString("  ·  ")
+    }
+
+    private fun bindPauseArtwork(mediaSource: org.jellyfin.mobile.player.source.JellyfinMediaSource) {
+        pauseArtworkJob?.cancel()
+        playerBinding.pauseArtwork.setImageDrawable(null)
+        val tag = mediaSource.item?.imageTags?.get(ImageType.PRIMARY) ?: return
+        val height = resources.getDimensionPixelSize(R.dimen.media_notification_height)
+        val imageUrl = apiClient.imageApi.getItemImageUrl(
+            itemId = mediaSource.itemId,
+            imageType = ImageType.PRIMARY,
+            fillHeight = height,
+            tag = tag,
+        )
+        pauseArtworkJob = viewLifecycleOwner.lifecycleScope.launch {
+            val bitmap = imageLoader.execute(
+                ImageRequest.Builder(requireContext()).data(imageUrl).allowHardware(false).build(),
+            ).image?.toBitmap()
+            if (isAdded && _playerBinding != null && viewModel.mediaSourceOrNull?.itemId == mediaSource.itemId) {
+                playerBinding.pauseArtwork.setImageBitmap(bitmap)
+            }
+        }
     }
 
     override fun onStart() {
@@ -275,7 +431,7 @@ class PlayerFragment : Fragment(), BackPressInterceptor {
      * If playing a portrait video, this just hides the status and navigation bars.
      * For landscape videos, additionally the screen gets rotated.
      */
-    private fun toggleFullscreen() {
+    internal fun toggleFullscreen() {
         val videoTrack = currentVideoStream
         if (videoTrack == null || videoTrack.isLandscape) {
             val current = resources.configuration.orientation
@@ -410,6 +566,7 @@ class PlayerFragment : Fragment(), BackPressInterceptor {
 
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean) {
         playerView.useController = !isInPictureInPictureMode
+        _playerBinding?.nflixPlayerUi?.isVisible = !isInPictureInPictureMode
         if (isInPictureInPictureMode) {
             playerMenus?.dismissPlaybackInfo()
             playerLockScreenHelper.hideUnlockButton()
@@ -432,6 +589,7 @@ class PlayerFragment : Fragment(), BackPressInterceptor {
     }
 
     override fun onDestroyView() {
+        pauseArtworkJob?.cancel()
         super.onDestroyView()
         // Detach player from PlayerView
         playerView.player = null
@@ -443,6 +601,7 @@ class PlayerFragment : Fragment(), BackPressInterceptor {
     }
 
     override fun onDestroy() {
+        viewModel.playerOrNull?.removeListener(pauseStateListener)
         super.onDestroy()
         with(requireActivity()) {
             // Reset screen orientation

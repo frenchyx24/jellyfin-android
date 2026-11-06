@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<org.jellyfin.mobile.player.ui.HiddenControlsLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/player_controls"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/playback_controls_background">
+    android:background="@android:color/transparent">
 
     <androidx.appcompat.widget.Toolbar
         android:id="@+id/toolbar"
@@ -17,6 +17,8 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent"
         app:navigationIcon="?attr/homeAsUpIndicator"
+        app:titleTextAppearance="@style/TextAppearance.Nflix.PlayerTitle"
+        app:titleTextColor="@android:color/white"
         tools:title="Star Wars: A New Hope" />
 
     <androidx.appcompat.widget.AppCompatImageButton
@@ -27,7 +29,7 @@
         android:background="@drawable/ripple_background_circular"
         android:padding="@dimen/exo_center_icon_padding"
         android:src="@drawable/ic_skip_previous_black_32dp"
-        android:tint="?android:textColorPrimary"
+        android:tint="@android:color/white"
         app:layout_constraintBottom_toBottomOf="@id/play_pause_container"
         app:layout_constraintEnd_toStartOf="@id/previous_chapter_button"
         app:layout_constraintTop_toTopOf="@id/play_pause_container" />
@@ -40,7 +42,7 @@
         android:background="@drawable/ripple_background_circular"
         android:padding="@dimen/exo_center_icon_padding"
         android:src="@drawable/ic_skip_previous_chapter_black_32dp"
-        android:tint="?android:textColorPrimary"
+        android:tint="@android:color/white"
         app:layout_constraintBottom_toBottomOf="@id/play_pause_container"
         app:layout_constraintEnd_toStartOf="@id/play_pause_container"
         app:layout_constraintTop_toTopOf="@id/play_pause_container" />
@@ -56,11 +58,13 @@
 
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/exo_play_pause"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:background="@drawable/ripple_background_circular"
-            android:padding="@dimen/exo_center_icon_padding"
-            android:tint="?android:textColorPrimary" />
+            android:layout_width="76dp"
+            android:layout_height="76dp"
+            android:background="@drawable/nflix_play_button"
+            android:elevation="6dp"
+            android:padding="18dp"
+            android:scaleType="fitCenter"
+            android:tint="@android:color/white" />
     </FrameLayout>
 
     <androidx.appcompat.widget.AppCompatImageButton
@@ -71,7 +75,7 @@
         android:background="@drawable/ripple_background_circular"
         android:padding="@dimen/exo_center_icon_padding"
         android:src="@drawable/ic_skip_next_chapter_black_32dp"
-        android:tint="?android:textColorPrimary"
+        android:tint="@android:color/white"
         app:layout_constraintBottom_toBottomOf="@id/play_pause_container"
         app:layout_constraintStart_toEndOf="@id/play_pause_container"
         app:layout_constraintTop_toTopOf="@id/play_pause_container" />
@@ -84,7 +88,7 @@
         android:background="@drawable/ripple_background_circular"
         android:padding="@dimen/exo_center_icon_padding"
         android:src="@drawable/ic_skip_next_black_32dp"
-        android:tint="?android:textColorPrimary"
+        android:tint="@android:color/white"
         app:layout_constraintBottom_toBottomOf="@id/play_pause_container"
         app:layout_constraintStart_toEndOf="@id/next_chapter_button"
         app:layout_constraintTop_toTopOf="@id/play_pause_container" />
@@ -94,7 +98,8 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginStart="@dimen/exo_player_controls_display_padding"
-        android:textColor="?android:textColorPrimary"
+        android:textColor="@android:color/white"
+        android:textStyle="bold"
         app:layout_constraintBottom_toBottomOf="@id/seek_bar_container"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="@id/seek_bar_container"
@@ -131,11 +136,13 @@
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toTopOf="parent"
-            app:played_color="?colorAccent"
-            app:scrubber_color="?colorAccent"
-            app:scrubber_dragged_size="24dp"
+            app:bar_height="5dp"
+            app:buffered_color="#66FFFFFF"
+            app:played_color="#E50914"
+            app:scrubber_color="#E50914"
+            app:scrubber_dragged_size="26dp"
             app:scrubber_enabled_size="16dp"
-            app:unplayed_color="@color/playback_timebar_unplayed" />
+            app:unplayed_color="#33FFFFFF" />
     </androidx.constraintlayout.widget.ConstraintLayout>
 
     <androidx.appcompat.widget.AppCompatTextView
@@ -143,7 +150,8 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginEnd="@dimen/exo_player_controls_display_padding"
-        android:textColor="?android:textColorPrimary"
+        android:textColor="@android:color/white"
+        android:textStyle="bold"
         app:layout_constraintBottom_toBottomOf="@id/seek_bar_container"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintTop_toTopOf="@id/seek_bar_container"
@@ -251,7 +259,8 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginBottom="8dp"
-        android:background="#282828"
+        android:background="@drawable/nflix_trickplay_background"
+        android:clipToOutline="true"
         android:elevation="8dp"
         android:visibility="gone"
         app:layout_constraintBottom_toTopOf="@id/seek_bar_container"
@@ -302,4 +311,4 @@
                 android:textStyle="bold" />
         </LinearLayout>
     </FrameLayout>
-</androidx.constraintlayout.widget.ConstraintLayout>
+</org.jellyfin.mobile.player.ui.HiddenControlsLayout>

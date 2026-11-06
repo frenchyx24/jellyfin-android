@@ -52,7 +52,7 @@ public sealed class NflixAuthController : ControllerBase
     /// <summary>Public client configuration consumed by the Android app.</summary>
     [HttpGet("Config")]
     [AllowAnonymous]
-    public IActionResult GetConfig() => Ok(new { Config.Issuer, Config.ClientId, Version = "1.2.0" });
+    public IActionResult GetConfig() => Ok(new { Config.Issuer, Config.ClientId, Version = "1.4.0" });
 
     /// <summary>Exchanges a Mira Connect ID token for a Jellyfin session.</summary>
     [HttpPost("Mira")]

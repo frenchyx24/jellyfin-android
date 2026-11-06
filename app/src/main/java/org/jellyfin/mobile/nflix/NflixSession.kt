@@ -2,6 +2,9 @@ package org.jellyfin.mobile.nflix
 
 import android.content.Context
 import androidx.core.content.edit
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -37,11 +40,43 @@ class NflixSession(context: Context) {
         get() = prefs.getString(KEY_METHOD, null)
         set(value) = prefs.edit { putString(KEY_METHOD, value) }
 
+    var miraName: String?
+        get() = prefs.getString(KEY_MIRA_NAME, null)
+        set(value) = prefs.edit { putString(KEY_MIRA_NAME, value) }
+
+    var miraEmail: String?
+        get() = prefs.getString(KEY_MIRA_EMAIL, null)
+        set(value) = prefs.edit { putString(KEY_MIRA_EMAIL, value) }
+
+    var miraAvatar: String? by mutableStateOf(prefs.getString(KEY_MIRA_AVATAR, null))
+        private set
+
+    var miraGroups: Set<String>
+        get() = prefs.getStringSet(KEY_MIRA_GROUPS, emptySet()).orEmpty()
+        set(value) = prefs.edit { putStringSet(KEY_MIRA_GROUPS, value) }
+
+    internal fun setMiraProfile(profile: MiraProfile?) {
+        miraAvatar = MiraProfile.safeAvatar(profile?.avatar)
+        prefs.edit {
+            putString(KEY_MIRA_NAME, profile?.name)
+            putString(KEY_MIRA_EMAIL, profile?.email)
+            putString(KEY_MIRA_AVATAR, miraAvatar)
+            putStringSet(KEY_MIRA_GROUPS, profile?.groups.orEmpty())
+        }
+    }
+
     fun clear() {
         accessToken = null
+        miraAvatar = null
         prefs.edit {
             remove(KEY_USER_ID)
             remove(KEY_SERVER_ID)
+            remove(KEY_USER_NAME)
+            remove(KEY_METHOD)
+            remove(KEY_MIRA_NAME)
+            remove(KEY_MIRA_EMAIL)
+            remove(KEY_MIRA_AVATAR)
+            remove(KEY_MIRA_GROUPS)
         }
     }
 
@@ -78,5 +113,9 @@ class NflixSession(context: Context) {
         const val KEY_USER_ID = "user_id"
         const val KEY_USER_NAME = "user_name"
         const val KEY_METHOD = "method"
+        const val KEY_MIRA_NAME = "mira_name"
+        const val KEY_MIRA_EMAIL = "mira_email"
+        const val KEY_MIRA_AVATAR = "mira_avatar"
+        const val KEY_MIRA_GROUPS = "mira_groups"
     }
 }
