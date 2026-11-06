@@ -111,15 +111,6 @@ class NflixAppFragment : Fragment() {
                 }
             }
         }
-        // Receiver app chosen by the server admin for this user (Jellyfin's when unset).
-        viewLifecycleOwner.lifecycleScope.launch {
-            runCatching {
-                val me = api.getJson("Users/Me") as? kotlinx.serialization.json.JsonObject
-                val config = me?.get("Configuration") as? kotlinx.serialization.json.JsonObject
-                (config?.get("CastReceiverId") as? kotlinx.serialization.json.JsonPrimitive)?.content
-                    ?.takeIf { Regex("[A-Z0-9]{8}").matches(it) }?.let { org.jellyfin.mobile.nflix.cast.CastReceiver.id = it }
-            }
-        }
         // Signed in: the alerts worker runs every 15 min (Android minimum), like Mira Connect.
         org.jellyfin.mobile.nflix.alerts.NflixAlerts.createChannel(requireContext())
         org.jellyfin.mobile.nflix.alerts.NflixAlerts.schedule(requireContext())

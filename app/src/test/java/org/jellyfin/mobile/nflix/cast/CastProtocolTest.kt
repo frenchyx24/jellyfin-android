@@ -39,4 +39,15 @@ class CastProtocolTest : FunSpec({
         result.audioIndex shouldBe 1
         result.subtitleIndex shouldBe 2
     }
+
+    test("stop message clears stale playback state") {
+        val target = CastTarget("screen", "TV", CastTarget.Kind.Jellyfin)
+        val playing = CastStatus(target, itemId = "item", title = "Film", positionTicks = 123, durationTicks = 900)
+        val stopped = CastProtocol.applyMessage(playing, Json.parseToJsonElement("""{"type":"playbackstop"}""").jsonObject)
+        stopped.itemId shouldBe null
+        stopped.title shouldBe null
+        stopped.positionTicks shouldBe 0
+        stopped.durationTicks shouldBe null
+        stopped.idle shouldBe true
+    }
 })

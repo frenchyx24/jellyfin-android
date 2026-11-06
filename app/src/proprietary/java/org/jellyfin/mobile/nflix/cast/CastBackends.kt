@@ -49,8 +49,10 @@ private class ChromecastBackend(
 
     private fun castContext(): CastContext? = runCatching { CastContext.getSharedInstance(context) }.getOrNull()
 
+    private fun effectiveReceiverId(): String = CastOptionsProvider.getAppId()?.takeIf(String::isNotBlank) ?: receiverId()
+
     private fun selector(): MediaRouteSelector =
-        MediaRouteSelector.Builder().addControlCategory(CastMediaControlIntent.categoryForCast(receiverId())).build()
+        MediaRouteSelector.Builder().addControlCategory(CastMediaControlIntent.categoryForCast(effectiveReceiverId())).build()
 
     private val routerCallback = object : MediaRouter.Callback() {
         override fun onRouteAdded(router: MediaRouter, route: MediaRouter.RouteInfo) = refresh()
@@ -75,7 +77,7 @@ private class ChromecastBackend(
     }
 
     private fun applyReceiver() {
-        val id = receiverId()
+        val id = effectiveReceiverId()
         if (id != appliedReceiver) {
             CastOptionsProvider.setAppId(id)
             appliedReceiver = id
@@ -85,7 +87,7 @@ private class ChromecastBackend(
     private fun refresh() {
         val selector = selector()
         _targets.value = router.routes.filter { !it.isDefault && it.isEnabled && it.matchesSelector(selector) }
-            .map { CastTarget(it.id, it.name, CastTarget.Kind.Chromecast, it.description?.toString().orEmpty()) }
+            .map { CastTarget(it.id, it.name, CastTarget.Kind.Chromecast, it.description.orEmpty()) }
     }
 
     override fun startDiscovery() {

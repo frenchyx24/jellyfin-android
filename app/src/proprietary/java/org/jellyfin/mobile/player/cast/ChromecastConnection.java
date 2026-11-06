@@ -90,7 +90,7 @@ public class ChromecastConnection {
         handler = new Handler(Looper.getMainLooper());
         activity = act;
         settings = activity.getSharedPreferences("CORDOVA-PLUGIN-CHROMECAST_ChromecastConnection", 0);
-        appId = settings.getString("appId", CastMediaControlIntent.DEFAULT_MEDIA_RECEIVER_APPLICATION_ID);
+        appId = settings.getString("appId", "F007D354");
         listener = connectionListener;
         chromecastSession = new ChromecastSession(activity, listener);
 

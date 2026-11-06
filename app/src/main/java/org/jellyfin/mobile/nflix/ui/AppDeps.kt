@@ -85,7 +85,11 @@ class AppDeps(
         // A screen is connected: it plays, the phone becomes the remote.
         if (cast.connected) {
             scope.launch {
-                val queue = ids.drop(startIndex.coerceIn(0, ids.lastIndex)).take(50).map { id -> jellyfin.cachedItem(id) ?: Item(id = id, type = "Video", mediaType = "Video") }
+                val validIds = uuids.map { it.toString() }
+                val selectedId = ids.getOrNull(startIndex.coerceIn(0, ids.lastIndex))?.toUUIDOrNull()?.toString()
+                val castStartIndex = validIds.indexOf(selectedId).coerceAtLeast(0)
+                val queue = validIds.drop(castStartIndex).take(50)
+                    .map { id -> jellyfin.cachedItem(id) ?: Item(id = id, type = "Video", mediaType = "Video") }
                 if (!cast.play(queue, resumeTicks ?: 0)) Timber.w("Cast play refused")
             }
             return

@@ -119,7 +119,16 @@ object CastProtocol {
     fun applyMessage(current: CastStatus, message: JsonObject): CastStatus {
         val type = (message["type"] as? JsonPrimitive)?.contentOrNull ?: return current
         val data = message["data"] as? JsonObject
-        if (type == "playbackstop") return current.copy(idle = true, paused = true)
+        if (type == "playbackstop") return current.copy(
+            itemId = null,
+            title = null,
+            positionTicks = 0,
+            durationTicks = null,
+            paused = true,
+            audioIndex = null,
+            subtitleIndex = null,
+            idle = true,
+        )
         if (data == null) return current
         return applyState(current, data).let { if (type == "playbackstart") it.copy(idle = false) else it }
     }
@@ -133,15 +142,15 @@ object CastProtocol {
         fun JsonObject?.str(key: String) = (this?.get(key) as? JsonPrimitive)?.contentOrNull
         val volume = play.long("VolumeLevel")?.let { (it / 100f).coerceIn(0f, 1f) }
         return current.copy(
-            itemId = item.str("Id") ?: current.itemId,
-            title = item.str("Name") ?: current.title,
-            positionTicks = play.long("PositionTicks") ?: current.positionTicks,
-            durationTicks = item.long("RunTimeTicks") ?: current.durationTicks,
-            paused = play.bool("IsPaused") ?: current.paused,
+            itemId = item.str("Id"),
+            title = item.str("Name"),
+            positionTicks = if (item == null) 0 else play.long("PositionTicks") ?: current.positionTicks,
+            durationTicks = item.long("RunTimeTicks"),
+            paused = if (item == null) true else play.bool("IsPaused") ?: current.paused,
             volume = volume ?: current.volume,
-            audioIndex = play.long("AudioStreamIndex")?.toInt() ?: current.audioIndex,
-            subtitleIndex = play.long("SubtitleStreamIndex")?.toInt() ?: current.subtitleIndex,
-            idle = item == null && play == null && current.idle,
+            audioIndex = play.long("AudioStreamIndex")?.toInt(),
+            subtitleIndex = play.long("SubtitleStreamIndex")?.toInt(),
+            idle = item == null,
         )
     }
 }
@@ -212,7 +221,11 @@ class JellyfinSessionsBackend(private val api: NflixApi, private val ownDeviceId
             val session = sessions.filterIsInstance<JsonObject>().firstOrNull { (it["Id"] as? JsonPrimitive)?.contentOrNull == target.id }
             val current = _status.value ?: return
             if (current.target.id != target.id) return
-            _status.value = if (session == null) current.copy(idle = true) else CastProtocol.applyState(current.copy(idle = session["NowPlayingItem"] == null), session)
+            _status.value = if (session == null) {
+                CastProtocol.applyMessage(current, buildJsonObject { put("type", "playbackstop") })
+            } else {
+                CastProtocol.applyState(current.copy(idle = session["NowPlayingItem"] == null), session)
+            }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (e: Exception) {
@@ -222,11 +235,11 @@ class JellyfinSessionsBackend(private val api: NflixApi, private val ownDeviceId
 
     override suspend fun play(target: CastTarget, items: List<Item>, startTicks: Long, audioIndex: Int?, subtitleIndex: Int?) {
         api.send("POST", "Sessions/${target.id}/Playing", body = buildJsonObject {
-            put("playCommand", "PlayNow")
-            putJsonArray("itemIds") { items.forEach { add(JsonPrimitive(it.id)) } }
-            if (startTicks > 0) put("startPositionTicks", startTicks)
-            audioIndex?.let { put("audioStreamIndex", it) }
-            subtitleIndex?.let { put("subtitleStreamIndex", it) }
+            put("PlayCommand", "PlayNow")
+            putJsonArray("ItemIds") { items.forEach { add(JsonPrimitive(it.id)) } }
+            if (startTicks > 0) put("StartPositionTicks", startTicks)
+            audioIndex?.let { put("AudioStreamIndex", it) }
+            subtitleIndex?.let { put("SubtitleStreamIndex", it) }
         })
         _status.value = CastStatus(target, items.firstOrNull()?.id, items.firstOrNull()?.name, startTicks, items.firstOrNull()?.runTimeTicks)
     }
@@ -269,7 +282,7 @@ class JellyfinSessionsBackend(private val api: NflixApi, private val ownDeviceId
 
 /** Receiver application chosen by the server admin (user configuration), Jellyfin's by default. */
 object CastReceiver {
-    @Volatile var id: String = CastProtocol.DEFAULT_RECEIVER
+    const val id: String = CastProtocol.DEFAULT_RECEIVER
 }
 
 /** Single entry point for the UI: merges every backend, remembers the active screen. */

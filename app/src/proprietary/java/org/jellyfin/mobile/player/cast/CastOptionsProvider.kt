@@ -18,7 +18,7 @@ class CastOptionsProvider : OptionsProvider {
         /**
          * ID of the cast receiver application.
          */
-        private var applicationId: String? = null
+        private var applicationId: String? = "F007D354"
 
         /**
          * Sets the application ID.
@@ -29,5 +29,8 @@ class CastOptionsProvider : OptionsProvider {
         fun setAppId(appId: String) {
             applicationId = appId
         }
+
+        @JvmStatic
+        fun getAppId(): String? = applicationId
     }
 }
