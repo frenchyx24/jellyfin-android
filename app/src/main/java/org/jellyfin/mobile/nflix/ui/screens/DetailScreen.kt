@@ -65,6 +65,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -88,6 +89,8 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import org.jellyfin.mobile.nflix.data.Item
 import org.jellyfin.mobile.nflix.ui.Badge
+import org.jellyfin.mobile.nflix.ui.CastButton
+import org.jellyfin.mobile.nflix.ui.CastRemoteSheet
 import org.jellyfin.mobile.nflix.ui.ContentBottomPadding
 import org.jellyfin.mobile.nflix.ui.LocalDeps
 import org.jellyfin.mobile.nflix.ui.LocalNavigator
@@ -132,7 +135,11 @@ fun DetailScreen(id: String, origin: String?) {
         } else {
             LazyColumn(state = listState, contentPadding = PaddingValues(bottom = ContentBottomPadding)) {
                 item(key = "header") {
-                    val scroll = if (listState.firstVisibleItemIndex == 0) listState.firstVisibleItemScrollOffset.toFloat() else 2000f
+                    val scroll = remember(listState) {
+                        derivedStateOf {
+                            if (listState.firstVisibleItemIndex == 0) listState.firstVisibleItemScrollOffset.toFloat() else 2000f
+                        }
+                    }.value
                     if (merged.isBook || merged.isAudioBook) DetailHeader(merged, origin, scroll)
                     else CinematicHeader(merged, origin, scroll, accent, trailerUrl)
                 }
@@ -279,6 +286,7 @@ private fun Actions(item: Item, accent: Color, onChanged: () -> Unit) {
     val data = item.userData
     val resumable = (data?.positionTicks ?: 0) > 0 && item.isPlayableVideo
     val pulse = rememberArrivalPulse(item.id)
+    var castRemote by remember { mutableStateOf(false) }
     Column(Modifier.padding(horizontal = 20.dp, vertical = 16.dp)) {
         Button(
             onClick = { if (item.isBook) navigator.open(Route.Reader(item.id)) else deps.play(scope, item, navigator = navigator) },
@@ -318,6 +326,7 @@ private fun Actions(item: Item, accent: Color, onChanged: () -> Unit) {
         }
         Spacer(Modifier.height(14.dp))
         Row(horizontalArrangement = Arrangement.SpaceEvenly, modifier = Modifier.fillMaxWidth()) {
+            CastButton(deps.cast, tint = accent, onOpenRemote = { castRemote = true })
             val favorite = data?.favorite == true
             ActionIcon(if (favorite) Icons.Rounded.Check else Icons.Rounded.Add, "Ma liste", favorite, accent) { scope.launch { deps.jellyfin.setFavorite(item, !favorite) } }
             if (item.type == "Series") FollowBell(item.id, item.name)
@@ -349,6 +358,7 @@ private fun Actions(item: Item, accent: Color, onChanged: () -> Unit) {
             }
         }
     }
+    if (castRemote) CastRemoteSheet(deps.cast) { castRemote = false }
 }
 
 @Composable
@@ -452,7 +462,7 @@ private fun EpisodeList(seriesId: String, seasonId: String, accent: Color = Nfli
     val list = episodes.value
     Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         if (list == null) repeat(3) { Skeleton(Modifier.fillMaxWidth().height(96.dp)) }
-        list.orEmpty().forEachIndexed { i, base ->
+        list.orEmpty().forEachIndexed { i, base -> key(base.id) {
             val episode = userData[base.id]?.let { base.copy(userData = it) } ?: base
             Row(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Nflix.Surface)
@@ -461,7 +471,8 @@ private fun EpisodeList(seriesId: String, seasonId: String, accent: Color = Nfli
             ) {
                 Box(Modifier.width(150.dp).aspectRatio(16f / 9f).clip(RoundedCornerShape(10.dp)).pressable({
                     deps.playVideos(scope, list.orEmpty().map { it.id }, i, episode.userData?.positionTicks)
-                })) {
+                }
+        } })) {
                     NImage(deps.jellyfin.thumb(episode, 400), Modifier.fillMaxSize().sharedPoster("episode/${episode.id}"))
                     Box(Modifier.align(Alignment.Center).size(34.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.5f)), contentAlignment = Alignment.Center) {
                         Icon(Icons.Rounded.PlayArrow, "Lecture", tint = Color.White, modifier = Modifier.size(22.dp))
@@ -596,7 +607,13 @@ private fun SeasonTools(season: Item, accent: Color) {
             when { played -> "Saison vue"; unplayed != null && unplayed > 0 -> "$unplayed épisode${if (unplayed > 1) "s" else ""} non vu${if (unplayed > 1) "s" else ""}"; else -> "" },
             style = MaterialTheme.typography.bodySmall, color = Nflix.Muted, modifier = Modifier.weight(1f),
         )
-        androidx.compose.material3.TextButton(onClick = { scope.launch { deps.jellyfin.setPlayed(season, !played) } }) {
+        androidx.compose.material3.TextButton(onClick = {
+            scope.launch {
+                val episodes = deps.jellyfin.episodes(season.seriesId ?: return@launch, season.id)
+                episodes.forEach { deps.jellyfin.setPlayed(it, !played) }
+                deps.jellyfin.setPlayed(season, !played)
+            }
+        }) {
             Icon(if (played) Icons.Rounded.RemoveDone else Icons.Rounded.DoneAll, null, tint = accent, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(6.dp))
             Text(if (played) "Marquer la saison non vue" else "Marquer la saison vue", color = accent)

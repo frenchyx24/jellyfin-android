@@ -237,11 +237,16 @@ fun CinematicHeader(item: Item, origin: String?, scroll: Float, accent: Color, t
             showTrailer = true
         }
     }
-    val kenBurns = rememberInfiniteTransition(label = "ken-burns")
-    val zoom by kenBurns.animateFloat(1f, if (motion) 1.12f else 1f, infiniteRepeatable(tween(20_000, easing = LinearEasing), RepeatMode.Reverse), label = "zoom")
-    val pan by kenBurns.animateFloat(-1f, 1f, infiniteRepeatable(tween(26_000, easing = LinearEasing), RepeatMode.Reverse), label = "pan")
+    val kenBurns = if (motion) rememberInfiniteTransition(label = "ken-burns") else null
+    val zoomState = kenBurns?.animateFloat(1f, 1.12f, infiniteRepeatable(tween(20_000, easing = LinearEasing), RepeatMode.Reverse), label = "zoom")
+    val panState = kenBurns?.animateFloat(-1f, 1f, infiniteRepeatable(tween(26_000, easing = LinearEasing), RepeatMode.Reverse), label = "pan")
+    val zoom = zoomState?.value ?: 1f
+    val pan = panState?.value ?: 0f
     val logoIn = remember(item.id) { Animatable(if (motion) 0f else 1f) }
-    LaunchedEffect(item.id) { logoIn.animateTo(1f, spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessLow)) }
+    LaunchedEffect(item.id, motion) {
+        if (motion) logoIn.animateTo(1f, spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessLow))
+        else logoIn.snapTo(1f)
+    }
     val dim = (scroll / 900f).coerceIn(0f, 0.75f)
 
     BoxWithConstraints(Modifier.fillMaxWidth()) {
@@ -251,7 +256,11 @@ fun CinematicHeader(item: Item, origin: String?, scroll: Float, accent: Color, t
                 NImage(
                     deps.jellyfin.backdrop(item) ?: deps.jellyfin.primary(item, 900),
                     Modifier.fillMaxSize().sharedPoster(origin ?: "detail/${item.id}")
-                        .graphicsLayer { scaleX = zoom; scaleY = zoom; translationX = pan * size.width * 0.03f },
+                        .graphicsLayer {
+                            scaleX = if (motion) zoom else 1f
+                            scaleY = if (motion) zoom else 1f
+                            translationX = if (motion) pan * size.width * 0.03f else 0f
+                        },
                     contentScale = ContentScale.Crop,
                     placeholderIcon = null,
                 )
@@ -363,7 +372,10 @@ private fun HeroTrailer(url: String, muted: Boolean, onFailed: () -> Unit) {
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) = onFailed()
         }
         player.addListener(listener)
-        onDispose { player.removeListener(listener); player.release() }
+        onDispose {
+            player.removeListener(listener)
+            player.release()
+        }
     }
     AndroidView(
         factory = { ctx ->
@@ -374,6 +386,7 @@ private fun HeroTrailer(url: String, muted: Boolean, onFailed: () -> Unit) {
                 this.player = player
             }
         },
+        onRelease = { view -> view.player = null },
         modifier = Modifier.fillMaxSize().semantics { contentDescription = "Bande-annonce en lecture" },
     )
 }
