@@ -229,6 +229,7 @@ private fun Screen(route: Route) {
         Route.Search -> SearchScreen()
         Route.NowPlaying -> NowPlayingScreen()
         Route.Notices -> NoticesScreen()
+        Route.Support -> org.jellyfin.mobile.nflix.ui.screens.SupportScreen()
         Route.Profile -> ProfileScreen()
         Route.HorusRequests -> HorusRequestsScreen()
         Route.Releases -> org.jellyfin.mobile.nflix.ui.screens.ReleasesScreen()

@@ -142,8 +142,11 @@ fun NflixUpdateDialog(updater: NflixUpdater) {
                         onClick = {
                             when {
                                 updater.miraConnectInstalled && updater.updateWithMiraConnect() -> Unit
-                                !updater.canInstallDirectly() -> runCatching { context.startActivity(updater.installPermissionIntent()) }
-                                else -> scope.launch { updater.installDirectly(release) }
+                                // Nflix never installs APKs itself (no REQUEST_INSTALL_PACKAGES, fewer Play Protect flags):
+                                // updates go through Mira Connect, which is offered for download when missing.
+                                else -> runCatching {
+                                    context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://nflix.miracloud.fr/NflixAuth/Store/mira-connect/app.apk")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                                }
                             }
                         },
                         enabled = !busy,

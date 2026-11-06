@@ -29,6 +29,7 @@ import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.Campaign
+import androidx.compose.material.icons.rounded.Report
 import androidx.compose.material.icons.rounded.Celebration
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Download
@@ -172,6 +173,7 @@ fun ProfileScreen() {
     val newsEntries = listOf(
         ProfileEntry("alerts", Icons.Rounded.NotificationsActive, "Notifications", "Demandes Horus, séries suivies, succès", ProfileAccents.Alerts) { navigator.open(Route.AlertSettings) },
         ProfileEntry("notices", Icons.Rounded.Campaign, "Annonces", "Les nouvelles de Nflix", ProfileAccents.Notices) { navigator.open(Route.Notices) },
+        ProfileEntry("support", Icons.Rounded.Report, "Mes signalements", "Problèmes et idées envoyés à Mira", ProfileAccents.Alerts) { navigator.open(Route.Support) },
     )
     val event = org.jellyfin.mobile.nflix.ui.SeasonalThemes.active
     val seasonalSubtitle = when {
