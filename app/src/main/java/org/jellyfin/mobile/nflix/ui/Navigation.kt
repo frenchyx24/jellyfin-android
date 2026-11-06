@@ -45,6 +45,7 @@ sealed class Route(val key: String) {
     data object HorusRequests : Route("horus-requests")
     data object Releases : Route("releases")
     data object AlertSettings : Route("alert-settings")
+    data class AchievementHub(val tab: String = "Quests") : Route("achievement-hub/$tab")
 
     val isTab: Boolean get() = this is Tab
 }

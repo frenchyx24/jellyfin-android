@@ -19,6 +19,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Storefront
+import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.Leaderboard
+import androidx.compose.material.icons.rounded.TaskAlt
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
@@ -61,6 +65,12 @@ fun AchievementsScreen() {
     var selected by remember { mutableStateOf<AchievementBadge?>(null) }
     var saving by remember { mutableStateOf(false) }
     var actionError by remember { mutableStateOf<String?>(null) }
+    var query by rememberSaveable { mutableStateOf("") }
+    val hub = remember(deps.api) { org.jellyfin.mobile.nflix.data.AchievementHub(deps.api) }
+    val publicConfig = org.jellyfin.mobile.nflix.ui.rememberLoad("ab-config") { hub.publicConfig() }.let { (it as? org.jellyfin.mobile.nflix.ui.Load.Ready)?.value }
+        ?: org.jellyfin.mobile.nflix.data.AchievementPublicConfig()
+    var bank by remember { mutableStateOf<org.jellyfin.mobile.nflix.data.AchievementBank?>(null) }
+    LaunchedEffect(hub, revision) { bank = runCatching { hub.bank() }.getOrNull() }
 
     LaunchedEffect(repository, revision) {
         loading = true
@@ -78,7 +88,8 @@ fun AchievementsScreen() {
 
     val visibleFor: (AchievementProfile) -> List<AchievementBadge> = { data ->
         data.badges.filter { badge ->
-            (category == null || badge.category == category) && when (filter) {
+            (category == null || badge.category == category) &&
+                (query.isBlank() || badge.title.contains(query.trim(), ignoreCase = true) || badge.description.contains(query.trim(), ignoreCase = true)) && when (filter) {
                 "Débloqués" -> badge.unlocked
                 "En cours" -> !badge.unlocked && badge.currentValue > 0
                 "Verrouillés" -> !badge.unlocked
@@ -108,7 +119,8 @@ fun AchievementsScreen() {
                     }
                 }
                 if (data != null) {
-                    item("showcase") {
+                    item("hub") { HubShortcuts(publicConfig, bank) { navigator.open(org.jellyfin.mobile.nflix.ui.Route.AchievementHub(it)) } }
+                    if (!publicConfig.hideShowcase) item("showcase") {
                         SectionTitle("Votre vitrine", "${data.equipped.size} exposé(s)")
                         if (data.equipped.isEmpty()) {
                             Text(
@@ -158,6 +170,11 @@ fun AchievementsScreen() {
                     }
                     item("filters") {
                         SectionTitle("Tous les succès", "${data.summary.unlocked} sur ${data.summary.total}")
+                        androidx.compose.material3.OutlinedTextField(
+                            query, { query = it.take(60) }, singleLine = true,
+                            label = { Text("Rechercher un succès") },
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp).fillMaxWidth(),
+                        )
                         LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             val counts = mapOf(
                                 "Tous" to data.badges.size,
@@ -256,7 +273,67 @@ fun AchievementsScreen() {
                         Text(if (saving) "Enregistrement…" else if (equipped) "Retirer de la vitrine" else "Exposer dans la vitrine", fontWeight = FontWeight.SemiBold)
                     }
                 }
+                if (badge.unlocked) {
+                    val pinned = bank?.pinned?.contains(badge.id) == true
+                    val titled = bank?.titleBadgeId == badge.id
+                    Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
+                        TextButton(enabled = !saving, onClick = {
+                            saving = true
+                            scope.launch {
+                                val result = runCatching { hub.pin(badge.id, !pinned) }.getOrElse { org.jellyfin.mobile.nflix.data.ActionResult(false, achievementError(it as Exception)) }
+                                if (result.success) { revision++ } else actionError = result.message
+                                saving = false
+                            }
+                        }) { Text(if (pinned) "Désépingler" else "Épingler", color = Nflix.Red) }
+                        TextButton(enabled = !saving, onClick = {
+                            saving = true
+                            scope.launch {
+                                val result = runCatching { hub.setTitle(if (titled) null else badge.id) }.getOrElse { org.jellyfin.mobile.nflix.data.ActionResult(false, achievementError(it as Exception)) }
+                                if (result.success) { revision++ } else actionError = result.message
+                                saving = false
+                            }
+                        }) { Text(if (titled) "Retirer le titre" else "Utiliser comme titre", color = Nflix.Red) }
+                    }
+                } else {
+                    Button(
+                        enabled = !saving && !loading,
+                        onClick = {
+                            saving = true
+                            scope.launch {
+                                val result = runCatching { hub.buyBadge(badge.id) }.getOrElse { org.jellyfin.mobile.nflix.data.ActionResult(false, achievementError(it as Exception)) }
+                                if (result.success) { revision++; selected = null } else actionError = result.message ?: "Achat impossible."
+                                saving = false
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Nflix.Surface, contentColor = Color.White),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth().height(48.dp),
+                    ) { Text("Débloquer avec mon score (banque : ${bank?.scoreBank ?: 0} pts)") }
+                }
                 Spacer(Modifier.height(12.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun HubShortcuts(config: org.jellyfin.mobile.nflix.data.AchievementPublicConfig, bank: org.jellyfin.mobile.nflix.data.AchievementBank?, open: (String) -> Unit) {
+    val entries = buildList {
+        if (config.quests) add(Triple("Quests", "Quêtes", Icons.Rounded.TaskAlt))
+        if (config.leaderboard && !config.privacy) add(Triple("Leaderboard", "Classement", Icons.Rounded.Leaderboard))
+        if (config.activityFeed && !config.privacy) add(Triple("Activity", "Activité", Icons.Rounded.History))
+        add(Triple("Shop", "Boutique", Icons.Rounded.Storefront))
+    }
+    LazyRow(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        items(entries, key = { it.first }) { (tab, label, icon) ->
+            Column(
+                Modifier.width(104.dp).clip(RoundedCornerShape(16.dp)).background(Nflix.Surface).clickable { open(tab) }.padding(vertical = 14.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Icon(icon, null, tint = Nflix.Red, modifier = Modifier.size(26.dp))
+                Spacer(Modifier.height(6.dp))
+                Text(label, style = MaterialTheme.typography.labelLarge)
+                if (tab == "Shop" && bank != null) Text("${bank.scoreBank} pts", style = MaterialTheme.typography.labelSmall, color = Nflix.Warning)
             }
         }
     }
@@ -325,7 +402,7 @@ private fun RankHeader(data: AchievementProfile, loading: Boolean, onRefresh: ()
 }
 
 @Composable
-private fun SectionTitle(title: String, subtitle: String?) {
+internal fun SectionTitle(title: String, subtitle: String?) {
     Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 22.dp, bottom = 10.dp), verticalAlignment = Alignment.Bottom) {
         Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
         subtitle?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = Nflix.Muted) }
@@ -333,7 +410,7 @@ private fun SectionTitle(title: String, subtitle: String?) {
 }
 
 @Composable
-private fun StatTile(label: String, value: String, modifier: Modifier = Modifier, caption: String? = null) {
+internal fun StatTile(label: String, value: String, modifier: Modifier = Modifier, caption: String? = null) {
     Column(
         modifier.clip(RoundedCornerShape(14.dp)).background(Color.White.copy(alpha = 0.06f)).padding(vertical = 12.dp, horizontal = 10.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -346,7 +423,7 @@ private fun StatTile(label: String, value: String, modifier: Modifier = Modifier
 
 /** Round badge emblem tinted by rarity; locked badges are greyed with a padlock. */
 @Composable
-private fun Medallion(badge: AchievementBadge, size: androidx.compose.ui.unit.Dp, showLocked: Boolean = true) {
+internal fun Medallion(badge: AchievementBadge, size: androidx.compose.ui.unit.Dp, showLocked: Boolean = true) {
     val color = rarityColor(badge.rarity)
     val locked = !badge.unlocked && showLocked
     Box(
@@ -371,7 +448,7 @@ private fun BadgeProgress(badge: AchievementBadge) {
 }
 
 @Composable
-private fun RarityPill(rarity: String) {
+internal fun RarityPill(rarity: String) {
     val color = rarityColor(rarity)
     Text(
         rarityName(rarity).uppercase(Locale.FRANCE),
@@ -412,7 +489,7 @@ private fun BadgeTile(badge: AchievementBadge, membersPercent: Double?, equipped
     }
 }
 
-private fun rarityColor(value: String): Color = when (value) {
+internal fun rarityColor(value: String): Color = when (value) {
     "Uncommon" -> Color(0xFF46D39A)
     "Rare" -> Color(0xFF4FA3FF)
     "Epic" -> Color(0xFFB57BFF)
@@ -421,9 +498,9 @@ private fun rarityColor(value: String): Color = when (value) {
     else -> Color(0xFF9E9EA8)
 }
 
-private fun tierColor(value: String): Color = runCatching { Color(android.graphics.Color.parseColor(value)) }.getOrDefault(Nflix.Red)
-private fun achievementDate(value: String): String = runCatching { OffsetDateTime.parse(value).format(DateTimeFormatter.ofPattern("d MMMM yyyy", Locale.FRANCE)) }.getOrDefault(value)
-private fun achievementError(error: Exception): String = when (error) {
+internal fun tierColor(value: String): Color = runCatching { Color(android.graphics.Color.parseColor(value)) }.getOrDefault(Nflix.Red)
+internal fun achievementDate(value: String): String = runCatching { OffsetDateTime.parse(value).format(DateTimeFormatter.ofPattern("d MMMM yyyy", Locale.FRANCE)) }.getOrDefault(value)
+internal fun achievementError(error: Exception): String = when (error) {
     is AchievementPluginMissingException -> error.message.orEmpty()
     is NflixHttpException -> when (error.code) {
         401, 403 -> "Votre session ne permet pas d’accéder aux succès. Reconnectez-vous."
@@ -433,7 +510,7 @@ private fun achievementError(error: Exception): String = when (error) {
     }
     else -> "Impossible de charger les succès. Vérifiez votre connexion puis réessayez."
 }
-private fun rarityName(value: String): String = when (value) {
+internal fun rarityName(value: String): String = when (value) {
     "Common" -> "Commun"
     "Uncommon" -> "Peu commun"
     "Rare" -> "Rare"
@@ -442,7 +519,7 @@ private fun rarityName(value: String): String = when (value) {
     "Mythic" -> "Mythique"
     else -> value
 }
-private fun categoryName(value: String): String = when (value) {
+internal fun categoryName(value: String): String = when (value) {
     "Getting Started" -> "Premiers pas"
     "Afternoon Watching" -> "Visionnage l’après-midi"
     "Morning Watching" -> "Visionnage le matin"
@@ -491,7 +568,7 @@ private fun categoryName(value: String): String = when (value) {
     "Special" -> "Spécial"
     else -> value
 }
-private fun achievementIcon(value: String?): ImageVector = when (value) {
+internal fun achievementIcon(value: String?): ImageVector = when (value) {
     "movie", "theaters" -> Icons.Rounded.Movie
     "music_note", "headphones" -> Icons.Rounded.MusicNote
     "menu_book", "auto_stories" -> Icons.Rounded.MenuBook

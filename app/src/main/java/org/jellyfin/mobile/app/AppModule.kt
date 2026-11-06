@@ -105,7 +105,11 @@ val applicationModule = module {
     single { org.jellyfin.mobile.nflix.alerts.AlertsClient(org.jellyfin.mobile.nflix.alerts.AlertsClient.defaultHttp()) }
     single { org.jellyfin.mobile.nflix.alerts.AlertsRepository(get(), get()) }
     single { org.jellyfin.mobile.nflix.alerts.AlertPrefs(androidApplication()) }
-    single { org.jellyfin.mobile.nflix.alerts.LocalAlertSources(emptyList()) }
+    single {
+        org.jellyfin.mobile.nflix.alerts.LocalAlertSources(
+            listOf(org.jellyfin.mobile.nflix.alerts.AchievementAlertSource(get()) { org.jellyfin.mobile.nflix.data.AchievementHub(get()) }),
+        )
+    }
     single { MusicController(androidApplication(), get(), get(), get()) }
     viewModel { NflixNavViewModel() }
     viewModel { DownloadsViewModel() }

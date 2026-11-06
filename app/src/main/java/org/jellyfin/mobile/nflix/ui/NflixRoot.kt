@@ -228,6 +228,7 @@ private fun Screen(route: Route) {
         Route.HorusRequests -> HorusRequestsScreen()
         Route.Releases -> org.jellyfin.mobile.nflix.ui.screens.ReleasesScreen()
         Route.AlertSettings -> org.jellyfin.mobile.nflix.ui.screens.AlertSettingsScreen()
+        is Route.AchievementHub -> org.jellyfin.mobile.nflix.ui.screens.AchievementHubScreen(route.tab)
         Route.Badges -> AchievementsScreen()
         is Route.Distributor -> org.jellyfin.mobile.nflix.ui.screens.DistributorScreen(route.id)
         Route.Admin -> org.jellyfin.mobile.nflix.ui.screens.AdminScreen()
