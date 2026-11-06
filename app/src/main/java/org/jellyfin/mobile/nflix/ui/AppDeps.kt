@@ -50,7 +50,11 @@ class AppDeps(
         scope.launch {
             runCatching {
                 when (item.type) {
-                    "Movie", "Episode", "Video", "MusicVideo", "Trailer" -> playVideos(scope, listOf(item.id), 0, if (fromStart) null else item.userData?.positionTicks)
+                    "Episode" -> {
+                        val (queue, index) = episodeQueue(item)
+                        playVideos(scope, queue, index, if (fromStart) null else item.userData?.positionTicks)
+                    }
+                    "Movie", "Video", "MusicVideo", "Trailer" -> playVideos(scope, listOf(item.id), 0, if (fromStart) null else item.userData?.positionTicks)
                     "Series" -> {
                         val next = jellyfin.items(parentId = item.id, includeTypes = "Episode", extra = mapOf("sortBy" to "ParentIndexNumber,IndexNumber", "sortOrder" to "Ascending", "isPlayed" to false), limit = 1).items.firstOrNull()
                             ?: jellyfin.items(parentId = item.id, includeTypes = "Episode", extra = mapOf("sortBy" to "ParentIndexNumber,IndexNumber", "sortOrder" to "Ascending"), limit = 1).items.firstOrNull()
@@ -77,6 +81,21 @@ class AppDeps(
                 }
             }.onFailure { Timber.e(it, "Unable to play %s", item.id) }
         }
+    }
+
+    /**
+     * The queue and start index for [item]: its whole season from that episode on, so the player
+     * can chain into the next one and offer "Épisode suivant". Falls back to the episode alone.
+     */
+    private suspend fun episodeQueue(item: Item): Pair<List<String>, Int> {
+        val seriesId = item.seriesId
+        val seasonId = item.seasonId
+        if (seriesId != null && seasonId != null) {
+            val episodes = runCatching { jellyfin.episodes(seriesId, seasonId) }.getOrDefault(emptyList())
+            val index = episodes.indexOfFirst { it.id == item.id }
+            if (index >= 0) return episodes.map { it.id } to index
+        }
+        return listOf(item.id) to 0
     }
 
     fun playVideos(scope: CoroutineScope, ids: List<String>, startIndex: Int, resumeTicks: Long?) {

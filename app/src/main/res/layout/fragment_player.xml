@@ -159,6 +159,21 @@
             android:textColor="@color/skip_media_segment_text"
             android:textSize="18sp"
             tools:visibility="visible"/>
+
+        <Button
+            android:id="@+id/next_episode_button"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/nflix_next_episode"
+            android:layout_marginStart="@dimen/exo_player_controls_display_padding"
+            android:layout_marginEnd="@dimen/exo_player_controls_display_padding"
+            android:layout_marginBottom="40dp"
+            android:layout_gravity="end|bottom"
+            android:visibility="gone"
+            android:background="@drawable/skip_media_segment_background"
+            android:textColor="@color/skip_media_segment_text"
+            android:textSize="18sp"
+            tools:visibility="visible"/>
     </FrameLayout>
 
     <FrameLayout

@@ -70,6 +70,7 @@ class PlayerMenus(
     private val trickplayChapterName: AppCompatTextView by playerControlsBinding::trickplayChapterName
     private val trickplayTime: AppCompatTextView by playerControlsBinding::trickplayTime
     private val skipSegmentButton: Button by playerBinding::skipSegmentButton
+    private val nextEpisodeButton: Button by playerBinding::nextEpisodeButton
 
     private var subtitleCount = 0
     private var subtitlesEnabled = false
@@ -83,7 +84,12 @@ class PlayerMenus(
     )
 
     private val playerMenuHelper: PlayerMenuHelper = PlayerMenuHelper(
-        skipMediaSegmentButton = SkipMediaSegmentButton(skipSegmentButton, fragment::onSkipMediaSegment),
+        skipMediaSegmentButton = SkipMediaSegmentButton(
+            skipMediaSegmentButton = skipSegmentButton,
+            nextEpisodeButton = nextEpisodeButton,
+            onNextEpisode = fragment::onNextEpisode,
+            callback = fragment::onSkipMediaSegment,
+        ),
     )
 
     init {

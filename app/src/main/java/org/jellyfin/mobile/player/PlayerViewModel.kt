@@ -437,7 +437,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application),
         val playbackPosition = currentPosition.milliseconds
         val currentMediaSegment = mediaSegments.find { seg -> playbackPosition in seg.start..seg.end }
         if (currentMediaSegment != null) {
-            playerMenuHelper?.skipMediaSegmentButton?.showSkipSegmentButton(currentMediaSegment)
+            playerMenuHelper?.skipMediaSegmentButton?.showSkipSegmentButton(currentMediaSegment, queueManager.hasNext())
         } else {
             playerMenuHelper?.skipMediaSegmentButton?.hideSkipSegmentButton()
         }
@@ -652,6 +652,19 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application),
         }
     }
 
+    /** Marks the current episode as played, then plays the next one in the queue. */
+    fun playNextEpisode() {
+        val mediaSource = mediaSourceOrNull as? RemoteJellyfinMediaSource ?: return
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                runCatching { playStateApi.markPlayedItem(itemId = mediaSource.itemId) }
+                    .onFailure { Timber.w(it, "Unable to mark the episode as played") }
+            }
+            playerMenuHelper?.skipMediaSegmentButton?.hideSkipSegmentButton()
+            queueManager.next()
+        }
+    }
+
     fun skipMediaSegment(mediaSegmentDto: MediaSegmentDto?) {
         val player = playerOrNull ?: return
         val mediaSegment = mediaSegmentDto ?: return
@@ -766,7 +779,10 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application),
                 }
                 Player.STATE_ENDED -> {
                     reportPlaybackStop()
-                    if (!autoPlayNextEpisodeEnabled || !queueManager.next()) {
+                    // Nflix: an episode always chains into the next one, even when the server
+                    // preference is off; the player only closes when the queue is exhausted.
+                    val shouldAdvance = autoPlayNextEpisodeEnabled || queueManager.hasNext()
+                    if (!shouldAdvance || !queueManager.next()) {
                         releasePlayer()
                     }
                 }

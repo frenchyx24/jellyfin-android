@@ -525,6 +525,10 @@ class PlayerFragment : Fragment(), BackPressInterceptor {
         viewModel.skipMediaSegment(mediaSegmentDto)
     }
 
+    fun onNextEpisode() {
+        viewModel.playNextEpisode()
+    }
+
     fun onPopupDismissed() {
         if (!AndroidVersion.isAtLeastR) {
             updateFullscreenState(resources.configuration)
