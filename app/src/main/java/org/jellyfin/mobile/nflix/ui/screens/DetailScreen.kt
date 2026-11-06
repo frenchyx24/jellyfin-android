@@ -65,7 +65,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -157,9 +156,13 @@ fun DetailScreen(id: String, origin: String?) {
                 item(key = "similar") { SimilarRow(merged) }
             }
         }
-        if (!collapsed) BackButton()
-        merged?.let { m ->
-            CollapsedTitleBar(collapsed, m.name, accent) { if (m.type == "Series") FollowBell(m.id, m.name) }
+        val m = merged
+        if (m != null && m.type in setOf("Episode", "Season") && m.seriesId != null) {
+            // Episodes and seasons: a breadcrumb back up to the show, always on screen.
+            TitleBreadcrumb(m, accent, solid = collapsed)
+        } else {
+            if (!collapsed) BackButton()
+            m?.let { CollapsedTitleBar(collapsed, it.name, accent) { if (it.type == "Series") FollowBell(it.id, it.name) } }
         }
     }
 }
@@ -462,7 +465,7 @@ private fun EpisodeList(seriesId: String, seasonId: String, accent: Color = Nfli
     val list = episodes.value
     Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         if (list == null) repeat(3) { Skeleton(Modifier.fillMaxWidth().height(96.dp)) }
-        list.orEmpty().forEachIndexed { i, base -> key(base.id) {
+        list.orEmpty().forEachIndexed { i, base ->
             val episode = userData[base.id]?.let { base.copy(userData = it) } ?: base
             Row(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Nflix.Surface)
@@ -471,8 +474,7 @@ private fun EpisodeList(seriesId: String, seasonId: String, accent: Color = Nfli
             ) {
                 Box(Modifier.width(150.dp).aspectRatio(16f / 9f).clip(RoundedCornerShape(10.dp)).pressable({
                     deps.playVideos(scope, list.orEmpty().map { it.id }, i, episode.userData?.positionTicks)
-                }
-        } })) {
+                })) {
                     NImage(deps.jellyfin.thumb(episode, 400), Modifier.fillMaxSize().sharedPoster("episode/${episode.id}"))
                     Box(Modifier.align(Alignment.Center).size(34.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.5f)), contentAlignment = Alignment.Center) {
                         Icon(Icons.Rounded.PlayArrow, "Lecture", tint = Color.White, modifier = Modifier.size(22.dp))

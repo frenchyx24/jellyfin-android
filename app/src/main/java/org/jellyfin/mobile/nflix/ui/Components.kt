@@ -273,7 +273,7 @@ fun <T> LazyListScope.rowSection(
     item(key = "row-$key", contentType = "row") {
         val state = rememberLazyListState()
         LazyRow(state = state, contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            items(unique, key = itemKey) { content(it) }
+            items(unique, key = itemKey, contentType = { "card-$key" }) { content(it) }
         }
     }
 }

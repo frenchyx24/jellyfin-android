@@ -153,103 +153,80 @@ fun ProfileScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val me = rememberLoad("me") { deps.jellyfin.me() }.value
+    // Shown only to Jellyfin administrators; the server checks the right again on every admin call.
+    val isAdmin = rememberLoad("is-admin") { deps.admin.isAdmin(it) }.value == true
     val miraInstalled = remember { runCatching { context.packageManager.getPackageInfo("fr.miracloud.connect", 0); true }.getOrDefault(false) }
     val plan = remember(deps.session.miraGroups) { MiraPlan.fromGroups(deps.session.miraGroups) }
+    val serverHost = remember { BuildConfig.NFLIX_SERVER_URL.substringAfter("://").substringBefore('/').ifBlank { "Nflix" } }
     var seasonalSheet by remember { mutableStateOf(false) }
     if (seasonalSheet) org.jellyfin.mobile.nflix.ui.SeasonalThemesSheet(onDismiss = { seasonalSheet = false })
+    val entrance = rememberProfileEntrance()
+
+    val spaceEntries = buildList {
+        if (isAdmin) add(ProfileEntry("admin", Icons.Rounded.AdminPanelSettings, "Administration", "Distributeurs, demandes à valider, activité, bibliothèques", ProfileAccents.Admin) { navigator.open(Route.Admin) })
+        add(ProfileEntry("badges", Icons.Rounded.EmojiEvents, "Mes succès", "Badges, rang, progression et vitrine", ProfileAccents.Badges) { navigator.open(Route.Badges) })
+        add(ProfileEntry("downloads", Icons.Rounded.Download, "Téléchargements", "Vos films et épisodes hors ligne", ProfileAccents.Downloads) { deps.openDownloads() })
+        add(ProfileEntry("horus", Icons.Rounded.Inbox, "Mes demandes Horus", "Suivi de vos demandes", ProfileAccents.Horus) { navigator.open(Route.HorusRequests) })
+        add(ProfileEntry("releases", Icons.Rounded.CalendarMonth, "Prochaines sorties", "Calendrier des épisodes et films à venir", ProfileAccents.Releases) { navigator.open(Route.Releases) })
+    }
+    val newsEntries = listOf(
+        ProfileEntry("alerts", Icons.Rounded.NotificationsActive, "Notifications", "Demandes Horus, séries suivies, succès", ProfileAccents.Alerts) { navigator.open(Route.AlertSettings) },
+        ProfileEntry("notices", Icons.Rounded.Campaign, "Annonces", "Les nouvelles de Nflix", ProfileAccents.Notices) { navigator.open(Route.Notices) },
+    )
+    val event = org.jellyfin.mobile.nflix.ui.SeasonalThemes.active
+    val seasonalSubtitle = when {
+        !org.jellyfin.mobile.nflix.ui.SeasonalThemes.enabled && event == null -> "Désactivés"
+        event != null -> "${event.emoji} ${event.label} en ce moment"
+        else -> "Noël, Halloween, 14 Juillet, Nouvel An…"
+    }
+    val lookEntries = listOf(
+        ProfileEntry("seasonal", Icons.Rounded.Celebration, "Thèmes saisonniers", seasonalSubtitle, Nflix.Red) { seasonalSheet = true },
+        ProfileEntry("playback", Icons.Rounded.Settings, "Lecture et lecteur", "Qualité, sous-titres, lecteur vidéo", ProfileAccents.Playback) { deps.openSettings() },
+    )
+    val appEntries = buildList {
+        add(ProfileEntry("updates", Icons.Rounded.SystemUpdate, "Mises à jour", "Version ${BuildConfig.VERSION_NAME}", ProfileAccents.Updates) { scope.launch { deps.updater.check(force = true) } })
+        if (miraInstalled) {
+            add(
+                ProfileEntry("mira", Icons.Rounded.Key, "Mira Connect", "Gérer votre compte Mira", ProfileAccents.Mira) {
+                    context.packageManager.getLaunchIntentForPackage("fr.miracloud.connect")?.let { context.startActivity(it) }
+                },
+            )
+        }
+        add(ProfileEntry("web", Icons.Rounded.Language, "Version web", "Administration et pages des plugins", ProfileAccents.Web) { deps.onOpenWeb() })
+        add(ProfileEntry("tutorial", Icons.Rounded.School, "Didacticiel", "Revoir la présentation de Nflix", ProfileAccents.Tutorial) { org.jellyfin.mobile.nflix.ui.tutorial.Tutorial.open() })
+    }
+
     Box(Modifier.fillMaxSize()) {
         LazyColumn(contentPadding = PaddingValues(bottom = ContentBottomPadding)) {
-            item {
-                Column(Modifier.statusBarsPadding().padding(top = 56.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                    val miraAvatar = org.jellyfin.mobile.nflix.MiraProfile.safeAvatar(deps.session.miraAvatar)
-                    Box(
-                        Modifier.size(104.dp).clip(CircleShape).background(Nflix.SurfaceHigh).border(2.dp, plan.color.copy(alpha = 0.85f), CircleShape),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        // Same order as Authentik's avatar setting: attributes.avatar, then initials.
-                        val displayName = deps.session.miraName?.takeIf { it.isNotBlank() } ?: me?.name ?: deps.session.userName
-                        org.jellyfin.mobile.nflix.ui.AvatarImage(miraAvatar, Modifier.size(104.dp).clip(CircleShape)) {
-                            Text(
-                                org.jellyfin.mobile.nflix.MiraProfile.initials(displayName),
-                                style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold, color = plan.color,
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(12.dp))
-                    Text(deps.session.miraName?.takeIf { it.isNotBlank() } ?: me?.name ?: deps.session.userName ?: "", style = MaterialTheme.typography.headlineSmall)
-                    deps.session.miraEmail?.takeIf { it.isNotBlank() }?.let {
-                        Text(it, style = MaterialTheme.typography.bodySmall, color = Nflix.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                    Spacer(Modifier.height(10.dp))
-                    if (plan != MiraPlan.NONE) {
-                        Surface(color = plan.color.copy(alpha = 0.16f), shape = RoundedCornerShape(50), border = BorderStroke(1.dp, plan.color.copy(alpha = 0.5f))) {
-                            Text(
-                                "Abonnement ${plan.label}",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = plan.color,
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-                            )
-                        }
-                        Spacer(Modifier.height(8.dp))
-                    }
-                    Text(if (deps.session.lastMethod == "mira") "Connecté avec Mira Connect" else "Connecté avec vos identifiants", style = MaterialTheme.typography.bodySmall, color = Nflix.Muted)
-                    Spacer(Modifier.height(20.dp))
-                }
+            item(key = "header") {
+                ProfileHeader(
+                    displayName = deps.session.miraName?.takeIf { it.isNotBlank() } ?: me?.name ?: deps.session.userName,
+                    email = deps.session.miraEmail?.takeIf { it.isNotBlank() },
+                    avatar = org.jellyfin.mobile.nflix.MiraProfile.safeAvatar(deps.session.miraAvatar),
+                    plan = plan,
+                    viaMira = deps.session.lastMethod == "mira",
+                    serverHost = serverHost,
+                    version = BuildConfig.VERSION_NAME,
+                    modifier = Modifier.staggerIn(entrance, 0),
+                )
             }
-            item {
-                // Shown only to Jellyfin administrators; the server checks the right again on every admin call.
-                val isAdmin = rememberLoad("is-admin") { deps.admin.isAdmin(it) }.value == true
-                if (isAdmin) ProfileRow(Icons.Rounded.AdminPanelSettings, "Administration", "Distributeurs, demandes à valider, activité, bibliothèques") { navigator.open(Route.Admin) }
+            item(key = "section-space") { ProfileSection("Mon espace", spaceEntries, Modifier.staggerIn(entrance, 1)) }
+            item(key = "section-news") { ProfileSection("Notifications et actualités", newsEntries, Modifier.staggerIn(entrance, 2)) }
+            item(key = "section-look") { ProfileSection("Apparence et lecture", lookEntries, Modifier.staggerIn(entrance, 3)) }
+            item(key = "section-app") { ProfileSection("Application", appEntries, Modifier.staggerIn(entrance, 4)) }
+            item(key = "sign-out") {
+                ProfileDangerRow(Icons.AutoMirrored.Rounded.Logout, "Se déconnecter", Modifier.padding(top = 8.dp).staggerIn(entrance, 5)) { deps.onSignOut() }
             }
-            item { ProfileRow(Icons.Rounded.EmojiEvents, "Mes succès", "Badges, rang, progression et vitrine") { navigator.open(Route.Badges) } }
-            item { ProfileRow(Icons.Rounded.Download, "Téléchargements", "Vos films et épisodes hors ligne") { deps.openDownloads() } }
-            item { ProfileRow(Icons.Rounded.Inbox, "Mes demandes Horus", "Suivi de vos demandes") { navigator.open(Route.HorusRequests) } }
-            item { ProfileRow(Icons.Rounded.CalendarMonth, "Prochaines sorties", "Calendrier des épisodes et films à venir") { navigator.open(Route.Releases) } }
-            item { ProfileRow(Icons.Rounded.NotificationsActive, "Notifications", "Demandes Horus, séries suivies, succès") { navigator.open(Route.AlertSettings) } }
-            item { ProfileRow(Icons.Rounded.Campaign, "Annonces", "Les nouvelles de Nflix") { navigator.open(Route.Notices) } }
-            item {
-                val event = org.jellyfin.mobile.nflix.ui.SeasonalThemes.active
-                ProfileRow(
-                    androidx.compose.material.icons.Icons.Rounded.Celebration,
-                    "Thèmes saisonniers",
-                    when {
-                        !org.jellyfin.mobile.nflix.ui.SeasonalThemes.enabled && event == null -> "Désactivés"
-                        event != null -> "${event.emoji} ${event.label} en ce moment"
-                        else -> "Noël, Halloween, 14 Juillet, Nouvel An…"
-                    },
-                ) { seasonalSheet = true }
+            item(key = "footer") {
+                Text(
+                    "Nflix ${BuildConfig.VERSION_NAME}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Nflix.Muted.copy(alpha = 0.6f),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 12.dp).staggerIn(entrance, 6),
+                )
             }
-            item { ProfileRow(Icons.Rounded.Settings, "Lecture et lecteur", "Qualité, sous-titres, lecteur vidéo") { deps.openSettings() } }
-            item {
-                ProfileRow(Icons.Rounded.SystemUpdate, "Mises à jour", "Version ${BuildConfig.VERSION_NAME}") {
-                    scope.launch { deps.updater.check(force = true) }
-                }
-            }
-            if (miraInstalled) {
-                item {
-                    ProfileRow(Icons.Rounded.Key, "Mira Connect", "Gérer votre compte Mira") {
-                        context.packageManager.getLaunchIntentForPackage("fr.miracloud.connect")?.let { context.startActivity(it) }
-                    }
-                }
-            }
-            item { ProfileRow(Icons.Rounded.Language, "Version web", "Administration et pages des plugins") { deps.onOpenWeb() } }
-            item { ProfileRow(Icons.Rounded.School, "Didacticiel", "Revoir la présentation de Nflix") { org.jellyfin.mobile.nflix.ui.tutorial.Tutorial.open() } }
-            item { ProfileRow(Icons.AutoMirrored.Rounded.Logout, "Se déconnecter", null, destructive = true) { deps.onSignOut() } }
         }
         BackButton()
-    }
-}
-
-@Composable
-private fun ProfileRow(icon: ImageVector, title: String, subtitle: String?, destructive: Boolean = false, onClick: () -> Unit) {
-    Row(
-        Modifier.padding(horizontal = 16.dp, vertical = 4.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Nflix.Surface).clickable(onClick = onClick).padding(16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(icon, null, tint = if (destructive) Nflix.Red else Nflix.Text)
-        Column(Modifier.weight(1f).padding(start = 14.dp)) {
-            Text(title, style = MaterialTheme.typography.titleSmall, color = if (destructive) Nflix.Red else Nflix.Text)
-            if (subtitle != null) Text(subtitle, style = MaterialTheme.typography.bodySmall, color = Nflix.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
     }
 }

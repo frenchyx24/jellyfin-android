@@ -34,6 +34,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -65,10 +66,13 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -89,6 +93,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.jellyfin.mobile.nflix.data.HorusMedia
+import org.jellyfin.mobile.nflix.data.HorusRequest
 import org.jellyfin.mobile.nflix.data.HorusStatus
 import org.jellyfin.mobile.nflix.data.HorusType
 import org.jellyfin.mobile.nflix.ui.ContentBottomPadding
@@ -103,11 +108,12 @@ import org.jellyfin.mobile.nflix.ui.Nflix
 import org.jellyfin.mobile.nflix.ui.Route
 import org.jellyfin.mobile.nflix.ui.Skeleton
 import org.jellyfin.mobile.nflix.ui.SkeletonRow
+import org.jellyfin.mobile.nflix.ui.ToastKind
+import org.jellyfin.mobile.nflix.ui.Toasts
 import org.jellyfin.mobile.nflix.ui.appear
 import org.jellyfin.mobile.nflix.ui.bottomScrim
 import org.jellyfin.mobile.nflix.ui.rememberLoad
 import org.jellyfin.mobile.nflix.ui.rememberReloader
-import org.jellyfin.mobile.nflix.ui.rowSection
 import org.jellyfin.mobile.nflix.ui.sharedPoster
 import org.jellyfin.mobile.nflix.ui.value
 
@@ -147,25 +153,162 @@ fun HorusScreen() {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun HorusDiscover(tab: HorusTab) {
     val deps = LocalDeps.current
     val navigator = LocalNavigator.current
-    val types = tab.type?.let { listOf(it) } ?: listOf(HorusType.Movie, HorusType.Tv, HorusType.Music, HorusType.Book)
-    val data = rememberLoad("horus-discover", tab) {
-        types.map { type -> Triple(type, runCatching { deps.horus.trending(type).results }.getOrDefault(emptyList()), runCatching { deps.horus.upcoming(type).results }.getOrDefault(emptyList())) }
+    val scope = rememberCoroutineScope()
+    val listState = rememberLazyListState()
+    val pageReloader = rememberReloader()
+    val requestsReloader = rememberReloader()
+    var refreshing by remember { mutableStateOf(false) }
+    val cacheKey = tab.name
+    // Cached content first (no skeleton flash when coming back), refreshed in place.
+    val data = rememberLoad("horus-discover", tab, reloader = pageReloader, initial = HorusHomeCache[cacheKey]) { _ ->
+        loadHorusHome(deps.horus, tab.type).also { HorusHomeCache[cacheKey] = it }
     }
-    when (data) {
-        is Load.Failed -> EmptyState(Icons.Rounded.TravelExplore, "Horus est injoignable", data.message)
-        Load.Loading -> Column { repeat(3) { SkeletonRow() } }
-        is Load.Ready -> LazyColumn(contentPadding = PaddingValues(bottom = ContentBottomPadding)) {
-            data.value.forEach { (type, trending, upcoming) ->
-                val name = when (type) { HorusType.Movie -> "films"; HorusType.Tv -> "séries"; HorusType.Music -> "albums"; else -> "livres" }
-                rowSection("tr-${type.api}", "Tendances · $name", trending, { "t-${it.id}" }) { media ->
-                    HorusCard(media, { navigator.open(Route.HorusDetail(media.type, media.id)) }, width = if (type == HorusType.Music) 140.dp else 120.dp)
+    val requestsLoad = rememberLoad("horus-my-requests", reloader = requestsReloader, initial = HorusHomeCache.requests) { force ->
+        deps.horus.myRequests(force).also { HorusHomeCache.requests = it }
+    }
+    LaunchedEffect(data, requestsLoad, refreshing) {
+        if (refreshing && data !is Load.Loading && requestsLoad !is Load.Loading) refreshing = false
+    }
+    val allRequests = requestsLoad.value.orEmpty()
+    // Quick requests made here stay marked until Horus' own list confirms (or drops) them.
+    LaunchedEffect(requestsLoad) {
+        if (requestsLoad !is Load.Ready) return@LaunchedEffect
+        // Kept only while the request is known and not yet available (then the real status wins).
+        val pending = allRequests.filter { it.media.status != HorusStatus.Available }.map { "${it.type.api}-${it.media.id}" }.toSet()
+        HorusHomeCache.overrides.keys.filter { it !in pending }.forEach { HorusHomeCache.overrides.remove(it) }
+    }
+    val requests = remember(allRequests, tab) { allRequests.filter { tab.type == null || it.type == tab.type }.distinctBy { it.id } }
+    val busy = remember { mutableStateMapOf<String, Boolean>() }
+
+    fun openDetail(media: HorusMedia) = navigator.open(Route.HorusDetail(media.type, media.id))
+
+    fun watch(media: HorusMedia) {
+        val id = media.jellyfinId ?: return openDetail(media)
+        navigator.open(if (media.type == HorusType.Music) Route.Album(id) else Route.Item(id))
+    }
+
+    fun quickRequest(media: HorusMedia) {
+        // Books ask "ebook or audiobook": that choice lives on the detail page.
+        if (media.type == HorusType.Book) return openDetail(media)
+        val key = media.horusKey
+        if (busy[key] == true) return
+        busy[key] = true
+        scope.launch {
+            val result = runCatching { deps.horus.request(media) }
+            busy.remove(key)
+            result.onSuccess {
+                HorusHomeCache.overrides[key] = HorusStatus.Pending
+                requestsReloader.reload()
+                Toasts.show("Demande envoyée : ${media.title}", ToastKind.Success)
+            }.onFailure {
+                Toasts.show(it.message ?: "Demande impossible.", ToastKind.Warning)
+            }
+        }
+    }
+
+    fun openRequest(request: HorusRequest) {
+        val jellyfinId = request.media.jellyfinId
+        if (jellyfinId != null && request.media.status == HorusStatus.Available) {
+            navigator.open(if (request.type == HorusType.Music) Route.Album(jellyfinId) else Route.Item(jellyfinId))
+        } else {
+            navigator.open(Route.HorusRequests)
+        }
+    }
+
+    val home = data.value
+    PullToRefreshBox(
+        isRefreshing = refreshing,
+        onRefresh = { refreshing = true; pageReloader.reload(); requestsReloader.reload() },
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        LazyColumn(state = listState, contentPadding = PaddingValues(bottom = ContentBottomPadding), modifier = Modifier.fillMaxSize()) {
+            when {
+                home != null -> {
+                    if (home.hero.isNotEmpty()) {
+                        item(key = "hero", contentType = "hero") {
+                            HorusHero(
+                                items = home.hero,
+                                busy = busy.keys.toSet(),
+                                onOpen = { openDetail(it) },
+                                onWatch = { watch(it) },
+                                onRequest = { quickRequest(it) },
+                            )
+                        }
+                    }
+                    if (requests.isNotEmpty()) {
+                        val active = requests.filter { it.isInProgress() }
+                        val available = requests.filter { it.media.status == HorusStatus.Available }
+                        val shown = active.ifEmpty { requests }.take(20)
+                        item(key = "requests-header", contentType = "header") {
+                            Column(Modifier.horusAppear("$cacheKey/requests-header")) {
+                                HorusSectionHeader(if (active.isNotEmpty()) "Mes demandes en cours" else "Mes demandes", onAction = { navigator.open(Route.HorusRequests) })
+                                HorusRequestSummary(requests)
+                                Spacer(Modifier.height(10.dp))
+                            }
+                        }
+                        item(key = "requests-row", contentType = "requests") {
+                            LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                itemsIndexed(shown, key = { _, r -> "req-${r.id}" }) { index, request ->
+                                    Box(if (index < 6) Modifier.horusAppear("$cacheKey/req/${request.id}", index * 60) else Modifier) {
+                                        HorusRequestTile(request, { openRequest(request) })
+                                    }
+                                }
+                                item(key = "req-all") { HorusSeeAllTile(requests.size, { navigator.open(Route.HorusRequests) }) }
+                            }
+                        }
+                        if (active.isNotEmpty() && available.isNotEmpty()) {
+                            item(key = "available-header", contentType = "header") {
+                                HorusSectionHeader("Récemment disponibles", action = "Mes demandes", onAction = { navigator.open(Route.HorusRequests) })
+                            }
+                            item(key = "available-row", contentType = "requests") {
+                                LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    items(available.take(12), key = { "avail-${it.id}" }) { request ->
+                                        HorusRequestTile(request, { openRequest(request) })
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    home.rows.forEach { row ->
+                        item(key = "header-${row.key}", contentType = "header") {
+                            Box(Modifier.horusAppear("$cacheKey/header/${row.key}")) { HorusSectionHeader(row.title) }
+                        }
+                        item(key = "row-${row.key}", contentType = "row-${row.style.name}") {
+                            LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                itemsIndexed(row.items, key = { _, m -> m.horusKey }) { index, raw ->
+                                    val media = raw.withOverride()
+                                    val shared = "${row.key}/${raw.horusKey}" in home.shared
+                                    Box(if (index < 6) Modifier.horusAppear("$cacheKey/${row.key}/${raw.horusKey}", index * 60) else Modifier) {
+                                        when (row.style) {
+                                            HorusRowStyle.Wide -> HorusUpcomingCard(media, { openDetail(media) })
+                                            HorusRowStyle.Square -> HorusPosterCard(media, shared, { openDetail(media) }, width = 140.dp)
+                                            HorusRowStyle.Poster -> HorusPosterCard(media, shared, { openDetail(media) })
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (home.rows.isEmpty() && home.hero.isEmpty()) {
+                        item(key = "empty") { EmptyState(Icons.Rounded.TravelExplore, "Rien à découvrir pour l'instant", "Utilisez la recherche pour trouver un titre.") }
+                    }
                 }
-                rowSection("up-${type.api}", if (type == HorusType.Music) "Nouvelles sorties" else if (type == HorusType.Book) "Populaires" else "Prochainement · $name", upcoming, { "u-${it.id}" }) { media ->
-                    HorusCard(media, { navigator.open(Route.HorusDetail(media.type, media.id)) }, width = if (type == HorusType.Music) 140.dp else 120.dp)
+                data is Load.Failed -> item(key = "error") {
+                    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                        EmptyState(Icons.Rounded.TravelExplore, "Horus est injoignable", data.message)
+                        FilledTonalButton(onClick = { pageReloader.reload(); requestsReloader.reload() }) { Text("Réessayer") }
+                    }
+                }
+                else -> {
+                    item(key = "hero-skeleton", contentType = "hero") { HorusHeroSkeleton() }
+                    items(3, key = { "skeleton-$it" }) { index ->
+                        SkeletonRow(if (index == 1) 2 else 4, if (index == 1) 264.dp else 124.dp, if (index == 1) 16f / 9f else 2f / 3f)
+                    }
                 }
             }
         }

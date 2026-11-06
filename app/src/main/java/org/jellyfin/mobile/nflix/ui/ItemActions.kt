@@ -44,7 +44,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -106,10 +105,7 @@ fun ItemMenuHost() {
     var confirmDelete by remember { mutableStateOf<Item?>(null) }
 
     ItemMenu.message?.let { text ->
-        LaunchedEffect(text) { delay(2500); ItemMenu.message = null }
-        Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 150.dp, start = 16.dp, end = 16.dp), contentAlignment = Alignment.BottomCenter) {
-            Snackbar(containerColor = Nflix.SurfaceHigh, contentColor = Nflix.Text) { Text(text) }
-        }
+        LaunchedEffect(text) { Toasts.show(text, ToastKind.Success); ItemMenu.message = null }
     }
 
     val target = ItemMenu.target ?: run {

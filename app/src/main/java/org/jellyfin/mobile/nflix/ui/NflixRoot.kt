@@ -202,6 +202,7 @@ fun NflixRoot(deps: AppDeps, navigator: Navigator, backEnabled: Boolean = true) 
             // Announcement popups wait until the tutorial is closed.
             if (!Tutorial.covering) NoticePopup()
             ItemMenuHost()
+            ToastHost()
             if (castRemoteOpen.value) CastRemoteSheet(deps.cast) { castRemoteOpen.value = false }
             TrailerHost()
             TutorialHost(backEnabled = backEnabled)
@@ -341,23 +342,23 @@ private fun NoticePopup() {
     val navigator = LocalNavigator.current
     val notices by deps.plugins.notices.collectAsState()
     val dismissed by deps.plugins.dismissed.collectAsState()
-    val popup = notices.firstOrNull { it.showPopup && it.id !in dismissed } ?: return
-    AlertDialog(
-        onDismissRequest = { if (popup.dismissible) deps.plugins.dismiss(popup) },
-        icon = { Icon(Icons.Rounded.Campaign, null, tint = Nflix.Red) },
-        title = { Text(popup.title) },
-        text = { Text(popup.message, style = MaterialTheme.typography.bodyMedium, maxLines = 14, overflow = TextOverflow.Ellipsis) },
-        confirmButton = {
-            TextButton(onClick = {
+    val shownThisSession = remember { mutableSetOf<String>() }
+    val popup = notices.firstOrNull { it.showPopup && it.id !in dismissed && it.id !in shownThisSession } ?: return
+    // A small toast instead of a blocking dialog: it hides by itself and stays readable in Annonces.
+    LaunchedEffect(popup.id) {
+        shownThisSession += popup.id
+        Toasts.show(ToastMessage(
+            text = popup.message.replace('\n', ' '),
+            title = popup.title,
+            actionLabel = if (popup.actionUrl.isNotBlank()) popup.actionLabel.ifBlank { "Ouvrir" } else "Voir",
+            durationMs = 7000,
+            onAction = {
                 deps.plugins.dismiss(popup)
-                if (popup.actionUrl.isNotBlank()) deps.openUrl(popup.actionUrl)
-            }) { Text(popup.actionLabel.ifBlank { "J'ai compris" }) }
-        },
-        dismissButton = {
-            TextButton(onClick = { deps.plugins.dismiss(popup); navigator.open(Route.Notices) }) { Text("Toutes les annonces") }
-        },
-        containerColor = Nflix.SurfaceHigh,
-    )
+                if (popup.actionUrl.isNotBlank()) deps.openUrl(popup.actionUrl) else navigator.open(Route.Notices)
+            },
+            onDismiss = { if (popup.dismissible) deps.plugins.dismiss(popup) },
+        ))
+    }
 }
 
 @Suppress("unused")

@@ -77,6 +77,31 @@ class Navigator {
         stack.add(tab)
     }
 
+    /**
+     * Goes up to a parent page (breadcrumb), with the "back" animation. Back to it when it is in the
+     * history; otherwise the pages below it ([descendants], e.g. the season and episode) leave the
+     * history first, so Back from the parent never returns down to them.
+     */
+    fun up(route: Route, descendants: Set<String> = emptySet()) {
+        if (route.key == current.key) return
+        forward = false
+        val index = stack.indexOfLast { it.key == route.key }
+        if (index >= 0) {
+            while (stack.lastIndex > index) stack.removeAt(stack.lastIndex)
+            return
+        }
+        val drop = descendants + current.key
+        while (stack.size > 1 && stack.last().key in drop) stack.removeAt(stack.lastIndex)
+        stack.add(route)
+    }
+
+    /** Sideways move (another season or episode of the same show): no history entry piles up. */
+    fun replace(route: Route) {
+        if (route.key == current.key) return
+        forward = true
+        if (stack.size > 1 && !current.isTab) stack[stack.lastIndex] = route else stack.add(route)
+    }
+
     fun back(): Boolean {
         if (stack.size <= 1) {
             if (current != Route.Home) {

@@ -27,8 +27,10 @@ object VideoCatalog {
     private val animeGenres = setOf("anime", "animes", "japanimation", "manga")
     private val japanWords = setOf("japan", "japon", "jp")
 
+    private val marks = Regex("\\p{M}+")
+
     fun normalize(value: String): String =
-        Normalizer.normalize(value, Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "").lowercase(Locale.ROOT).trim()
+        Normalizer.normalize(value, Normalizer.Form.NFD).replace(marks, "").lowercase(Locale.ROOT).trim()
 
     /** "Animé", "Anime", "Japanimation"… but never "Animation". */
     fun isAnimeLabel(value: String): Boolean = normalize(value) in animeGenres

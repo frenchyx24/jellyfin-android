@@ -1,12 +1,12 @@
 package org.jellyfin.mobile.nflix.ui.screens
 
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -65,6 +64,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -83,7 +83,6 @@ import org.jellyfin.mobile.nflix.ui.ContentBottomPadding
 import org.jellyfin.mobile.nflix.ui.LocalDeps
 import org.jellyfin.mobile.nflix.ui.Nflix
 import org.jellyfin.mobile.nflix.ui.Skeleton
-import org.jellyfin.mobile.nflix.ui.appear
 import org.jellyfin.mobile.nflix.ui.rememberLoad
 import org.jellyfin.mobile.nflix.ui.rememberReloader
 import org.jellyfin.mobile.nflix.ui.Load
@@ -207,10 +206,10 @@ private fun QuestsTab(hub: AchievementHub) {
         if (board != null) {
             item("daily") { QuestHeader("Quêtes du jour", board.dailyRerolls, busy) { run { hub.reroll(weekly = false) } } }
             if (board.daily.isEmpty()) item("d-empty") { EmptyLine("Aucune quête aujourd'hui.") }
-            itemsIndexed(board.daily, key = { _, q -> "d-${q.id}" }) { i, q -> QuestCard(q, Modifier.appear(i * 50)) }
+            itemsIndexed(board.daily, key = { _, q -> "d-${q.id}" }) { i, q -> QuestCard(q, Modifier.achievementAppear(i)) }
             item("weekly") { QuestHeader("Quêtes de la semaine", board.weeklyRerolls, busy) { run { hub.reroll(weekly = true) } } }
             if (board.weekly.isEmpty()) item("w-empty") { EmptyLine("Aucune quête cette semaine.") }
-            itemsIndexed(board.weekly, key = { _, q -> "w-${q.id}" }) { i, q -> QuestCard(q, Modifier.appear(i * 50)) }
+            itemsIndexed(board.weekly, key = { _, q -> "w-${q.id}" }) { i, q -> QuestCard(q, Modifier.achievementAppear(i)) }
             item("note") { EmptyLine("Chaque quête terminée crédite votre banque de score, à dépenser dans la boutique.") }
         }
         loadingState(load) { reloader.reload() }
@@ -231,21 +230,24 @@ private fun QuestHeader(title: String, rerolls: Int, busy: Boolean, onReroll: ()
 
 @Composable
 private fun QuestCard(quest: Quest, modifier: Modifier = Modifier) {
-    val progress by animateFloatAsState(quest.progress, tween(800), label = "quest")
+    val reduced = rememberAchievementReducedMotion()
     Row(
         modifier.padding(horizontal = 16.dp, vertical = 5.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Nflix.Surface).padding(14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(46.dp).clip(CircleShape).background(if (quest.completed) Nflix.Success.copy(alpha = 0.2f) else Nflix.Red.copy(alpha = 0.16f)), contentAlignment = Alignment.Center) {
+        Box(
+            Modifier.size(46.dp).then(if (quest.completed) Modifier.rarityGlow(Nflix.Success, 2, animated = false) else Modifier).clip(CircleShape)
+                .background(if (quest.completed) Nflix.Success.copy(alpha = 0.2f) else Nflix.Red.copy(alpha = 0.16f))
+                .achievementShine(enabled = quest.completed && !reduced, seed = quest.id.hashCode()),
+            contentAlignment = Alignment.Center,
+        ) {
             Icon(if (quest.completed) Icons.Rounded.CheckCircle else achievementIcon(quest.icon), null, tint = if (quest.completed) Nflix.Success else Nflix.Red)
         }
         Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
             Text(quest.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
             if (quest.description.isNotBlank()) Text(quest.description, style = MaterialTheme.typography.bodySmall, color = Nflix.Muted, maxLines = 2)
             Spacer(Modifier.height(8.dp))
-            Box(Modifier.fillMaxWidth().height(6.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.1f))) {
-                Box(Modifier.fillMaxHeight().fillMaxWidth(progress).clip(CircleShape).background(if (quest.completed) Nflix.Success else Nflix.Red))
-            }
+            AchievementProgressBar(quest.progress, if (quest.completed) Nflix.Success else Nflix.Red)
             Text("${quest.current} / ${quest.target}", style = MaterialTheme.typography.labelSmall, color = Nflix.Muted, modifier = Modifier.padding(top = 4.dp))
         }
         Text("+${quest.reward}", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black, color = Nflix.Warning)
@@ -268,9 +270,9 @@ private fun LeaderboardTab(hub: AchievementHub, config: AchievementPublicConfig)
         stats?.let { s ->
             item("stats") {
                 Row(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    StatTile("Membres", s.users.toString(), Modifier.weight(1f))
-                    StatTile("Succès", s.unlocked.toString(), Modifier.weight(1f), "débloqués au total")
-                    StatTile("Titres vus", s.itemsWatched.toString(), Modifier.weight(1f))
+                    AchievementStatTile("Membres", s.users, Modifier.weight(1f))
+                    AchievementStatTile("Succès", s.unlocked, Modifier.weight(1f), "débloqués au total")
+                    AchievementStatTile("Titres vus", s.itemsWatched, Modifier.weight(1f))
                 }
             }
         }
@@ -283,7 +285,7 @@ private fun LeaderboardTab(hub: AchievementHub, config: AchievementPublicConfig)
         load.value?.let { rows ->
             if (rows.isEmpty()) item("empty") { EmptyLine("Personne au classement pour l'instant.") }
             itemsIndexed(rows, key = { i, r -> "lb-$i-${r.userId}" }) { i, row ->
-                LeaderRow(i + 1, row, row.userId.replace("-", "").equals(me, true), prestige, Modifier.appear(i * 30)) {
+                LeaderRow(i + 1, row, row.userId.replace("-", "").equals(me, true), prestige, Modifier.achievementAppear(i)) {
                     if (config.compare && !row.userId.replace("-", "").equals(me, true)) compareWith = row.userId
                 }
             }
@@ -309,7 +311,19 @@ private fun LeaderRow(position: Int, row: LeaderboardRow, mine: Boolean, prestig
             .background(if (mine) Nflix.Red.copy(alpha = 0.18f) else Nflix.Surface).clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("#$position", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = medal, modifier = Modifier.width(44.dp))
+        if (position <= 3) {
+            Box(Modifier.width(44.dp)) {
+                Box(
+                    Modifier.size(34.dp).rarityGlow(medal, 3, animated = false).clip(CircleShape)
+                        .background(Brush.radialGradient(listOf(medal.copy(alpha = 0.55f), medal.copy(alpha = 0.15f))))
+                        .border(1.5.dp, medal, CircleShape)
+                        .achievementShine(enabled = !rememberAchievementReducedMotion(), seed = position * 1400),
+                    contentAlignment = Alignment.Center,
+                ) { Text("$position", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black, color = Color.White) }
+            }
+        } else {
+            Text("#$position", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = medal, modifier = Modifier.width(44.dp))
+        }
         Column(Modifier.weight(1f)) {
             Text(row.name + if (mine) " (vous)" else "", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
@@ -384,10 +398,14 @@ private fun ActivityTab(hub: AchievementHub) {
             if (data.entries.isEmpty()) item("empty") { EmptyLine("Aucune activité récente.") }
             itemsIndexed(data.entries, key = { i, e -> "a-$page-$i" }) { i, entry ->
                 Row(
-                    Modifier.padding(horizontal = 16.dp, vertical = 4.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Nflix.Surface).padding(12.dp).appear(i * 25),
+                    Modifier.achievementAppear(i).padding(horizontal = 16.dp, vertical = 4.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Nflix.Surface).padding(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Box(Modifier.size(40.dp).clip(CircleShape).background(rarityColor(entry.rarity ?: "Common").copy(alpha = 0.2f)), contentAlignment = Alignment.Center) {
+                    Box(
+                        Modifier.size(40.dp).rarityGlow(rarityColor(entry.rarity ?: "Common"), rarityRank(entry.rarity ?: "Common"), animated = false)
+                            .clip(CircleShape).background(rarityColor(entry.rarity ?: "Common").copy(alpha = 0.2f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
                         Icon(achievementIcon(entry.icon), null, tint = rarityColor(entry.rarity ?: "Common"))
                     }
                     Column(Modifier.weight(1f).padding(start = 12.dp)) {
@@ -422,9 +440,9 @@ private fun ShopTab(hub: AchievementHub, config: AchievementPublicConfig) {
     LazyColumn(contentPadding = PaddingValues(bottom = ContentBottomPadding)) {
         item("bank") {
             Row(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                StatTile("Banque", "${bank?.scoreBank ?: cosmetics?.scoreBank ?: 0} pts", Modifier.weight(1f), "à dépenser")
-                StatTile("Score à vie", "${bank?.lifetimeScore ?: cosmetics?.lifetimeScore ?: 0}", Modifier.weight(1f))
-                StatTile("Prestige", "${bank?.prestigeLevel ?: 0}", Modifier.weight(1f))
+                AchievementStatTile("Banque", bank?.scoreBank ?: cosmetics?.scoreBank ?: 0, Modifier.weight(1f), "à dépenser") { "$it pts" }
+                AchievementStatTile("Score à vie", bank?.lifetimeScore ?: cosmetics?.lifetimeScore ?: 0, Modifier.weight(1f))
+                AchievementStatTile("Prestige", bank?.prestigeLevel ?: 0, Modifier.weight(1f))
             }
         }
         item("msg") { Banner(message) }
@@ -433,7 +451,10 @@ private fun ShopTab(hub: AchievementHub, config: AchievementPublicConfig) {
                 Text("Vos bonus", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 20.dp, top = 8.dp, bottom = 6.dp))
                 LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     items(inventory, key = { "inv-${it.type}" }) { p ->
-                        Column(Modifier.width(170.dp).clip(RoundedCornerShape(16.dp)).background(Nflix.Surface).padding(12.dp)) {
+                        Column(
+                            Modifier.width(170.dp).clip(RoundedCornerShape(16.dp)).background(Nflix.Surface)
+                                .achievementShine(enabled = p.active && !rememberAchievementReducedMotion(), seed = p.type.hashCode(), periodMs = 5200).padding(12.dp),
+                        ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Rounded.Bolt, null, tint = if (p.active) Nflix.Success else Nflix.Warning)
                                 Spacer(Modifier.width(6.dp))
@@ -457,7 +478,7 @@ private fun ShopTab(hub: AchievementHub, config: AchievementPublicConfig) {
             itemsIndexed(list, key = { _, it -> "shop-${it.id}" }) { i, item ->
                 val owned = cosmetics?.owned?.contains(item.id) == true
                 val equipped = cosmetics?.equipped?.get(item.kind) == item.id
-                ShopRow(item, owned, equipped, busy, Modifier.appear(i * 30),
+                ShopRow(item, owned, equipped, busy, Modifier.achievementAppear(i),
                     onBuy = { confirm = item },
                     onEquip = { run { if (equipped) hub.unequip(item.kind) else hub.equip(item.id) } })
             }

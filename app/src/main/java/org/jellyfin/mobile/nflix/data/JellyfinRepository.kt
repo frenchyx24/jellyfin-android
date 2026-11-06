@@ -169,6 +169,17 @@ class JellyfinRepository(private val api: NflixApi) {
         requests.flatMap { it.getOrDefault(emptyList()) }.distinctBy { it.id }
     }
 
+    /**
+     * Every film, series and collection with just what search needs: one request, cached, so search
+     * answers while typing, offline from typos, word fragments and acronyms.
+     */
+    suspend fun searchCatalog(force: Boolean = false): List<Item> = page(
+        "Items",
+        baseQuery(listOf("Genres", "ProductionYear", "OriginalTitle", "Tags", "ProductionLocations", "Studios", "CommunityRating", "PrimaryImageAspectRatio")) +
+            mapOf("userId" to api.userId, "recursive" to true, "includeItemTypes" to "Movie,Series,BoxSet", "sortBy" to "SortName", "limit" to 10_000),
+        force,
+    ).items
+
     suspend fun genres(parentId: String?, includeTypes: String?): List<String> = runCatching {
         api.get("Genres", ItemsPage.serializer(), mapOf("userId" to api.userId, "parentId" to parentId, "includeItemTypes" to includeTypes, "sortBy" to "SortName", "recursive" to true)).items.map { it.name }
     }.getOrDefault(emptyList())

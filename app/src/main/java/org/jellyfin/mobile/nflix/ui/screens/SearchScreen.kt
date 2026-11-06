@@ -1,6 +1,26 @@
 package org.jellyfin.mobile.nflix.ui.screens
 
 import android.content.Context
+import android.content.Intent
+import android.speech.RecognizerIntent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.runtime.produceState
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.jellyfin.mobile.nflix.data.SearchEngine
+import org.jellyfin.mobile.nflix.data.SearchIndex
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import org.jellyfin.mobile.nflix.data.SearchQuery
+import org.jellyfin.mobile.nflix.ui.rememberLoad
+import org.jellyfin.mobile.nflix.ui.value
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -76,6 +96,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
@@ -181,6 +202,35 @@ private fun bestMatch(items: List<Item>, query: String): Item? {
         ?: videos.firstOrNull { VideoCatalog.normalize(it.name).startsWith(q) }
 }
 
+/** "Aller directement à" target resolved from "supracell s1e3". */
+private data class Jump(val target: Item, val series: Item, val query: SearchQuery)
+
+private enum class SearchSort(val label: String) { Relevance("Pertinence"), Rating("Mieux notés"), Recent("Plus récents"), Name("A → Z") }
+
+/**
+ * Season and episode named in the query, resolved on the server. An episode number is first looked up
+ * as is in every season (S2 may already be numbered 62…), then as absolute numbering across seasons.
+ */
+private suspend fun resolveJump(deps: org.jellyfin.mobile.nflix.ui.AppDeps, series: Item, query: SearchQuery): Jump? = coroutineScope {
+    val seasons = deps.jellyfin.seasons(series.id).filter { (it.indexNumber ?: 0) > 0 }.sortedBy { it.indexNumber }
+    val episode = query.episode
+    val season = query.season
+    if (season != null) {
+        val match = seasons.firstOrNull { it.indexNumber == season } ?: return@coroutineScope null
+        if (episode == null) return@coroutineScope Jump(match, series, query)
+        return@coroutineScope deps.jellyfin.episodes(series.id, match.id).firstOrNull { it.indexNumber == episode }?.let { Jump(it, series, query) }
+    }
+    if (episode == null) return@coroutineScope null
+    val perSeason = seasons.take(40).map { candidate -> async { runCatching { deps.jellyfin.episodes(series.id, candidate.id) }.getOrDefault(emptyList()) } }.awaitAll()
+    perSeason.firstNotNullOfOrNull { list -> list.firstOrNull { it.indexNumber == episode } }?.let { return@coroutineScope Jump(it, series, query) }
+    var offset = 0
+    for (episodes in perSeason) {
+        episodes.firstOrNull { (it.indexNumber ?: 0) + offset == episode }?.let { return@coroutineScope Jump(it, series, query) }
+        offset += episodes.size
+    }
+    null
+}
+
 @OptIn(FlowPreview::class)
 @Composable
 fun SearchScreen() {
@@ -192,32 +242,47 @@ fun SearchScreen() {
     var state by remember { mutableStateOf<SearchState>(SearchState.Idle) }
     var horus by remember { mutableStateOf<List<HorusMedia>>(emptyList()) }
     var recent by remember { mutableStateOf(SearchHistory.load(context)) }
+    var local by remember { mutableStateOf<List<Item>>(emptyList()) }
     val focus = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
     LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+    val parsed = remember(query) { SearchQuery.parse(query) }
 
-    // Local library: debounced, the previous request is cancelled as soon as the user types again.
+    // The whole video catalog, once: titles answer while typing, before the server does.
+    val index by produceState(SearchIndex.Empty) {
+        val items = withTimeoutOrNull(20_000) { runCatching { deps.jellyfin.searchCatalog() }.getOrNull() }.orEmpty()
+        value = withContext(Dispatchers.Default) { SearchIndex(items) }
+    }
+    val catalog = index.items
+    LaunchedEffect(index) {
+        snapshotFlow { query }.debounce(60).distinctUntilChanged().collectLatest { q ->
+            val p = SearchQuery.parse(q)
+            local = if (p.text.length < 2) emptyList() else withContext(Dispatchers.Default) { SearchEngine.local(p, index) }
+        }
+    }
+
+    // Server search (episodes, music, books, people): debounced, the previous request is cancelled on each keystroke.
     LaunchedEffect(Unit) {
-        snapshotFlow { query.trim() }.debounce(220).distinctUntilChanged().collectLatest { q ->
+        snapshotFlow { SearchQuery.parse(query).text }.debounce(220).distinctUntilChanged().collectLatest { q ->
             if (q.length < 2) {
                 state = SearchState.Idle
                 return@collectLatest
             }
             if (state !is SearchState.Done) state = SearchState.Loading
             state = runCatching {
-                var ranked = SearchRanking.rank(q, deps.jellyfin.search(q, 40))
+                var found = deps.jellyfin.search(q, 40)
                 // Typos: the server finds nothing for "harry poter"; retry with the start of the longest word.
                 val fallback = SearchRanking.fallbackTerm(q)
-                if (ranked.size < 3 && fallback != null) {
-                    ranked = (ranked + SearchRanking.rank(q, runCatching { deps.jellyfin.search(fallback, 60) }.getOrDefault(emptyList()))).distinctBy { it.id }
+                if (SearchRanking.rank(q, found).size < 3 && fallback != null) {
+                    found = (found + runCatching { deps.jellyfin.search(fallback, 60) }.getOrDefault(emptyList())).distinctBy { it.id }
                 }
-                SearchState.Done(q, ranked)
+                SearchState.Done(q, found)
             }.getOrElse { SearchState.Failed(it.message ?: "Serveur injoignable") }
         }
     }
     // Horus runs on its own and never holds back local results.
     LaunchedEffect(Unit) {
-        snapshotFlow { query.trim() }.debounce(450).distinctUntilChanged().collectLatest { q ->
+        snapshotFlow { SearchQuery.parse(query).text }.debounce(450).distinctUntilChanged().collectLatest { q ->
             horus = emptyList()
             if (q.length < 2) return@collectLatest
             horus = withTimeoutOrNull(8_000) { runCatching { deps.horus.searchEverything(q) }.getOrNull() }.orEmpty()
@@ -240,10 +305,29 @@ fun SearchScreen() {
             requests[key] = runCatching { deps.horus.request(media) }.fold({ RequestState.Sent }, { error -> if (error.message?.contains("déjà") == true) RequestState.Sent else RequestState.Failed })
         }
     }
-    val localTitles = remember(state) { (state as? SearchState.Done)?.items.orEmpty().mapTo(HashSet()) { VideoCatalog.normalize(it.name) } }
+    val done = state as? SearchState.Done
+    val serverItems = done?.takeIf { it.query == parsed.text }?.items.orEmpty()
+    val combined = remember(local, serverItems, parsed) { SearchEngine.merge(parsed, local, serverItems) }
+    val genre = remember(parsed.text, catalog) { SearchEngine.genre(parsed, catalog) }
+    val genreItems = remember(genre, catalog) { genre?.let { SearchEngine.byGenre(it, catalog) }.orEmpty() }
+    // Only a series the query really names ("star wars episode 4" is not The Clone Wars S1E4).
+    val jumpSeries = remember(combined, parsed) {
+        if (!parsed.wantsEpisode) null else {
+            // The top result when it is a series ("supra s1e3"), or a series the query clearly names.
+            combined.firstOrNull()?.takeIf { it.type == "Series" && SearchRanking.score(parsed.text, it) >= 600 }
+                ?: combined.firstOrNull { it.type == "Series" && SearchRanking.score(parsed.text, it) >= 750 }
+        }
+    }
+    val loadedJump = rememberLoad("search-jump", jumpSeries?.id, parsed.season, parsed.episode) {
+        jumpSeries?.let { runCatching { resolveJump(deps, it, parsed) }.getOrNull() }
+    }.value
+    // The previous answer stays while the next one loads: never show (or open) a stale target.
+    val jump = loadedJump?.takeIf { it.series.id == jumpSeries?.id && it.query == parsed }
+
+    val localTitles = remember(combined) { combined.mapTo(HashSet()) { VideoCatalog.normalize(it.name) } }
     val requestable = remember(horus, localTitles) { horus.filter { VideoCatalog.normalize(it.title) !in localTitles } }
 
-    val busy = query.trim().length >= 2 && (state is SearchState.Loading || (state as? SearchState.Done)?.query != query.trim())
+    val busy = parsed.text.length >= 2 && (state is SearchState.Loading || done?.query != parsed.text)
     fun saveRecent(q: String = query) { if (q.trim().length >= 2) recent = SearchHistory.add(context, q) }
     fun open(item: Item) {
         saveRecent()
@@ -259,6 +343,16 @@ fun SearchScreen() {
             },
         )
     }
+    val voice = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.let { spoken -> query = spoken; saveRecent(spoken) }
+    }
+    fun listen() {
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE, "fr-FR")
+            .putExtra(RecognizerIntent.EXTRA_PROMPT, "Dites un titre, un acteur, un genre…")
+        runCatching { voice.launch(intent) }.onFailure { org.jellyfin.mobile.nflix.ui.Toasts.show("Recherche vocale indisponible sur cet appareil.", org.jellyfin.mobile.nflix.ui.ToastKind.Warning) }
+    }
 
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.statusBarsPadding().padding(start = 4.dp, end = 16.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -266,17 +360,23 @@ fun SearchScreen() {
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
-                placeholder = { Text("Films, séries, animés, musique, livres…") },
+                placeholder = { Text("Titre, acteur, genre, « s1e3 »…", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 leadingIcon = { Icon(Icons.Rounded.Search, null, tint = if (query.isNotEmpty()) Nflix.Red else Nflix.Muted) },
                 trailingIcon = {
-                    AnimatedVisibility(query.isNotEmpty(), enter = scaleIn() + fadeIn(), exit = fadeOut()) {
-                        IconButton(onClick = { query = ""; runCatching { focus.requestFocus() } }) { Icon(Icons.Rounded.Close, "Effacer") }
+                    AnimatedContent(query.isNotEmpty(), transitionSpec = { (scaleIn() + fadeIn()) togetherWith fadeOut() }, label = "search-trailing") { typing ->
+                        if (typing) IconButton(onClick = { query = ""; runCatching { focus.requestFocus() } }) { Icon(Icons.Rounded.Close, "Effacer") }
+                        else IconButton(onClick = ::listen) { Icon(Icons.Rounded.Mic, "Recherche vocale", tint = Nflix.Muted) }
                     }
                 },
                 singleLine = true,
                 shape = RoundedCornerShape(16.dp),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(onSearch = { saveRecent(); focusManager.clearFocus() }),
+                keyboardActions = KeyboardActions(onSearch = {
+                    saveRecent()
+                    focusManager.clearFocus()
+                    // Enter on a precise query ("supracell s1e3") goes straight there.
+                    jump?.let { navigator.open(Route.Item(it.target.id)) }
+                }),
                 colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Nflix.Red, unfocusedBorderColor = Nflix.Outline, focusedContainerColor = Nflix.Surface, unfocusedContainerColor = Nflix.Surface),
                 modifier = Modifier.weight(1f).focusRequester(focus),
             )
@@ -287,22 +387,29 @@ fun SearchScreen() {
                 LinearProgressIndicator(Modifier.fillMaxWidth().clip(CircleShape), color = Nflix.Red, trackColor = Color.Transparent)
             }
         }
-        val done = state as? SearchState.Done
-        AnimatedVisibility(done != null && done.items.isNotEmpty(), enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
-            val items = done?.items.orEmpty()
+        // What was understood: "Saison 1 · Épisode 3", "Année 2021".
+        AnimatedVisibility(parsed.wantsEpisode || parsed.year != null, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
+            Row(Modifier.padding(horizontal = 20.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                parsed.season?.let { HintChip("Saison $it") }
+                parsed.episode?.let { HintChip("Épisode $it") }
+                parsed.year?.let { HintChip("Année $it") }
+            }
+        }
+        AnimatedVisibility(combined.isNotEmpty(), enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
             LazyRow(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(SearchFilter.entries.filter { f -> f == SearchFilter.All || items.any(f::matches) || requestable.any(f::matches) }, key = { it.name }) { option ->
-                    FilterPill(option.label, items.count(option::matches) + requestable.count(option::matches), option == filter) { filter = option }
+                items(SearchFilter.entries.filter { f -> f == SearchFilter.All || combined.any(f::matches) || requestable.any(f::matches) }, key = { it.name }) { option ->
+                    FilterPill(option.label, combined.count(option::matches) + requestable.count(option::matches), option == filter) { filter = option }
                 }
             }
         }
 
+        val hasResults = combined.isNotEmpty() || requestable.isNotEmpty() || genreItems.isNotEmpty() || jump != null
         val phase = when {
             query.trim().length < 2 -> "idle"
+            hasResults -> "results"
             state is SearchState.Failed -> "error"
-            done == null -> "loading"
-            done.items.isEmpty() && requestable.isEmpty() -> "empty"
-            else -> "results"
+            done == null || busy -> "loading"
+            else -> "empty"
         }
         AnimatedContent(
             targetState = phase,
@@ -314,22 +421,64 @@ fun SearchScreen() {
             modifier = Modifier.fillMaxSize(),
         ) { current ->
             when (current) {
-                "idle" -> SearchIdle(recent, onPick = { query = it }, onClear = { SearchHistory.clear(context); recent = emptyList() })
+                "idle" -> SearchIdle(recent, catalog, onPick = { query = it }, onOpen = ::open, onClear = { SearchHistory.clear(context); recent = emptyList() })
                 "loading" -> SearchSkeleton()
                 "error" -> SearchMessage(Icons.Rounded.CloudOff, "Recherche indisponible", (state as? SearchState.Failed)?.message)
-                "empty" -> SearchMessage(Icons.Rounded.SearchOff, "Aucun résultat pour « ${query.trim()} »", "Essayez un autre titre, un acteur ou un artiste.")
+                "empty" -> SearchMessage(Icons.Rounded.SearchOff, "Aucun résultat pour « ${query.trim()} »", "Essayez quelques lettres du titre, un acteur, un genre ou une année.")
                 else -> SearchResults(
-                    query = done?.query.orEmpty(),
-                    items = done?.items.orEmpty(),
+                    query = parsed.text,
+                    items = combined,
                     requestable = requestable,
                     requests = requests,
                     filter = filter,
+                    jump = jump,
+                    genre = genre,
+                    genreItems = genreItems,
                     onOpen = ::open,
                     onDetails = { media -> saveRecent(); navigator.open(Route.HorusDetail(media.type, media.id)) },
                     onRequest = { media -> saveRecent(); request(media) },
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun HintChip(label: String) {
+    Text(
+        label, style = MaterialTheme.typography.labelMedium, color = Nflix.Red, fontWeight = FontWeight.Bold,
+        modifier = Modifier.appear().clip(CircleShape).background(Nflix.Red.copy(alpha = 0.14f)).padding(horizontal = 10.dp, vertical = 4.dp),
+    )
+}
+
+/** "Supracell · S1 · É3 — Michael": one tap to the exact episode or season asked for. */
+@Composable
+private fun JumpCard(jump: Jump, onOpen: (Item) -> Unit) {
+    val deps = LocalDeps.current
+    val target = jump.target
+    val motion = rememberMotionEnabled()
+    val glow = if (motion) rememberInfiniteTransition(label = "jump-glow").animateFloat(0.25f, 0.6f, infiniteRepeatable(tween(1400), RepeatMode.Reverse), label = "glow") else null
+    Row(
+        Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth().appear().clip(RoundedCornerShape(18.dp))
+            // Read in the draw phase only: the pulse never recomposes the card.
+            .drawBehind { drawRect(Brush.horizontalGradient(listOf(Nflix.Red.copy(alpha = glow?.value ?: 0.4f), Nflix.Surface))) }
+            .pressable({ onOpen(target) }).padding(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        NImage(
+            if (target.type == "Episode") deps.jellyfin.thumb(target, 400) ?: deps.jellyfin.primary(target, 400) else deps.jellyfin.primary(target, 300),
+            Modifier.width(if (target.type == "Episode") 128.dp else 64.dp).aspectRatio(if (target.type == "Episode") 16f / 9f else 2f / 3f).clip(RoundedCornerShape(12.dp)),
+            description = target.name,
+        )
+        Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+            Text("ALLER DIRECTEMENT À", style = MaterialTheme.typography.labelSmall, color = Color.White, fontWeight = FontWeight.Black)
+            Text(jump.series.name, style = MaterialTheme.typography.labelLarge, color = Color.White.copy(alpha = 0.8f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                if (target.type == "Episode") listOfNotNull(target.episodeLabel, target.name).joinToString(" · ") else target.name,
+                style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Icon(Icons.Rounded.PlayArrow, null, tint = Color.White, modifier = Modifier.size(28.dp))
     }
 }
 
@@ -351,18 +500,21 @@ private fun FilterPill(label: String, count: Int, selected: Boolean, onClick: ()
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun SearchIdle(recent: List<String>, onPick: (String) -> Unit, onClear: () -> Unit) {
+private fun SearchIdle(recent: List<String>, catalog: List<Item>, onPick: (String) -> Unit, onOpen: (Item) -> Unit, onClear: () -> Unit) {
     val navigator = LocalNavigator.current
-    LazyColumn(contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 12.dp, bottom = ContentBottomPadding), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    val genres = remember(catalog) { SearchEngine.topGenres(catalog) }
+    // A few well-rated titles, different each visit.
+    val ideas = remember(catalog) { catalog.filter { (it.communityRating ?: 0.0) >= 7.0 && it.type != "BoxSet" }.shuffled().take(14) }
+    LazyColumn(contentPadding = PaddingValues(top = 12.dp, bottom = ContentBottomPadding), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         if (recent.isNotEmpty()) {
             item(key = "recent-title") {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("Recherches récentes", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                     Text("Effacer", color = Nflix.Red, style = MaterialTheme.typography.labelLarge, modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onClear).padding(8.dp))
                 }
             }
             item(key = "recent") {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(Modifier.padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     recent.forEachIndexed { index, term ->
                         Row(
                             Modifier.appear(index * 35).clip(CircleShape).background(Nflix.Surface).clickable { onPick(term) }.padding(horizontal = 12.dp, vertical = 8.dp),
@@ -376,7 +528,31 @@ private fun SearchIdle(recent: List<String>, onPick: (String) -> Unit, onClear: 
                 }
             }
         }
-        item(key = "explore-title") { Text("Explorer", style = MaterialTheme.typography.titleMedium) }
+        if (genres.isNotEmpty()) {
+            item(key = "genres-title") { Text("Par genre", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 20.dp)) }
+            item(key = "genres") {
+                FlowRow(Modifier.padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    genres.forEachIndexed { index, genre ->
+                        Text(
+                            genre, style = MaterialTheme.typography.labelLarge,
+                            modifier = Modifier.appear(index * 25).clip(CircleShape)
+                                .background(Brush.horizontalGradient(listOf(genreColor(genre).copy(alpha = 0.45f), genreColor(genre).copy(alpha = 0.18f))))
+                                .clickable { onPick(genre) }.padding(horizontal = 14.dp, vertical = 8.dp),
+                        )
+                    }
+                }
+            }
+        }
+        if (ideas.isNotEmpty()) {
+            rowSection("ideas", "À découvrir", ideas, { it.id }) { item -> SearchCard(item, onOpen) }
+        }
+        item(key = "tips") {
+            Column(Modifier.padding(horizontal = 20.dp).appear(120).clip(RoundedCornerShape(14.dp)).background(Nflix.Surface).padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Astuces", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                Text("« supracell s1e3 » ouvre directement l'épisode · « dune 2021 » choisit l'année · « got » trouve Game of Thrones · quelques lettres suffisent.", style = MaterialTheme.typography.bodySmall, color = Nflix.Muted)
+            }
+        }
+        item(key = "explore-title") { Text("Explorer", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 20.dp)) }
         item(key = "explore") {
             val tiles = listOf(
                 Triple("Films", Color(0xFFE50914), { navigator.selectTab(Route.Library) }),
@@ -384,7 +560,7 @@ private fun SearchIdle(recent: List<String>, onPick: (String) -> Unit, onClear: 
                 Triple("Musique", Color(0xFFB46CFF), { navigator.selectTab(Route.Music) }),
                 Triple("Livres", Color(0xFF46D39A), { navigator.selectTab(Route.Books) }),
             )
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 tiles.chunked(2).forEachIndexed { row, pair ->
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         pair.forEachIndexed { col, (label, color, action) ->
@@ -400,6 +576,12 @@ private fun SearchIdle(recent: List<String>, onPick: (String) -> Unit, onClear: 
             }
         }
     }
+}
+
+/** Stable colour per genre name, so chips keep their colour between visits. */
+private fun genreColor(genre: String): Color {
+    val palette = listOf(0xFFE50914, 0xFF3D6BFF, 0xFFB46CFF, 0xFF46D39A, 0xFFFFA726, 0xFF26C6DA, 0xFFEC407A, 0xFF8D6E63)
+    return Color(palette[(genre.hashCode() and Int.MAX_VALUE) % palette.size])
 }
 
 @Composable
@@ -429,15 +611,23 @@ private fun SearchResults(
     requestable: List<HorusMedia>,
     requests: Map<String, RequestState>,
     filter: SearchFilter,
+    jump: Jump?,
+    genre: String?,
+    genreItems: List<Item>,
     onOpen: (Item) -> Unit,
     onDetails: (HorusMedia) -> Unit,
     onRequest: (HorusMedia) -> Unit,
 ) {
+    var sort by rememberSaveable { mutableStateOf(SearchSort.Relevance) }
     AnimatedContent(filter, transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(120)) }, label = "search-filter") { selected ->
         if (selected == SearchFilter.All) {
             val best = remember(items, query) { bestMatch(items, query) }
             LazyColumn(contentPadding = PaddingValues(bottom = ContentBottomPadding)) {
-                best?.let { item(key = "best-${it.id}") { BestMatch(it, onOpen) } }
+                jump?.let { item(key = "jump-${it.target.id}") { JumpCard(it, onOpen) } }
+                best?.takeIf { it.id != jump?.series?.id }?.let { item(key = "best-${it.id}") { BestMatch(it, onOpen) } }
+                if (genre != null && genreItems.isNotEmpty()) {
+                    rowSection("genre", "Genre · $genre", genreItems, { "g-${it.id}" }) { hit -> SearchCard(hit, onOpen) }
+                }
                 sections.forEach { (key, title, predicate) ->
                     val local: List<Any> = items.filter { predicate(it) && it.id != best?.id }
                     val extra: List<Any> = requestRows[key]?.let { type -> requestable.filter { it.type == type } }.orEmpty()
@@ -451,13 +641,35 @@ private fun SearchResults(
                 }
             }
         } else {
-            val filtered: List<Any> = remember(items, requestable, selected) { items.filter(selected::matches) + requestable.filter(selected::matches) }
+            val filtered: List<Any> = remember(items, requestable, selected, sort) {
+                val own = items.filter(selected::matches).let { list ->
+                    when (sort) {
+                        SearchSort.Relevance -> list
+                        SearchSort.Rating -> list.sortedByDescending { it.communityRating ?: 0.0 }
+                        SearchSort.Recent -> list.sortedByDescending { it.year ?: 0 }
+                        SearchSort.Name -> list.sortedBy { VideoCatalog.normalize(it.name) }
+                    }
+                }
+                own + requestable.filter(selected::matches)
+            }
             LazyVerticalGrid(
                 columns = GridCells.Adaptive(108.dp),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = ContentBottomPadding),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = ContentBottomPadding),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
+                item(key = "sort", span = { GridItemSpan(maxLineSpan) }) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        SearchSort.entries.forEach { option ->
+                            val active = option == sort
+                            Text(
+                                option.label, style = MaterialTheme.typography.labelMedium,
+                                color = if (active) Color.Black else Nflix.Muted, fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
+                                modifier = Modifier.clip(CircleShape).background(if (active) Color.White else Nflix.Surface).clickable { sort = option }.padding(horizontal = 10.dp, vertical = 6.dp),
+                            )
+                        }
+                    }
+                }
                 items(filtered, key = ::hitKey) { hit ->
                     when (hit) {
                         is Item -> SearchCard(hit, onOpen, Modifier.animateItem().fillMaxWidth(), gridWidth = true)
