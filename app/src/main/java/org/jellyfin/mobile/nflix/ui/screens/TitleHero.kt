@@ -276,6 +276,7 @@ fun CinematicHeader(item: Item, origin: String?, scroll: Float, accent: Color, t
                     .background(Brush.verticalGradient(listOf(Color.Transparent, accent.copy(alpha = 0.10f), Nflix.Night.copy(alpha = 0.85f), Nflix.Night))),
             )
             Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = dim)))
+            org.jellyfin.mobile.nflix.ui.SagaMotion(item, Modifier.fillMaxSize())
             Column(
                 Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp)
                     .graphicsLayer { alpha = (1f - scroll / 700f).coerceIn(0f, 1f) },

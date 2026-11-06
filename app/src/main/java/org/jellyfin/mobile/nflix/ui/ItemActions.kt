@@ -57,6 +57,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.material3.FilterChip
+import androidx.compose.material.icons.rounded.Lightbulb
+import androidx.compose.material.icons.rounded.Report
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -85,6 +92,13 @@ object ItemMenu {
 
     var message by mutableStateOf<String?>(null)
 
+    /** Item being reported to Mira (problem or improvement), shown by [ItemMenuHost]. */
+    var reporting by mutableStateOf<Pair<Item, String>?>(null)
+        private set
+
+    fun report(item: Item, kind: String = "incident") { target = null; reporting = item to kind }
+    fun endReport() { reporting = null }
+
     fun show(item: Item, playlistId: String? = null) { target = MenuTarget.Media(item, playlistId) }
     fun showPlayer() { target = MenuTarget.Player }
     fun dismiss() { target = null }
@@ -109,6 +123,7 @@ fun ItemMenuHost() {
     }
 
     val target = ItemMenu.target ?: run {
+        ItemMenu.reporting?.let { (item, kind) -> ReportDialog(item, kind) { ItemMenu.endReport() } }
         playlistPicker?.let { items -> PlaylistPicker(items) { playlistPicker = null } }
         rename?.let { playlist -> RenameDialog(playlist) { rename = null } }
         confirmDelete?.let { playlist ->
@@ -197,6 +212,10 @@ fun ItemMenuHost() {
                         playlistPicker = if (item.type == "MusicAlbum") deps.jellyfin.albumTracks(item.id) else listOf(item)
                     })
                 }
+                if (item.type != "Playlist") {
+                    add(MenuAction(Icons.Rounded.Report, "Signaler un problème") { ItemMenu.report(item, "incident") })
+                    add(MenuAction(Icons.Rounded.Lightbulb, "Proposer une amélioration") { ItemMenu.report(item, "improvement") })
+                }
                 if (target.playlistId != null && item.playlistItemId != null) {
                     add(MenuAction(Icons.Rounded.RemoveCircleOutline, "Retirer de cette playlist", destructive = true) {
                         deps.jellyfin.removeFromPlaylist(target.playlistId, listOf(item.playlistItemId))
@@ -256,6 +275,91 @@ fun ItemMenuHost() {
             }
         }
     }
+}
+
+private val reportCategories = mapOf(
+    "Movie" to listOf("Vidéo", "Son", "Sous-titres", "Mauvaise version", "Infos / image", "Autre"),
+    "Episode" to listOf("Vidéo", "Son", "Sous-titres", "Épisode manquant", "Mauvais épisode", "Infos / image", "Autre"),
+    "Season" to listOf("Épisodes manquants", "Mauvais ordre", "Qualité", "Sous-titres", "Infos / image", "Autre"),
+    "Series" to listOf("Saison manquante", "Épisodes manquants", "Qualité", "Infos / image", "Autre"),
+    "Audio" to listOf("Ne se lit pas", "Son", "Paroles", "Infos / pochette", "Autre"),
+    "MusicAlbum" to listOf("Titres manquants", "Ordre des titres", "Son", "Infos / pochette", "Autre"),
+    "Book" to listOf("Ne s'ouvre pas", "Pages manquantes", "Mauvais livre", "Infos / couverture", "Autre"),
+)
+
+private fun reportLabel(item: Item): String = when (item.type) {
+    "Movie" -> "Film"; "Series" -> "Série"; "Season" -> "Saison"; "Episode" -> "Épisode"
+    "Audio" -> "Musique"; "MusicAlbum" -> "Album"; "MusicArtist" -> "Artiste"; "Book" -> "Livre"; "AudioBook" -> "Livre audio"
+    else -> item.type
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ReportDialog(item: Item, initialKind: String, onDismiss: () -> Unit) {
+    val deps = LocalDeps.current
+    val context = LocalContext.current.applicationContext
+    val scope = rememberCoroutineScope()
+    val repo = remember(deps.api, context) { org.jellyfin.mobile.nflix.data.SupportRepository(deps.api, context) }
+    var kind by remember { mutableStateOf(initialKind) }
+    var category by remember { mutableStateOf<String?>(null) }
+    var message by remember { mutableStateOf("") }
+    var sending by remember { mutableStateOf(false) }
+    val categories = reportCategories[item.type] ?: listOf("Lecture", "Qualité", "Infos / image", "Autre")
+    val where = listOfNotNull(
+        item.seriesName,
+        item.parentIndexNumber?.let { "S$it" }.takeIf { item.type == "Episode" },
+        item.indexNumber?.let { if (item.type == "Episode") "É$it" else null },
+        item.name,
+    ).joinToString(" · ")
+    AlertDialog(
+        onDismissRequest = { if (!sending) onDismiss() },
+        title = { Text(if (kind == "incident") "Signaler un problème" else "Proposer une amélioration") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("${reportLabel(item)} · $where", style = MaterialTheme.typography.labelLarge, color = Nflix.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(kind == "incident", { kind = "incident"; category = null }, { Text("Problème") })
+                    FilterChip(kind == "improvement", { kind = "improvement"; category = null }, { Text("Amélioration") })
+                }
+                if (kind == "incident") FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    categories.forEach { label -> FilterChip(category == label, { category = if (category == label) null else label }, { Text(label) }) }
+                }
+                OutlinedTextField(
+                    value = message, onValueChange = { if (it.length <= 4000) message = it },
+                    placeholder = { Text(if (kind == "incident") "Que se passe-t-il ? (minute, appareil…)" else "Votre idée") },
+                    minLines = 3, modifier = Modifier.fillMaxWidth(),
+                )
+                Text("Visible par les admins dans Mira Connect › Tickets.", style = MaterialTheme.typography.labelSmall, color = Nflix.Muted)
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = (message.isNotBlank() || category != null) && !sending, onClick = {
+                sending = true
+                val text = message.trim().ifBlank { category.orEmpty() }
+                val ctx = listOfNotNull(category?.let { "Catégorie : $it" }, where.takeIf { it.isNotBlank() }?.let { "Élément : $it" }).joinToString("\n").ifBlank { null }
+                scope.launch {
+                    try {
+                        when (repo.report(item, kind, text, ctx)) {
+                            in 200..299 -> ItemMenu.changed("Signalement envoyé à Mira")
+                            0 -> ItemMenu.message = "Connectez Mira Connect pour signaler"
+                            401, 403 -> ItemMenu.message = "Session Mira expirée : ouvrez Mira Connect"
+                            429 -> ItemMenu.message = "Limite du jour atteinte (20 signalements)"
+                            else -> ItemMenu.message = "Envoi impossible. Réessayez plus tard."
+                        }
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        ItemMenu.message = "Envoi impossible. Réessayez plus tard."
+                    } finally {
+                        sending = false
+                        onDismiss()
+                    }
+                }
+            }) { Text(if (sending) "Envoi…" else "Envoyer", color = Nflix.Red) }
+        },
+        dismissButton = { TextButton(enabled = !sending, onClick = onDismiss) { Text("Annuler") } },
+        containerColor = Nflix.SurfaceHigh,
+    )
 }
 
 private fun navigatorShowing(navigator: Navigator, id: String) = navigator.current.let { it is Route.Playlist && it.id == id }

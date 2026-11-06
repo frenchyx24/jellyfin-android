@@ -25,7 +25,12 @@ CODE
 CHANNEL="${NFLIX_RELEASE_CHANNEL:-beta}"
 case "$CHANNEL" in beta) SLUG=nflix-beta ;; stable) SLUG=nflix ;; *) echo 'Refused: release channel must be beta or stable.' >&2; exit 1 ;; esac
 for CHECK_CHANNEL in nflix-beta nflix; do
-  CURRENT="$(curl -fsS -A 'MiraStorePublisher/1.1' "https://nflix.miracloud.fr/NflixAuth/Store/$CHECK_CHANNEL/manifest.json" | python3 -c 'import json,sys;print(json.load(sys.stdin)["versionCode"])')"
+  BODY="$(curl -sS -A 'MiraStorePublisher/1.1' -w '\n%{http_code}' "https://nflix.miracloud.fr/NflixAuth/Store/$CHECK_CHANNEL/manifest.json")"
+  case "${BODY##*$'\n'}" in
+    200) CURRENT="$(printf '%s' "${BODY%$'\n'*}" | python3 -c 'import json,sys;print(json.load(sys.stdin)["versionCode"])')" ;;
+    404) CURRENT=0 ;;
+    *) echo "Refused: cannot read $CHECK_CHANNEL manifest." >&2; exit 1 ;;
+  esac
   [ "$CODE" -gt "$CURRENT" ] || { echo "Refused: versionCode $CODE must exceed $CHECK_CHANNEL versionCode $CURRENT." >&2; exit 1; }
 done
 KEYS="${NFLIX_KEYS_DIR:-$HOME/nflix/keys}"
@@ -33,6 +38,13 @@ KEYS="${NFLIX_KEYS_DIR:-$HOME/nflix/keys}"
   echo 'Refused: original Nflix release keystore and signing configuration are required.' >&2
   exit 1
 }
+# Every release must be recoverable from GitHub: clean tree, pushed branch and tag, release record.
+GIT=(git -C "$SRC")
+[ -z "$("${GIT[@]}" status --porcelain)" ] || { echo 'Refused: commit every change before releasing (the release must be on GitHub).' >&2; exit 1; }
+grep -q "^jellyfin.version=$VERSION$" "$SRC/gradle.properties" || { echo "Refused: gradle.properties must hold jellyfin.version=$VERSION in the committed tree." >&2; exit 1; }
+GIT_PUSH=("${GIT[@]}")
+[ -n "${NFLIX_GIT_CREDENTIAL:-}" ] && GIT_PUSH+=(-c credential.helper= -c "credential.helper=$NFLIX_GIT_CREDENTIAL")
+"${GIT_PUSH[@]}" push -q origin "HEAD:refs/heads/release/$VERSION" || { echo 'Refused: could not push the release branch to GitHub.' >&2; exit 1; }
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 NFLIX_VERSION="$VERSION" NFLIX_BUILD_OUT="$TMP/out" "$SCRIPT_DIR/build-nflix.sh" testProprietaryDebugUnitTest assembleProprietaryRelease
@@ -41,5 +53,30 @@ APKS=("$TMP/out"/*/apk/proprietary/release/*.apk)
 [ "${#APKS[@]}" -eq 1 ] && [ -s "${APKS[0]}" ] || { echo 'Refused: expected exactly one release APK.' >&2; exit 1; }
 APK="${APKS[0]}"
 [ "$(basename "$APK")" = "nflix-android-v$VERSION-proprietary-release.apk" ] || { echo 'Refused: release APK filename does not match the requested version.' >&2; exit 1; }
-"$SCRIPT_DIR/store-publish.sh" "$SLUG" "$APK" "$HOME/nflix/brand/icon-512.png" \
+"$SCRIPT_DIR/store-publish.sh" "$SLUG" "$APK" "${NFLIX_ICON:-$HOME/nflix/out/nflix-store-icon.png}" \
   3C7E2866A82ADEA668857EE07B46995975C0096EA1642D590689A9EC1B320A64 "$CHANGELOG"
+SHA="$(sha256sum "$APK" | cut -d' ' -f1 | tr a-f A-F)"
+mkdir -p "$SRC/nflix/releases"
+cat > "$SRC/nflix/releases/$VERSION.md" <<EOF
+# Nflix $VERSION ($CHANNEL)
+
+- versionCode: $CODE
+- Store channel: \`$SLUG\`, published $(date -u +%Y-%m-%dT%H:%MZ)
+- APK SHA-256: $SHA
+- Signer SHA-256: 3C7E2866A82ADEA668857EE07B46995975C0096EA1642D590689A9EC1B320A64
+- Source commit: $("${GIT[@]}" rev-parse HEAD)
+
+Changelog: $CHANGELOG
+
+## Rebuild
+
+    git checkout v$VERSION
+    nflix/scripts/build-nflix.sh testProprietaryDebugUnitTest assembleProprietaryRelease
+
+Signing needs the private keystore in ~/nflix/keys (never committed).
+EOF
+"${GIT[@]}" add "nflix/releases/$VERSION.md"
+"${GIT[@]}" commit -qm "docs: Nflix $VERSION release record"
+"${GIT[@]}" tag -a "v$VERSION" -m "Nflix $VERSION ($CHANNEL, $CODE)"
+"${GIT_PUSH[@]}" push -q origin "HEAD:refs/heads/release/$VERSION" "v$VERSION" || { echo "WARNING: published, but pushing v$VERSION to GitHub failed: push it now." >&2; exit 1; }
+echo "GitHub: release/$VERSION and tag v$VERSION pushed."

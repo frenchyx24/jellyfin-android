@@ -34,6 +34,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.animation.core.spring
 import androidx.compose.material.icons.rounded.RemoveDone
+import androidx.compose.material.icons.rounded.Report
 import androidx.compose.material.icons.rounded.DoneAll
 import androidx.compose.material.icons.rounded.RadioButtonUnchecked
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -188,6 +189,7 @@ private fun DetailHeader(item: Item, origin: String?, scroll: Float) {
     }
     // Full-bleed artwork, title centred over a deep fade: the layout of a streaming title page.
     Box(Modifier.fillMaxWidth().height(540.dp)) {
+        org.jellyfin.mobile.nflix.ui.SagaMotion(item, Modifier.fillMaxSize())
         NImage(
             deps.jellyfin.backdrop(item) ?: deps.jellyfin.primary(item, 900),
             Modifier.fillMaxSize().sharedPoster(origin ?: "detail/${item.id}")
@@ -340,6 +342,7 @@ private fun Actions(item: Item, accent: Color, onChanged: () -> Unit) {
                 }
             }
             if (resumable) ActionIcon(Icons.Rounded.Replay, "Du début") { deps.play(scope, item, fromStart = true) }
+            ActionIcon(Icons.Rounded.Report, "Signaler", accent = accent) { org.jellyfin.mobile.nflix.ui.ItemMenu.report(item) }
             val remoteTrailer = item.trailers.firstNotNullOfOrNull { org.jellyfin.mobile.nflix.ui.TrailerSource.youtubeId(it.url) }
             if ((item.localTrailerCount ?: 0) > 0 || remoteTrailer != null) {
                 ActionIcon(Icons.Rounded.Movie, "Bande-annonce") {

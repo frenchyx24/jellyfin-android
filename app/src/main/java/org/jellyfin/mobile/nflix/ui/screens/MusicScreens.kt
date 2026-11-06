@@ -226,6 +226,9 @@ fun AlbumScreen(id: String) {
                         album?.albumArtists?.firstOrNull()?.let { artist ->
                             Text("Voir l'artiste", color = Nflix.Red, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 6.dp).clip(RoundedCornerShape(6.dp)).clickable { navigator.open(Route.Artist(artist.id)) }.padding(vertical = 4.dp))
                         }
+                        album?.let { a ->
+                            Text("Signaler un problème", color = Nflix.Muted, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 6.dp).clickable { org.jellyfin.mobile.nflix.ui.ItemMenu.report(a) })
+                        }
                     },
                 )
             }
