@@ -574,7 +574,7 @@ private fun AdminFeatures(hub: AchievementHub) {
                 Row(Modifier.padding(horizontal = 16.dp, vertical = 6.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Nflix.Surface).padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("Badges en vitrine : $max", modifier = Modifier.weight(1f))
                     TextButton(onClick = { run { hub.saveFeatureConfig(config, mapOf("MaxEquippedBadges" to JsonPrimitive((max - 1).coerceAtLeast(1)))) } }, enabled = !busy && max > 1) { Text("−") }
-                    TextButton(onClick = { run { hub.saveFeatureConfig(config, mapOf("MaxEquippedBadges" to JsonPrimitive((max + 1).coerceAtMost(20)))) } }, enabled = !busy && max < 20) { Text("+") }
+                    TextButton(onClick = { run { hub.saveFeatureConfig(config, mapOf("MaxEquippedBadges" to JsonPrimitive((max + 1).coerceAtMost(10)))) } }, enabled = !busy && max < 10) { Text("+") }
                 }
             }
             item("welcome") {
@@ -595,6 +595,12 @@ private fun AdminCatalog(hub: AchievementHub) {
     val load = rememberLoad("ab-catalog", reloader = reloader) { hub.adminCatalog() }
     var query by rememberSaveable { mutableStateOf("") }
     val (busy, message, run) = rememberActionRunner { reloader.reload() }
+    var confirm by remember { mutableStateOf<Pair<String, List<String>>?>(null) }
+    confirm?.let { (label, ids) ->
+        ConfirmDialog("$label ?", "Cela modifie ${if (query.isBlank()) "tout le catalogue" else "tous les badges filtrés"}. Les choix précédents seront remplacés.", "Confirmer", { confirm = null }) {
+            run { hub.setDisabledBadges(ids) }
+        }
+    }
     LazyColumn(contentPadding = PaddingValues(bottom = ContentBottomPadding)) {
         item("msg") { Banner(message) }
         item("search") { OutlinedTextField(query, { query = it }, label = { Text("Rechercher un badge") }, singleLine = true, modifier = Modifier.padding(horizontal = 16.dp).fillMaxWidth()) }
@@ -602,11 +608,11 @@ private fun AdminCatalog(hub: AchievementHub) {
             val list = all.filter { query.isBlank() || it.title.contains(query, true) || it.description.contains(query, true) }
             item("bulk") {
                 Row(Modifier.padding(horizontal = 8.dp)) {
-                    TextButton(onClick = { run { hub.setDisabledBadges(all.filter { it.disabled && it !in list }.map { it.id }) } }, enabled = !busy && list.isNotEmpty()) { Text("Tout activer (filtre)") }
-                    TextButton(onClick = { run { hub.setDisabledBadges((all.filter { it.disabled } + list).map { it.id }.distinct()) } }, enabled = !busy && list.isNotEmpty()) { Text("Tout désactiver (filtre)") }
+                    TextButton(onClick = { confirm = "Tout activer" to all.filter { it.disabled && it !in list }.map { it.id } }, enabled = !busy && list.isNotEmpty()) { Text("Tout activer (filtre)") }
+                    TextButton(onClick = { confirm = "Tout désactiver" to (all.filter { it.disabled } + list).map { it.id }.distinct() }, enabled = !busy && list.isNotEmpty()) { Text("Tout désactiver (filtre)") }
                 }
             }
-            items(list, key = { "cat-${it.id}" }) { badge ->
+            itemsIndexed(list, key = { i, b -> "cat-$i-${b.id}" }) { _, badge ->
                 AdminSwitch("${badge.title} · ${categoryName(badge.category)}", !badge.disabled, !busy) { on -> run { hub.toggleBadge(badge.id, !on) } }
             }
         }
@@ -627,7 +633,7 @@ private fun AdminQuestsSection(hub: AchievementHub) {
         item("msg") { Banner(message) }
         load.value?.let { data ->
             val disabled = data.quests.filter { it.disabled }.map { it.id }.toSet()
-            items(data.quests, key = { "q-${it.weekly}-${it.id}" }) { quest ->
+            itemsIndexed(data.quests, key = { i, q -> "q-$i-${q.builtIn}-${q.weekly}-${q.id}" }) { _, quest ->
                 AdminSwitch("${if (quest.weekly) "Semaine" else "Jour"} · ${quest.title}${if (quest.builtIn) "" else " (perso)"}", !quest.disabled, !busy) { on ->
                     run { hub.saveQuests(data, if (on) disabled - quest.id else disabled + quest.id) }
                 }
@@ -670,16 +676,22 @@ private fun AdminChallenges(hub: AchievementHub) {
     var title by remember { mutableStateOf("") }
     var target by remember { mutableStateOf("10") }
     var days by remember { mutableStateOf("7") }
+    var removing by remember { mutableStateOf<kotlinx.serialization.json.JsonObject?>(null) }
     LazyColumn(contentPadding = PaddingValues(bottom = ContentBottomPadding)) {
         item("msg") { Banner(message) }
         load.value?.let { list ->
             if (list.isEmpty()) item("none") { EmptyLine("Aucun défi en cours.") }
-            items(list, key = { "ch-" + (it["Id"]?.toString() ?: it.hashCode().toString()) }) { challenge ->
+            removing?.let { challenge ->
+                item("confirm-remove") {
+                    ConfirmDialog("Retirer ce défi ?", "Le défi disparaît pour tous les membres.", "Retirer", { removing = null }) { run { hub.saveChallenges(list - challenge) } }
+                }
+            }
+            itemsIndexed(list, key = { i, c -> "ch-$i-" + (c["Id"]?.toString() ?: "") }) { _, challenge ->
                 val name = (challenge["Title"] as? JsonPrimitive)?.content ?: "Défi"
                 Row(Modifier.padding(horizontal = 16.dp, vertical = 4.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Nflix.Surface).padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Rounded.EmojiEvents, null, tint = Nflix.Warning)
                     Text(name, Modifier.weight(1f).padding(horizontal = 10.dp))
-                    TextButton(onClick = { run { hub.saveChallenges(list - challenge) } }, enabled = !busy) { Text("Retirer", color = Nflix.Red) }
+                    TextButton(onClick = { removing = challenge }, enabled = !busy) { Text("Retirer", color = Nflix.Red) }
                 }
             }
             item("new") {
@@ -721,6 +733,12 @@ private fun AdminCustomBadges(hub: AchievementHub) {
     var threshold by remember { mutableStateOf("10") }
     var rarity by remember { mutableStateOf("Rare") }
     var metric by remember { mutableStateOf(AchievementHub.METRICS.first().first) }
+    var deleting by remember { mutableStateOf<org.jellyfin.mobile.nflix.data.CustomBadgeItem?>(null) }
+    deleting?.let { badge ->
+        ConfirmDialog("Supprimer « ${badge.name} » ?", "Le badge est retiré de tous les profils qui l'ont gagné. Cette action est définitive.", "Supprimer", { deleting = null }) {
+            run { hub.deleteCustomBadge(badge.id) }
+        }
+    }
     LazyColumn(contentPadding = PaddingValues(bottom = ContentBottomPadding)) {
         item("msg") { Banner(message) }
         load.value?.let { list ->
@@ -730,7 +748,7 @@ private fun AdminCustomBadges(hub: AchievementHub) {
                         Text(badge.name, style = MaterialTheme.typography.titleSmall)
                         Text("${rarityName(badge.rarity)}${if (badge.enabled) "" else " · désactivé"}", style = MaterialTheme.typography.labelSmall, color = Nflix.Muted)
                     }
-                    TextButton(onClick = { run { hub.deleteCustomBadge(badge.id) } }, enabled = !busy) { Text("Supprimer", color = Nflix.Red) }
+                    TextButton(onClick = { deleting = badge }, enabled = !busy) { Text("Supprimer", color = Nflix.Red) }
                 }
             }
         }
@@ -758,6 +776,13 @@ private fun AdminMembers(hub: AchievementHub) {
     val (busy, message, run) = rememberActionRunner { }
     var amount by remember { mutableStateOf("50") }
     var reset by remember { mutableStateOf<org.jellyfin.mobile.nflix.data.Member?>(null) }
+    var granting by remember { mutableStateOf<org.jellyfin.mobile.nflix.data.Member?>(null) }
+    granting?.let { member ->
+        val value = amount.toIntOrNull() ?: 0
+        ConfirmDialog(if (value > 0) "Donner $value points à ${member.name} ?" else "Retirer ${-value} points à ${member.name} ?", "Le score est crédité dans sa banque.", "Confirmer", { granting = null }) {
+            run { hub.grantScore(member.id, value) }
+        }
+    }
     LazyColumn(contentPadding = PaddingValues(bottom = ContentBottomPadding)) {
         item("msg") { Banner(message) }
         item("amount") {
@@ -768,7 +793,7 @@ private fun AdminMembers(hub: AchievementHub) {
                 Row(Modifier.padding(horizontal = 16.dp, vertical = 4.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Nflix.Surface).padding(horizontal = 14.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Rounded.Groups, null, tint = Nflix.Muted)
                     Text(member.name, Modifier.weight(1f).padding(horizontal = 10.dp))
-                    TextButton(onClick = { run { hub.grantScore(member.id, amount.toIntOrNull() ?: 0) } }, enabled = !busy && (amount.toIntOrNull() ?: 0) != 0) { Text("Attribuer") }
+                    TextButton(onClick = { granting = member }, enabled = !busy && (amount.toIntOrNull() ?: 0) != 0) { Text("Attribuer") }
                     TextButton(onClick = { reset = member }, enabled = !busy) { Text("Réinitialiser", color = Nflix.Red) }
                 }
             }
@@ -801,8 +826,8 @@ private fun AdminWebhook(hub: AchievementHub) {
                     AdminSwitch("Webhook activé", config.enabled, !busy) { on -> run { hub.saveWebhook(config, on, null, null) } }
                     Text("Adresse actuelle : ${config.maskedUrl ?: "aucune"}", style = MaterialTheme.typography.bodySmall, color = Nflix.Muted)
                     OutlinedTextField(url, { url = it.trim() }, label = { Text("Nouvelle adresse (laisser vide pour garder)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                    OutlinedTextField(template, { template = it.take(1000) }, label = { Text("Modèle du message") }, modifier = Modifier.fillMaxWidth())
-                    TextButton(onClick = { run { hub.saveWebhook(config, config.enabled, url.ifBlank { null }, template) } }, enabled = !busy) { Text("Enregistrer", color = Nflix.Red) }
+                    OutlinedTextField(template, { template = it.take(1000) }, label = { Text("Modèle du message (vide : inchangé)") }, modifier = Modifier.fillMaxWidth())
+                    TextButton(onClick = { run { hub.saveWebhook(config, config.enabled, url.ifBlank { null }, template.ifBlank { null }) } }, enabled = !busy) { Text("Enregistrer", color = Nflix.Red) }
                 }
             }
         }
@@ -826,6 +851,16 @@ private fun AdminAudit(hub: AchievementHub) {
         }
         loadingState(load) { reloader.reload() }
     }
+}
+
+@Composable
+internal fun ConfirmDialog(title: String, text: String, confirm: String, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss, containerColor = Nflix.SurfaceHigh,
+        title = { Text(title) }, text = { Text(text) },
+        confirmButton = { TextButton(onClick = { onDismiss(); onConfirm() }) { Text(confirm, color = Nflix.Red) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Annuler") } },
+    )
 }
 
 private typealias FeatureConfig = org.jellyfin.mobile.nflix.data.FeatureConfig

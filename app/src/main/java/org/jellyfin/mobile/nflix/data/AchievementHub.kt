@@ -248,6 +248,13 @@ class AchievementHub internal constructor(
         api.json,
     )
 
+    /** For background work: explicit user and token, the in-memory session is left alone. */
+    constructor(api: NflixApi, userId: String, token: String) : this(
+        { userId },
+        { method, path, body -> api.rawWithToken(method, achievementUrl(api.baseUrl.toHttpUrl(), path), token, body) },
+        api.json,
+    )
+
     private val me: String get() = userId()
 
     private suspend fun get(path: String): JsonElement = parse(call("GET", path))
@@ -274,11 +281,17 @@ class AchievementHub internal constructor(
         return ActionResult(ok, PJ.str(o, "Message") ?: if (ok) null else fallback)
     }
 
-    /** Errors from 400 answers carry {Message}; surface them instead of a bare HTTP code. */
+    /** Refusals carry {Message} or {error}: show them (translated when known) instead of a bare HTTP code. */
     private suspend fun action(method: String, path: String, body: JsonElement? = null, fallback: String = "Action refusée par le serveur."): ActionResult = try {
-        result(parse(call(method, path, body)), fallback)
+        result(parse(call(method, path, body)), fallback).let { if (it.success) it else it.copy(message = translate(it.message) ?: fallback) }
+    } catch (missing: AchievementPluginMissingException) {
+        // 404 on an action: no achievements profile yet for this member, not a missing plugin.
+        ActionResult(false, "Profil de succès introuvable : regardez un premier titre pour le créer.")
     } catch (error: NflixHttpException) {
-        if (error.code == 400 || error.code == 429) ActionResult(false, if (error.code == 429) "Trop de tentatives, réessayez plus tard." else fallback) else throw error
+        if (error.code != 400 && error.code != 409 && error.code != 429) throw error
+        val server = error.body?.let { runCatching { json.parseToJsonElement(it) as? JsonObject }.getOrNull() }
+            ?.let { PJ.str(it, "Message") ?: PJ.str(it, "error") }
+        ActionResult(false, translate(server) ?: if (error.code == 429) "Trop de tentatives, réessayez plus tard." else fallback)
     }
 
     // --- Member features -----------------------------------------------------------------------
@@ -388,8 +401,9 @@ class AchievementHub internal constructor(
     }
 
     /** Badges unlocked after [since] (ISO-8601), plus the server clock to use as the next cutoff. */
-    suspend fun unlocksSince(since: String?): Pair<String?, List<Pair<String, String>>> {
-        val query = since?.let { "?since=" + URLEncoder.encode(it, "UTF-8") }.orEmpty()
+    suspend fun unlocksSince(since: String?, deviceId: String? = null): Pair<String?, List<Pair<String, String>>> {
+        val params = listOfNotNull(since?.let { "since=" + URLEncoder.encode(it, "UTF-8") }, deviceId?.let { "deviceId=" + URLEncoder.encode(it.take(256), "UTF-8") })
+        val query = if (params.isEmpty()) "" else "?" + params.joinToString("&")
         val o = get("users/$me/unlocks-since$query") as? JsonObject
         return PJ.str(o, "Now") to PJ.objects(o, "Badges").mapNotNull { b -> PJ.str(b, "Id")?.let { it to (PJ.str(b, "Title") ?: "Succès") } }
     }
@@ -486,6 +500,25 @@ class AchievementHub internal constructor(
 
     companion object {
         const val ROOT = "Plugins/AchievementBadges"
+
+        /** Known plugin messages in French; others are shown as sent. */
+        fun translate(message: String?): String? {
+            val text = message?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+            Regex("Not enough score bank\\. Need (\\d+), have (\\d+)").find(text)?.let { return "Score insuffisant : il faut ${it.groupValues[1]} points, vous en avez ${it.groupValues[2]}." }
+            return when {
+                text.contains("reroll already used", true) -> "Relance déjà utilisée pour cette période."
+                text.contains("Already unlocked", true) -> "Ce badge est déjà débloqué."
+                text.contains("Badge not found", true) -> "Badge introuvable."
+                text.contains("Not enough", true) -> "Score insuffisant."
+                text.contains("Unknown power-up", true) -> "Bonus inconnu."
+                else -> text
+            }
+        }
+
+        /** Score-bank price of a locked badge, by rarity (plugin GetPurchaseCost). */
+        fun badgePrice(rarity: String?): Int = when (rarity?.lowercase()) {
+            "common" -> 150; "uncommon" -> 300; "rare" -> 600; "epic" -> 1200; "legendary" -> 2500; "mythic" -> 5000; else -> 400
+        }
         val COSMETIC_KINDS = setOf("ProfileTheme", "BadgeFrame", "RankTitle", "Avatar", "Background", "ProfileBorder")
         val RARITIES = listOf("Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic")
 

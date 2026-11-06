@@ -120,7 +120,7 @@ fun AchievementsScreen() {
                 }
                 if (data != null) {
                     item("hub") { HubShortcuts(publicConfig, bank) { navigator.open(org.jellyfin.mobile.nflix.ui.Route.AchievementHub(it)) } }
-                    if (!publicConfig.hideShowcase) item("showcase") {
+                    item("showcase") {
                         SectionTitle("Votre vitrine", "${data.equipped.size} exposé(s)")
                         if (data.equipped.isEmpty()) {
                             Text(
@@ -280,7 +280,7 @@ fun AchievementsScreen() {
                         TextButton(enabled = !saving, onClick = {
                             saving = true
                             scope.launch {
-                                val result = runCatching { hub.pin(badge.id, !pinned) }.getOrElse { org.jellyfin.mobile.nflix.data.ActionResult(false, achievementError(it as Exception)) }
+                                val result = safeAction { hub.pin(badge.id, !pinned) }
                                 if (result.success) { revision++ } else actionError = result.message
                                 saving = false
                             }
@@ -288,27 +288,39 @@ fun AchievementsScreen() {
                         TextButton(enabled = !saving, onClick = {
                             saving = true
                             scope.launch {
-                                val result = runCatching { hub.setTitle(if (titled) null else badge.id) }.getOrElse { org.jellyfin.mobile.nflix.data.ActionResult(false, achievementError(it as Exception)) }
+                                val result = safeAction { hub.setTitle(if (titled) null else badge.id) }
                                 if (result.success) { revision++ } else actionError = result.message
                                 saving = false
                             }
                         }) { Text(if (titled) "Retirer le titre" else "Utiliser comme titre", color = Nflix.Red) }
                     }
                 } else {
-                    Button(
-                        enabled = !saving && !loading,
-                        onClick = {
-                            saving = true
-                            scope.launch {
-                                val result = runCatching { hub.buyBadge(badge.id) }.getOrElse { org.jellyfin.mobile.nflix.data.ActionResult(false, achievementError(it as Exception)) }
-                                if (result.success) { revision++; selected = null } else actionError = result.message ?: "Achat impossible."
-                                saving = false
-                            }
+                    val price = org.jellyfin.mobile.nflix.data.AchievementHub.badgePrice(badge.rarity)
+                    var confirmBuy by remember(badge.id) { mutableStateOf(false) }
+                    if (confirmBuy) AlertDialog(
+                        onDismissRequest = { confirmBuy = false }, containerColor = Nflix.SurfaceHigh,
+                        title = { Text("Débloquer « ${badge.title} » ?") },
+                        text = { Text("$price points seront retirés de votre banque (${bank?.scoreBank ?: 0} disponibles).") },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                confirmBuy = false
+                                saving = true
+                                scope.launch {
+                                    val result = safeAction { hub.buyBadge(badge.id) }
+                                    if (result.success) { revision++; selected = null } else actionError = result.message ?: "Achat impossible."
+                                    saving = false
+                                }
+                            }) { Text("Débloquer", color = Nflix.Red) }
                         },
+                        dismissButton = { TextButton(onClick = { confirmBuy = false }) { Text("Annuler") } },
+                    )
+                    Button(
+                        enabled = !saving && !loading && (bank?.scoreBank ?: 0) >= price,
+                        onClick = { confirmBuy = true },
                         colors = ButtonDefaults.buttonColors(containerColor = Nflix.Surface, contentColor = Color.White),
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier.fillMaxWidth().height(48.dp),
-                    ) { Text("Débloquer avec mon score (banque : ${bank?.scoreBank ?: 0} pts)") }
+                    ) { Text("Débloquer pour $price pts (banque : ${bank?.scoreBank ?: 0})") }
                 }
                 Spacer(Modifier.height(12.dp))
             }
@@ -577,4 +589,14 @@ internal fun achievementIcon(value: String?): ImageVector = when (value) {
     "visibility", "tv" -> Icons.Rounded.Tv
     "person", "group" -> Icons.Rounded.Person
     else -> Icons.Rounded.EmojiEvents
+}
+
+
+/** Runs a hub action; cancellation propagates, any other failure becomes a refused result. */
+internal suspend fun safeAction(block: suspend () -> org.jellyfin.mobile.nflix.data.ActionResult): org.jellyfin.mobile.nflix.data.ActionResult = try {
+    block()
+} catch (cancelled: kotlinx.coroutines.CancellationException) {
+    throw cancelled
+} catch (error: Exception) {
+    org.jellyfin.mobile.nflix.data.ActionResult(false, achievementError(error))
 }

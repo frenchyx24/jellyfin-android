@@ -111,16 +111,19 @@ private fun kindColor(event: CalendarEvent): Color = when (event.kind) {
 
 /** Asks for the notification permission once, then runs [then]. */
 @Composable
-fun rememberNotificationPermission(then: (Boolean) -> Unit): () -> Unit {
+fun rememberNotificationPermission(then: (granted: Boolean, refusedForGood: Boolean) -> Unit): () -> Unit {
     val context = LocalContext.current
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) NflixAlerts.runNow(context)
-        then(granted)
+        // After a refusal Android stops showing the prompt once the rationale flag drops.
+        val activity = generateSequence(context) { (it as? android.content.ContextWrapper)?.baseContext }.filterIsInstance<android.app.Activity>().firstOrNull()
+        val forGood = !granted && activity != null && !androidx.core.app.ActivityCompat.shouldShowRequestPermissionRationale(activity, Manifest.permission.POST_NOTIFICATIONS)
+        then(granted, forGood)
     }
     return {
         when {
             Build.VERSION.SDK_INT >= 33 && !NflixAlerts.permissionGranted(context) -> launcher.launch(Manifest.permission.POST_NOTIFICATIONS)
-            else -> then(true)
+            else -> then(true, false)
         }
     }
 }
@@ -153,7 +156,7 @@ fun FollowBell(seriesId: String, title: String, modifier: Modifier = Modifier) {
         }
         Unit
     }
-    val ask = rememberNotificationPermission { toggle() }
+    val ask = rememberNotificationPermission { _, _ -> toggle() }
     val tint by animateColorAsState(if (followed) Nflix.Red else Nflix.Text, label = "bell-tint")
     val bounce by animateFloatAsState(if (followed) 1.15f else 1f, spring(Spring.DampingRatioHighBouncy, Spring.StiffnessMedium), label = "bell-bounce")
     Column(
@@ -373,10 +376,10 @@ fun AlertSettingsScreen() {
     val context = LocalContext.current
     val version by deps.alertPrefs.version.collectAsState()
     var allowed by remember { mutableStateOf(NflixAlerts.canNotify(context)) }
-    val ask = rememberNotificationPermission {
+    val ask = rememberNotificationPermission { granted, forGood ->
         allowed = NflixAlerts.canNotify(context)
-        // Refused for good, or turned off in the system: only the settings page can fix it.
-        if (!allowed) NflixAlerts.openSettings(context)
+        // Refused for good, or allowed but turned off in the system: only the settings page can fix it.
+        if (!allowed && (forGood || granted)) NflixAlerts.openSettings(context)
     }
     @Suppress("DEPRECATION") val lifecycle = androidx.compose.ui.platform.LocalLifecycleOwner.current
     androidx.compose.runtime.DisposableEffect(lifecycle) {

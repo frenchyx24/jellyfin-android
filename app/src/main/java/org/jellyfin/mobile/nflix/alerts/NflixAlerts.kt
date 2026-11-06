@@ -105,7 +105,9 @@ object NflixAlerts {
     const val TAG_LOCAL = "nflix-achievement"
 
     /** Stable Int for a Long id, never 0 (0 is used by the player notifications' intents). */
-    fun intId(id: Long): Int = ((id xor (id ushr 32)).toInt()).let { if (it == 0) 1 else it }
+    fun intId(id: Long): Int =
+        if (id in 1..Int.MAX_VALUE.toLong()) id.toInt()
+        else ((id * -7046029254386353131L) ushr 33).toInt().let { if (it == 0) 1 else -it }
 
     fun createChannel(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return

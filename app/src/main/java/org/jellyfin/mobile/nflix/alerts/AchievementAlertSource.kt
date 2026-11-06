@@ -5,14 +5,16 @@ import org.jellyfin.mobile.nflix.data.AchievementHub
 import org.jellyfin.mobile.nflix.data.AchievementPluginMissingException
 
 /** Unlocked badges become phone notifications; the first check only records the cursor. */
-class AchievementAlertSource(private val session: NflixSession, private val hub: () -> AchievementHub) : LocalAlertSource {
+class AchievementAlertSource(
+    private val session: NflixSession,
+    private val deviceId: () -> String?,
+    private val hub: (userId: String, token: String) -> AchievementHub,
+) : LocalAlertSource {
     override suspend fun poll(token: String, prefs: AlertPrefs): List<NflixAlert> {
-        if (session.userId == null) return emptyList()
-        // A cold worker process has no session token in memory yet.
-        if (session.accessToken == null) session.accessToken = token
+        val userId = session.userId ?: return emptyList()
         val cursor = prefs.badgeCursor
         val (now, badges) = try {
-            hub().unlocksSince(cursor)
+            hub(userId, token).unlocksSince(cursor, deviceId())
         } catch (missing: AchievementPluginMissingException) {
             return emptyList()
         }

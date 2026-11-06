@@ -81,7 +81,20 @@ class AchievementHubTest : FunSpec({
         val fake = Fake(mapOf("users/u1/buy-badge/b1" to """{"Success":false,"Message":"Not enough score bank."}"""))
         val result = runBlocking { fake.hub.buyBadge("b1") }
         result.success shouldBe false
-        result.message shouldBe "Not enough score bank."
+        result.message shouldBe "Score insuffisant."
+        AchievementHub.translate("Not enough score bank. Need 600, have 42.") shouldBe "Score insuffisant : il faut 600 points, vous en avez 42."
+        AchievementHub.badgePrice("Epic") shouldBe 1200
+    }
+
+    test("a 404 on an action means no profile yet, not a missing plugin") {
+        val result = runBlocking { Fake(emptyMap()).hub.reroll(weekly = false) }
+        result.success shouldBe false
+        result.message!! shouldContain "Profil"
+    }
+
+    test("refusal bodies are surfaced") {
+        val hub = AchievementHub({ "u1" }, { _, _, _ -> throw NflixHttpException(429, "x", "{\"Message\":\"Daily quest reroll already used today.\"}") }, json)
+        runBlocking { hub.reroll(weekly = false) }.message shouldBe "Relance déjà utilisée pour cette période."
     }
 
     test("feature config is written back whole, tokens included") {

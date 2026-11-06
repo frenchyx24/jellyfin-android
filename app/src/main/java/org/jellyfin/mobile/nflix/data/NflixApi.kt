@@ -23,7 +23,7 @@ import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
-class NflixHttpException(val code: Int, message: String) : IOException(message)
+class NflixHttpException(val code: Int, message: String, val body: String? = null) : IOException(message)
 
 /** Lightweight Jellyfin HTTP client: one OkHttp pool, HTTP cache, JSON decoding off the main thread. */
 class NflixApi(cacheDir: File, private val session: NflixSession, private val apiClient: ApiClient) {
@@ -89,7 +89,27 @@ class NflixApi(cacheDir: File, private val session: NflixSession, private val ap
             .build()
         client.newCall(request).execute().use { response ->
             val text = response.body?.string().orEmpty()
-            if (!response.isSuccessful) throw NflixHttpException(response.code, "HTTP ${response.code} ${url.encodedPath}")
+            if (!response.isSuccessful) throw NflixHttpException(response.code, "HTTP ${response.code} ${url.encodedPath}", text.take(2048))
+            text
+        }
+    }
+
+    /** Device id of this app's Jellyfin session. */
+    val deviceId: String get() = apiClient.deviceInfo.id
+
+    /** Same as [raw] with an explicit token (background work must not rely on the in-memory session). */
+    suspend fun rawWithToken(method: String, url: HttpUrl, token: String, body: String? = null): String = withContext(Dispatchers.IO) {
+        val request = Request.Builder().url(url)
+            .header("X-Emby-Token", token)
+            .header("Accept", "application/json")
+            .apply {
+                val payload = body?.toByteArray(Charsets.UTF_8)?.toRequestBody("application/json".toMediaType())
+                if (method == "GET") get() else method(method, payload ?: ByteArray(0).toRequestBody(null))
+            }
+            .build()
+        client.newCall(request).execute().use { response ->
+            val text = response.body?.string().orEmpty()
+            if (!response.isSuccessful) throw NflixHttpException(response.code, "HTTP ${response.code} ${url.encodedPath}", text.take(2048))
             text
         }
     }
