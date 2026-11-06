@@ -106,6 +106,22 @@ val applicationModule = module {
     single { org.jellyfin.mobile.nflix.alerts.AlertsRepository(get(), get()) }
     single { org.jellyfin.mobile.nflix.alerts.AlertPrefs(androidApplication()) }
     single {
+        val api = get<org.jellyfin.mobile.nflix.data.NflixApi>()
+        val session = get<org.jellyfin.mobile.nflix.NflixSession>()
+        val chromecast = org.jellyfin.mobile.nflix.cast.CastBackends.chromecast(
+            androidApplication(),
+            { org.jellyfin.mobile.nflix.cast.CastReceiver.id },
+            {
+                val user = session.userId
+                val token = session.accessToken
+                if (user == null || token == null) null
+                else org.jellyfin.mobile.nflix.cast.CastProtocol.Credentials(user, api.deviceId, token, org.jellyfin.mobile.BuildConfig.NFLIX_SERVER_URL.trimEnd('/'), session.serverId, null)
+            },
+            { session.serverId },
+        )
+        org.jellyfin.mobile.nflix.cast.CastManager(listOfNotNull(chromecast, org.jellyfin.mobile.nflix.cast.JellyfinSessionsBackend(api) { api.deviceId }))
+    }
+    single {
         org.jellyfin.mobile.nflix.alerts.LocalAlertSources(
             listOf(org.jellyfin.mobile.nflix.alerts.AchievementAlertSource(get(), { runCatching { get<org.jellyfin.mobile.nflix.data.NflixApi>().deviceId }.getOrNull() }) { user, token -> org.jellyfin.mobile.nflix.data.AchievementHub(get(), user, token) }),
         )

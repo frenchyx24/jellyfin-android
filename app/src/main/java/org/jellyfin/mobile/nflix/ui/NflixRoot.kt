@@ -61,6 +61,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -113,6 +114,7 @@ private val tabs = listOf(
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 fun NflixRoot(deps: AppDeps, navigator: Navigator, backEnabled: Boolean = true) {
+    val castRemoteOpen = remember { mutableStateOf(false) }
     val holder = rememberSaveableStateHolder()
     val context = androidx.compose.ui.platform.LocalContext.current.applicationContext
     val music by deps.music.state.collectAsState()
@@ -181,6 +183,7 @@ fun NflixRoot(deps: AppDeps, navigator: Navigator, backEnabled: Boolean = true) 
 
             val showChrome = navigator.current != Route.NowPlaying && navigator.current !is Route.Reader
             Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().then(hiddenUnderTutorial)) {
+                CastRemoteBar(deps.cast, onExpand = { castRemoteOpen.value = true })
                 AnimatedVisibility(
                     visible = showChrome && music.current != null,
                     enter = slideInVertically { it } + fadeIn(),
@@ -199,6 +202,7 @@ fun NflixRoot(deps: AppDeps, navigator: Navigator, backEnabled: Boolean = true) 
             // Announcement popups wait until the tutorial is closed.
             if (!Tutorial.covering) NoticePopup()
             ItemMenuHost()
+            if (castRemoteOpen.value) CastRemoteSheet(deps.cast) { castRemoteOpen.value = false }
             TrailerHost()
             TutorialHost(backEnabled = backEnabled)
         }

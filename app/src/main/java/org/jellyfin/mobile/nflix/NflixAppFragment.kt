@@ -51,6 +51,7 @@ class NflixAppFragment : Fragment() {
     private val updater: NflixUpdater by inject()
     private val alerts: org.jellyfin.mobile.nflix.alerts.AlertsRepository by inject()
     private val alertPrefs: org.jellyfin.mobile.nflix.alerts.AlertPrefs by inject()
+    private val cast: org.jellyfin.mobile.nflix.cast.CastManager by inject()
     private val downloadDao: DownloadDao by inject()
     private val storageManager: StorageManager by inject()
 
@@ -68,10 +69,11 @@ class NflixAppFragment : Fragment() {
         horus.userName = session.userName
         val deps = AppDeps(
             api = api, jellyfin = jellyfin, plugins = plugins, horus = horus, music = music,
-            events = events, session = session, updater = updater, alerts = alerts, alertPrefs = alertPrefs,
+            events = events, session = session, updater = updater, alerts = alerts, alertPrefs = alertPrefs, cast = cast,
             downloadDao = downloadDao, storageManager = storageManager,
             onSignOut = {
                 alerts.clear()
+                lifecycleScope.launch { cast.disconnect() }
                 lifecycleScope.launch {
                     runCatching { api.send("POST", "Sessions/Logout") }
                     music.stop()
@@ -107,6 +109,15 @@ class NflixAppFragment : Fragment() {
                     mainViewModel.consumeOpenItem()
                     navViewModel.navigator.open(Route.Item(id))
                 }
+            }
+        }
+        // Receiver app chosen by the server admin for this user (Jellyfin's when unset).
+        viewLifecycleOwner.lifecycleScope.launch {
+            runCatching {
+                val me = api.getJson("Users/Me") as? kotlinx.serialization.json.JsonObject
+                val config = me?.get("Configuration") as? kotlinx.serialization.json.JsonObject
+                (config?.get("CastReceiverId") as? kotlinx.serialization.json.JsonPrimitive)?.content
+                    ?.takeIf { Regex("[A-Z0-9]{8}").matches(it) }?.let { org.jellyfin.mobile.nflix.cast.CastReceiver.id = it }
             }
         }
         // Signed in: the alerts worker runs every 15 min (Android minimum), like Mira Connect.

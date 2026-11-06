@@ -36,6 +36,7 @@ class AppDeps(
     val updater: NflixUpdater,
     val alerts: org.jellyfin.mobile.nflix.alerts.AlertsRepository,
     val alertPrefs: org.jellyfin.mobile.nflix.alerts.AlertPrefs,
+    val cast: org.jellyfin.mobile.nflix.cast.CastManager,
     private val downloadDao: DownloadDao,
     private val storageManager: StorageManager,
     val onSignOut: () -> Unit,
@@ -81,6 +82,14 @@ class AppDeps(
     fun playVideos(scope: CoroutineScope, ids: List<String>, startIndex: Int, resumeTicks: Long?) {
         val uuids = ids.mapNotNull { it.toUUIDOrNull() }
         if (uuids.isEmpty()) return
+        // A screen is connected: it plays, the phone becomes the remote.
+        if (cast.connected) {
+            scope.launch {
+                val queue = ids.drop(startIndex.coerceIn(0, ids.lastIndex)).take(50).map { id -> jellyfin.cachedItem(id) ?: Item(id = id, type = "Video", mediaType = "Video") }
+                if (!cast.play(queue, resumeTicks ?: 0)) Timber.w("Cast play refused")
+            }
+            return
+        }
         val selectedId = uuids.getOrNull(startIndex.coerceIn(0, uuids.lastIndex)) ?: uuids.first()
         scope.launch {
             val local = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
