@@ -32,6 +32,10 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.animation.core.spring
+import androidx.compose.material.icons.rounded.RemoveDone
+import androidx.compose.material.icons.rounded.DoneAll
+import androidx.compose.material.icons.rounded.RadioButtonUnchecked
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.MenuBook
 import androidx.compose.material.icons.rounded.Add
@@ -114,6 +118,11 @@ fun DetailScreen(id: String, origin: String?) {
     val userData by deps.jellyfin.userDataChanges.collectAsState()
     val merged = item?.let { base -> userData[base.id]?.let { base.copy(userData = it) } ?: base }
 
+    val accent = rememberAccent(item?.let { deps.jellyfin.primary(it, 120) })
+    val trailerUrl = rememberLoad("hero-trailer", id) {
+        if ((item?.localTrailerCount ?: 0) > 0) deps.jellyfin.localTrailers(id).firstOrNull()?.let(deps.jellyfin::trailerStreamUrl) else null
+    }.value
+    val collapsed by remember { derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 900 } }
     Box(Modifier.fillMaxSize().background(Nflix.Night)) {
         if (merged == null) {
             Column {
@@ -122,12 +131,17 @@ fun DetailScreen(id: String, origin: String?) {
             }
         } else {
             LazyColumn(state = listState, contentPadding = PaddingValues(bottom = ContentBottomPadding)) {
-                item(key = "header") { DetailHeader(merged, origin, listState.firstVisibleItemScrollOffset.toFloat()) }
-                item(key = "actions") { Actions(merged) { reloader.reload() } }
-                item(key = "overview") { Overview(merged) }
+                item(key = "header") {
+                    val scroll = if (listState.firstVisibleItemIndex == 0) listState.firstVisibleItemScrollOffset.toFloat() else 2000f
+                    if (merged.isBook || merged.isAudioBook) DetailHeader(merged, origin, scroll)
+                    else CinematicHeader(merged, origin, scroll, accent, trailerUrl)
+                }
+                item(key = "actions") { Actions(merged, accent) { reloader.reload() } }
+                if (merged.type == "Series") item(key = "next-up") { SeriesProgress(merged, accent, Modifier.appear(80)) }
+                item(key = "overview") { Overview(merged, Modifier.appear(120)) }
                 when (merged.type) {
-                    "Series" -> item(key = "seasons") { Seasons(merged) }
-                    "Season" -> item(key = "episodes") { EpisodeList(merged.seriesId ?: merged.id, merged.id) }
+                    "Series" -> item(key = "seasons") { Seasons(merged, accent) }
+                    "Season" -> item(key = "episodes") { EpisodeList(merged.seriesId ?: merged.id, merged.id, accent) }
                     "BoxSet" -> item(key = "children") { CollectionChildren(merged) }
                 }
                 if (merged.people.isNotEmpty()) {
@@ -136,7 +150,10 @@ fun DetailScreen(id: String, origin: String?) {
                 item(key = "similar") { SimilarRow(merged) }
             }
         }
-        BackButton()
+        if (!collapsed) BackButton()
+        merged?.let { m ->
+            CollapsedTitleBar(collapsed, m.name, accent) { if (m.type == "Series") FollowBell(m.id, m.name) }
+        }
     }
 }
 
@@ -255,18 +272,19 @@ private fun MetaLine(item: Item, centered: Boolean = false) {
 }
 
 @Composable
-private fun Actions(item: Item, onChanged: () -> Unit) {
+private fun Actions(item: Item, accent: Color, onChanged: () -> Unit) {
     val deps = LocalDeps.current
     val navigator = LocalNavigator.current
     val scope = rememberCoroutineScope()
     val data = item.userData
     val resumable = (data?.positionTicks ?: 0) > 0 && item.isPlayableVideo
+    val pulse = rememberArrivalPulse(item.id)
     Column(Modifier.padding(horizontal = 20.dp, vertical = 16.dp)) {
         Button(
             onClick = { if (item.isBook) navigator.open(Route.Reader(item.id)) else deps.play(scope, item, navigator = navigator) },
             colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black),
             shape = RoundedCornerShape(8.dp),
-            modifier = Modifier.fillMaxWidth().height(52.dp),
+            modifier = Modifier.fillMaxWidth().height(52.dp).graphicsLayer { scaleX = pulse; scaleY = pulse },
         ) {
             Icon(if (item.isBook) Icons.AutoMirrored.Rounded.MenuBook else Icons.Rounded.PlayArrow, null, Modifier.size(28.dp))
             Spacer(Modifier.width(8.dp))
@@ -294,26 +312,18 @@ private fun Actions(item: Item, onChanged: () -> Unit) {
         }
         if (resumable && deps.plugins.enhanced.showWatchProgress) {
             Spacer(Modifier.height(12.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.weight(1f).height(4.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.18f))) {
-                    Box(Modifier.fillMaxHeight().fillMaxWidth(item.progress).background(Nflix.Red))
-                }
-                Spacer(Modifier.width(10.dp))
-                val left = item.runtimeMinutes?.let { (it * (1f - item.progress)).toInt() }?.takeIf { it > 0 }
-                Text(
-                    left?.let { "Reste ${formatRuntime(it)}" } ?: formatTicks(data!!.positionTicks),
-                    style = MaterialTheme.typography.labelMedium, color = Nflix.Muted,
-                )
-            }
+            val left = item.runtimeMinutes?.let { (it * (1f - item.progress)).toInt() }?.takeIf { it > 0 }
+            val at = formatTicks(data!!.positionTicks)
+            ResumeRing(item.progress, "Reprendre à $at" + (left?.let { " · reste ${formatRuntime(it)}" } ?: ""), accent, { deps.play(scope, item, navigator = navigator) })
         }
         Spacer(Modifier.height(14.dp))
         Row(horizontalArrangement = Arrangement.SpaceEvenly, modifier = Modifier.fillMaxWidth()) {
             val favorite = data?.favorite == true
-            ActionIcon(if (favorite) Icons.Rounded.Check else Icons.Rounded.Add, "Ma liste", favorite) { scope.launch { deps.jellyfin.setFavorite(item, !favorite) } }
+            ActionIcon(if (favorite) Icons.Rounded.Check else Icons.Rounded.Add, "Ma liste", favorite, accent) { scope.launch { deps.jellyfin.setFavorite(item, !favorite) } }
             if (item.type == "Series") FollowBell(item.id, item.name)
             if (!item.isBook) {
                 val played = data?.played == true
-                ActionIcon(if (played) Icons.Rounded.CheckCircle else Icons.Rounded.Visibility, if (played) "Vu" else "Marquer vu", played) {
+                ActionIcon(if (played) Icons.Rounded.CheckCircle else Icons.Rounded.Visibility, if (played) "Vu" else "Marquer vu", played, accent) {
                     scope.launch { deps.jellyfin.setPlayed(item, !played); onChanged() }
                 }
             }
@@ -342,10 +352,10 @@ private fun Actions(item: Item, onChanged: () -> Unit) {
 }
 
 @Composable
-private fun ActionIcon(icon: ImageVector, label: String, active: Boolean = false, onClick: () -> Unit) {
+private fun ActionIcon(icon: ImageVector, label: String, active: Boolean = false, accent: Color = Nflix.Red, onClick: () -> Unit) {
     Column(Modifier.width(74.dp).pressable(onClick), horizontalAlignment = Alignment.CenterHorizontally) {
-        AnimatedContent(icon, transitionSpec = { fadeIn(tween(200)) togetherWith fadeOut(tween(120)) }, label = "action-icon") { current ->
-            Icon(current, label, tint = if (active) Nflix.Red else Nflix.Text, modifier = Modifier.size(26.dp))
+        AnimatedContent(icon, transitionSpec = { (fadeIn(tween(200)) + androidx.compose.animation.scaleIn(initialScale = 0.6f)) togetherWith fadeOut(tween(120)) }, label = "action-icon") { current ->
+            Icon(current, label, tint = if (active) accent else Nflix.Text, modifier = Modifier.size(26.dp))
         }
         Spacer(Modifier.height(4.dp))
         Text(label, style = MaterialTheme.typography.labelSmall, color = Nflix.Muted, maxLines = 1)
@@ -354,17 +364,18 @@ private fun ActionIcon(icon: ImageVector, label: String, active: Boolean = false
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun Overview(item: Item) {
+private fun Overview(item: Item, modifier: Modifier = Modifier) {
     val navigator = LocalNavigator.current
     var expanded by rememberSaveable { mutableStateOf(false) }
-    Column(Modifier.padding(horizontal = 20.dp)) {
+    Column(modifier.padding(horizontal = 20.dp)) {
         item.taglines.firstOrNull()?.let { Text(it, style = MaterialTheme.typography.titleSmall, color = Nflix.Text.copy(alpha = 0.9f)); Spacer(Modifier.height(6.dp)) }
         item.overview?.let { text ->
             Text(
                 text, style = MaterialTheme.typography.bodyMedium, color = Nflix.Muted,
                 maxLines = if (expanded) Int.MAX_VALUE else 4, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.animateContentSize().clickable { expanded = !expanded },
+                modifier = Modifier.animateContentSize().clickable(onClickLabel = if (expanded) "Réduire" else "Lire la suite") { expanded = !expanded },
             )
+            if (!expanded && text.length > 220) Text("Lire la suite", style = MaterialTheme.typography.labelLarge, color = Nflix.Text, modifier = Modifier.padding(top = 4.dp).clickable { expanded = true })
         }
         if (item.genres.isNotEmpty()) {
             Spacer(Modifier.height(12.dp))
@@ -394,7 +405,7 @@ private fun typesForItem(item: Item) = when (item.type) {
 }
 
 @Composable
-private fun Seasons(series: Item) {
+private fun Seasons(series: Item, accent: Color) {
     val deps = LocalDeps.current
     val seasons = rememberLoad("seasons", series.id) { deps.jellyfin.seasons(series.id) }.value.orEmpty()
     if (seasons.isEmpty()) return
@@ -415,14 +426,24 @@ private fun Seasons(series: Item) {
                 Tab(selected = i == index, onClick = { selected = i }, text = { Text(season.name, maxLines = 1) })
             }
         }
-        AnimatedContent(seasons[index].id, transitionSpec = { fadeIn(tween(250)) togetherWith fadeOut(tween(150)) }, label = "season") { seasonId ->
-            EpisodeList(series.id, seasonId)
+        val season = seasons[index]
+        SeasonTools(season, accent)
+        AnimatedContent(
+            index,
+            transitionSpec = {
+                val forward = targetState >= initialState
+                (androidx.compose.animation.slideInHorizontally(tween(280)) { if (forward) it / 4 else -it / 4 } + fadeIn(tween(250))) togetherWith fadeOut(tween(150))
+            },
+            label = "season",
+        ) { shown ->
+            EpisodeList(series.id, seasons[shown.coerceIn(0, seasons.lastIndex)].id, accent)
         }
+        UpcomingEpisodes(series, accent)
     }
 }
 
 @Composable
-private fun EpisodeList(seriesId: String, seasonId: String) {
+private fun EpisodeList(seriesId: String, seasonId: String, accent: Color = Nflix.Red) {
     val deps = LocalDeps.current
     val navigator = LocalNavigator.current
     val scope = rememberCoroutineScope()
@@ -452,8 +473,11 @@ private fun EpisodeList(seriesId: String, seasonId: String) {
                     Text(listOfNotNull(formatRuntime(episode.runtimeMinutes), episode.premiereDate?.take(10)).joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = Nflix.Muted)
                     episode.overview?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = Nflix.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis) }
                 }
-                if (episode.userData?.played == true) {
-                    IconButton(onClick = { scope.launch { deps.jellyfin.setPlayed(episode, false) } }) { Icon(Icons.Rounded.CheckCircle, "Vu", tint = Nflix.Red) }
+                val played = episode.userData?.played == true
+                IconButton(onClick = { scope.launch { deps.jellyfin.setPlayed(episode, !played) } }) {
+                    AnimatedContent(played, transitionSpec = { androidx.compose.animation.scaleIn(spring(dampingRatio = 0.45f)) + fadeIn() togetherWith fadeOut(tween(90)) }, label = "played") { on ->
+                        Icon(if (on) Icons.Rounded.CheckCircle else Icons.Rounded.RadioButtonUnchecked, if (on) "Vu, marquer non vu" else "Marquer vu", tint = if (on) accent else Nflix.Muted)
+                    }
                 }
             }
         }
@@ -531,3 +555,69 @@ fun PersonScreen(id: String, name: String) {
 
 @Suppress("unused")
 private val heroGradient = Brush.verticalGradient(listOf(Color.Transparent, Nflix.Night))
+
+
+/** Next episode to watch and what is left in the series. */
+@Composable
+private fun SeriesProgress(series: Item, accent: Color, modifier: Modifier = Modifier) {
+    val deps = LocalDeps.current
+    val navigator = LocalNavigator.current
+    val scope = rememberCoroutineScope()
+    val next = rememberLoad("next-up", series.id) { deps.jellyfin.nextUpFor(series.id) }.value ?: return
+    val left = series.userData?.unplayed
+    Row(
+        modifier.padding(horizontal = 20.dp, vertical = 4.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Nflix.Surface)
+            .pressable({ deps.play(scope, next, navigator = navigator) }, { navigator.open(Route.Item(next.id)) }).padding(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.width(112.dp).aspectRatio(16f / 9f).clip(RoundedCornerShape(10.dp))) {
+            NImage(deps.jellyfin.thumb(next, 320), Modifier.fillMaxSize())
+            ProgressBar(next.progress, Modifier.align(Alignment.BottomCenter))
+        }
+        Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+            Text("Prochain épisode", style = MaterialTheme.typography.labelMedium, color = accent, fontWeight = FontWeight.Bold)
+            Text(listOfNotNull(next.episodeLabel, next.name).joinToString(" · "), style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            if (left != null && left > 0) Text("Encore $left épisode${if (left > 1) "s" else ""} à voir", style = MaterialTheme.typography.bodySmall, color = Nflix.Muted)
+        }
+        Icon(Icons.Rounded.PlayArrow, "Lire le prochain épisode", tint = Color.White)
+    }
+}
+
+/** Season header tools: watched count and "mark the whole season". */
+@Composable
+private fun SeasonTools(season: Item, accent: Color) {
+    val deps = LocalDeps.current
+    val scope = rememberCoroutineScope()
+    val userData by deps.jellyfin.userDataChanges.collectAsState()
+    val played = (userData[season.id] ?: season.userData)?.played == true
+    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        val unplayed = season.userData?.unplayed
+        Text(
+            when { played -> "Saison vue"; unplayed != null && unplayed > 0 -> "$unplayed épisode${if (unplayed > 1) "s" else ""} non vu${if (unplayed > 1) "s" else ""}"; else -> "" },
+            style = MaterialTheme.typography.bodySmall, color = Nflix.Muted, modifier = Modifier.weight(1f),
+        )
+        androidx.compose.material3.TextButton(onClick = { scope.launch { deps.jellyfin.setPlayed(season, !played) } }) {
+            Icon(if (played) Icons.Rounded.RemoveDone else Icons.Rounded.DoneAll, null, tint = accent, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(if (played) "Marquer la saison non vue" else "Marquer la saison vue", color = accent)
+        }
+    }
+}
+
+/** Announced episodes from the release calendar, greyed with their estimated date on Nflix. */
+@Composable
+private fun UpcomingEpisodes(series: Item, accent: Color) {
+    val deps = LocalDeps.current
+    val today = remember { java.time.LocalDate.now() }
+    val page = rememberLoad("upcoming", series.id) { runCatching { deps.alerts.calendar(today, today.plusDays(90)) }.getOrNull() }.value
+    val id = org.jellyfin.mobile.nflix.alerts.AlertsRepository.normalize(series.id)
+    val upcoming = page?.events.orEmpty().filter { !it.available && (it.seriesId == id || it.itemId == id) }.distinctBy { it.id }.take(6)
+    if (upcoming.isEmpty()) return
+    Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("À venir", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
+        upcoming.forEach { event ->
+            val day = org.jellyfin.mobile.nflix.alerts.CalendarModel.day(event.nflixAt)
+            UpcomingEpisodeCard(event.title, event.subtitle, "${org.jellyfin.mobile.nflix.alerts.CalendarModel.dayTitle(day, today)} · ${org.jellyfin.mobile.nflix.alerts.CalendarModel.confidenceLabel(event)}", accent)
+        }
+    }
+}

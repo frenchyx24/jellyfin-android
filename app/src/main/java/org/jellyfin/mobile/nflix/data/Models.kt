@@ -118,6 +118,8 @@ data class Item(
     @SerialName("MediaType") val mediaType: String? = null,
     @SerialName("Status") val status: String? = null,
     @SerialName("LocalTrailerCount") val localTrailerCount: Int? = null,
+    @SerialName("AirDays") val airDays: List<String> = emptyList(),
+    @SerialName("AirTime") val airTime: String? = null,
 ) {
     val isFolderLike: Boolean get() = type in setOf("Series", "Season", "BoxSet", "MusicAlbum", "MusicArtist", "Playlist", "CollectionFolder", "Folder")
     val isPlayableVideo: Boolean get() = type in setOf("Movie", "Episode", "Video", "MusicVideo", "Trailer")

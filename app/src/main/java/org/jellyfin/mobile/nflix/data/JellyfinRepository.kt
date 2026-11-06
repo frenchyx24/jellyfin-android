@@ -123,6 +123,13 @@ class JellyfinRepository(private val api: NflixApi) {
         api.get("Items/$id", Item.serializer(), baseQuery(detailFields) + mapOf("userId" to api.userId))
     }
 
+    /** Next episode to watch in one series, or null when caught up. */
+    suspend fun nextUpFor(seriesId: String): Item? = runCatching {
+        api.get("Shows/NextUp", ItemsPage.serializer(), baseQuery() + mapOf("userId" to api.userId, "seriesId" to seriesId, "limit" to 1, "enableResumable" to true)).items.firstOrNull()
+    }.getOrNull()
+
+    fun trailerStreamUrl(trailer: Item) = api.streamUrl("Videos/${trailer.id}/stream", mapOf("static" to true))
+
     suspend fun seasons(seriesId: String) =
         page("Shows/$seriesId/Seasons", baseQuery() + mapOf("userId" to api.userId)).items
 
