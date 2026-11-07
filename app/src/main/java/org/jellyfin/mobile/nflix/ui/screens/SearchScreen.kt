@@ -127,6 +127,7 @@ import org.jellyfin.mobile.nflix.data.Item
 import org.jellyfin.mobile.nflix.data.NameId
 import org.jellyfin.mobile.nflix.data.VideoCatalog
 import org.jellyfin.mobile.nflix.ui.ContentBottomPadding
+import org.jellyfin.mobile.nflix.ui.ItemMenu
 import org.jellyfin.mobile.nflix.ui.LocalDeps
 import org.jellyfin.mobile.nflix.ui.LocalNavigator
 import org.jellyfin.mobile.nflix.ui.NImage
