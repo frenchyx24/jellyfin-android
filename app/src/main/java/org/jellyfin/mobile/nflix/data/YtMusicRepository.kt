@@ -4,6 +4,7 @@ import androidx.compose.runtime.Immutable
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 
@@ -75,7 +76,7 @@ class YtMusicRepository(private val api: NflixApi) {
 
     /** Downloads the track into the Jellyfin music library (admin). Server answers {downloaded,path,title,artist}. */
     suspend fun download(videoId: String): JsonObject =
-        api.send("POST", "Plugins/NflixButler/yt/download", body = buildJsonObject { put("videoId", videoId) })?.jsonObject
+        api.send("POST", "Plugins/NflixButler/yt/download", body = buildJsonObject { put("videoId", JsonPrimitive(videoId)) })?.jsonObject
             ?: error("Réponse vide")
 
     /** Directly playable proxied audio URL (signed-in via `api_key`). */
