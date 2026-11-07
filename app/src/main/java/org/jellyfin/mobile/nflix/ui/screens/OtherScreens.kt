@@ -36,6 +36,7 @@ import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.AdminPanelSettings
 import androidx.compose.material.icons.rounded.EmojiEvents
 import androidx.compose.material.icons.rounded.Inbox
+import androidx.compose.material.icons.rounded.SyncAlt
 import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Person
@@ -168,6 +169,7 @@ fun ProfileScreen() {
         add(ProfileEntry("badges", Icons.Rounded.EmojiEvents, "Mes succès", "Badges, rang, progression et vitrine", ProfileAccents.Badges) { navigator.open(Route.Badges) })
         add(ProfileEntry("downloads", Icons.Rounded.Download, "Téléchargements", "Vos films et épisodes hors ligne", ProfileAccents.Downloads) { deps.openDownloads() })
         add(ProfileEntry("horus", Icons.Rounded.Inbox, "Mes demandes Horus", "Suivi de vos demandes", ProfileAccents.Horus) { navigator.open(Route.HorusRequests) })
+        add(ProfileEntry("sync", Icons.Rounded.SyncAlt, "Comptes liés", "Deezer et Spotify : playlists importées et envoyées", ProfileAccents.Mira) { navigator.open(Route.SyncAccounts) })
         add(ProfileEntry("releases", Icons.Rounded.CalendarMonth, "Prochaines sorties", "Calendrier des épisodes et films à venir", ProfileAccents.Releases) { navigator.open(Route.Releases) })
     }
     val newsEntries = listOf(

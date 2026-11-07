@@ -51,6 +51,9 @@ class AppDeps(
     /** YouTube Music search + stream proxy (Nflix Butler plugin). */
     val yt: org.jellyfin.mobile.nflix.data.YtMusicRepository by lazy { org.jellyfin.mobile.nflix.data.YtMusicRepository(api) }
 
+    /** Deezer/Spotify account linking and playlist sync. */
+    val sync: org.jellyfin.mobile.nflix.data.SyncRepository by lazy { org.jellyfin.mobile.nflix.data.SyncRepository(api) }
+
     /** Starts the right native player for any item. */
     fun play(scope: CoroutineScope, item: Item, fromStart: Boolean = false, navigator: Navigator? = null) {
         scope.launch {
