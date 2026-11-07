@@ -94,6 +94,10 @@ class YtMusicRepository(private val api: NflixApi) {
     fun streamUrl(videoId: String): String =
         api.url("Plugins/NflixButler/yt/stream", mapOf("videoId" to videoId, "ApiKey" to api.token.orEmpty())).toString()
 
+    /** One feed section: a title and its tracks. */
+    suspend fun feed(): List<YtFeedSection> =
+        api.get("Plugins/NflixButler/yt/feed", FeedResponse.serializer()).sections
+
     @Serializable
     private data class HistoryResponse(@SerialName("searches") val searches: List<YtSearchHistoryEntry> = emptyList())
 
@@ -102,4 +106,14 @@ class YtMusicRepository(private val api: NflixApi) {
 
     @Serializable
     private data class AlbumResponse(@SerialName("results") val results: List<YtHit> = emptyList())
+
+    @Serializable
+    data class YtFeedSection(
+        @SerialName("title") val title: String = "",
+        @SerialName("subtitle") val subtitle: String = "",
+        @SerialName("tracks") val tracks: List<YtHit> = emptyList(),
+    )
+
+    @Serializable
+    private data class FeedResponse(@SerialName("sections") val sections: List<YtFeedSection> = emptyList())
 }

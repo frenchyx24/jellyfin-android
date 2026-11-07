@@ -81,7 +81,7 @@ import org.jellyfin.mobile.nflix.ui.rememberLoad
 import org.jellyfin.mobile.nflix.ui.value
 import java.time.LocalTime
 
-private enum class MusicTab(val label: String) { Home("Tout"), Albums("Albums"), Artists("Artistes"), Playlists("Playlists") }
+private enum class MusicTab(val label: String) { Home("Tout"), PourToi("Pour toi"), Albums("Albums"), Artists("Artistes"), Playlists("Playlists") }
 
 private data class MusicHomeData(
     val quick: List<Item>,
@@ -166,6 +166,7 @@ fun MusicScreen() {
                 music == null && views.isNotEmpty() -> EmptyState(Icons.Rounded.MusicNote, "Pas de bibliothèque musicale", null)
                 music == null -> Box(Modifier.fillMaxSize())
                 current == MusicTab.Home -> MusicHome(music.id, playlists?.id)
+                current == MusicTab.PourToi -> YtFeedScreen()
                 current == MusicTab.Albums -> BrowseGrid(viewId = music.id, types = "MusicAlbum", key = "albums-${music.id}", square = true)
                 current == MusicTab.Artists -> ArtistsGrid(music.id)
                 else -> BrowseGrid(viewId = playlists?.id, types = "Playlist", key = "playlists", square = true)

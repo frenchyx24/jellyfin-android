@@ -3,15 +3,20 @@ package org.jellyfin.mobile.nflix.ui.screens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -31,6 +36,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -43,6 +50,7 @@ import org.jellyfin.mobile.nflix.ui.LocalNavigator
 import org.jellyfin.mobile.nflix.ui.NImage
 import org.jellyfin.mobile.nflix.ui.Nflix
 import org.jellyfin.mobile.nflix.ui.Route
+import org.jellyfin.mobile.nflix.ui.Skeleton
 
 /** Shared list of YT Music tracks; tap plays the whole list from the tapped index. */
 @Composable
@@ -105,11 +113,26 @@ fun YtArtistScreen(name: String) {
             .onFailure { error = it.message }
     }
     Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 16.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            BackButton()
-            Column(Modifier.weight(1f).padding(start = 8.dp)) {
-                Text(name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text("Artiste", style = MaterialTheme.typography.bodySmall, color = Nflix.Muted)
+        if (result != null) {
+            val hero = result!!.results.firstOrNull()?.thumbnail?.replace("hqdefault", "maxresdefault")
+            Box(Modifier.fillMaxWidth().height(240.dp)) {
+                NImage(hero, Modifier.fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Crop, placeholderIcon = Icons.Rounded.Person)
+                Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Nflix.Night))))
+                Row(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(name, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Black, color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text("Artiste", style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.7f))
+                    }
+                }
+                Box(Modifier.align(Alignment.TopStart).padding(4.dp)) { BackButton() }
+            }
+        } else {
+            Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 16.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                BackButton()
+                Column(Modifier.weight(1f).padding(start = 8.dp)) {
+                    Text(name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("Artiste", style = MaterialTheme.typography.bodySmall, color = Nflix.Muted)
+                }
             }
         }
         when {
@@ -171,6 +194,72 @@ fun YtAlbumScreen(browseId: String, title: String) {
                 CircularProgressIndicator(color = Nflix.Red)
             }
             else -> YtTrackList(hits!!) { tracks, index -> deps.music.playYt(tracks, index) }
+        }
+    }
+}
+
+/** Personalized feed ("Pour toi" tab): sections built server-side from play history + online recents. */
+@Composable
+fun YtFeedScreen() {
+    val deps = LocalDeps.current
+    var sections by remember { mutableStateOf<List<org.jellyfin.mobile.nflix.data.YtMusicRepository.YtFeedSection>?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        runCatching { deps.yt.feed() }
+            .onSuccess { sections = it }
+            .onFailure { error = it.message }
+    }
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(top = 8.dp, bottom = ContentBottomPadding),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
+    ) {
+        when {
+            error != null -> item { EmptyState(Icons.Rounded.MusicNote, "Fil indisponible", error) }
+            sections == null -> items(3) { Skeleton(Modifier.padding(horizontal = 16.dp).fillMaxWidth().height(190.dp)) }
+            sections!!.isEmpty() -> item {
+                Text(
+                    "Écoute quelques morceaux pour que le fil se remplisse.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Nflix.Muted,
+                    modifier = Modifier.padding(24.dp),
+                )
+            }
+            else -> {
+                sections!!.forEachIndexed { sectionIndex, section ->
+                    val tracks = remember(section) {
+                        section.tracks.filter { it.kind == "track" }.map {
+                            org.jellyfin.mobile.nflix.data.YtTrack(videoId = it.videoId, title = it.title, artist = it.subtitle, thumbnail = it.thumbnail.orEmpty())
+                        }
+                    }
+                    item(key = "t$sectionIndex") {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(section.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, modifier = Modifier.padding(horizontal = 16.dp))
+                            if (section.subtitle.isNotBlank()) Text(section.subtitle, style = MaterialTheme.typography.bodySmall, color = Nflix.Muted, modifier = Modifier.padding(horizontal = 16.dp))
+                        }
+                    }
+                    item(key = "r$sectionIndex") {
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            items(tracks.size) { index ->
+                                val track = tracks[index]
+                                Column(Modifier.width(150.dp).clickable { deps.music.playYt(tracks, index) }) {
+                                    NImage(
+                                        track.thumbnail.takeIf { it.isNotBlank() },
+                                        Modifier.size(150.dp).clip(RoundedCornerShape(14.dp)),
+                                        placeholderIcon = Icons.Rounded.MusicNote,
+                                    )
+                                    Spacer(Modifier.size(6.dp))
+                                    Text(track.title, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(track.artist, style = MaterialTheme.typography.bodySmall, color = Nflix.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
