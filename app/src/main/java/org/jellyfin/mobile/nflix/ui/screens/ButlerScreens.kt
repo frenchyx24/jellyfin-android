@@ -7,16 +7,14 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoFixHigh
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.SearchOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -26,6 +24,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -47,34 +46,35 @@ import org.jellyfin.mobile.nflix.ui.Load
 import org.jellyfin.mobile.nflix.ui.LocalDeps
 import org.jellyfin.mobile.nflix.ui.Nflix
 import org.jellyfin.mobile.nflix.ui.rememberLoad
-import org.jellyfin.mobile.nflix.ui.rememberReloader
 import org.jellyfin.mobile.nflix.ui.value
 
 /**
  * Nflix Butler, administrators only. The server enforces `RequiresElevation` on every route it
- * calls; this screen just drives the passes, the journal, and the repairs one item at a time.
+ * calls; this screen drives the passes, the journal, and the repairs one item at a time.
+ *
+ * Deliberately plain: no list keys, no non-null assertions, no date library. A refresh bumps an
+ * integer that the three loads use as a key, so nothing else can throw while the screen renders.
  */
 @Composable
 fun ButlerScreen() {
     val deps = LocalDeps.current
     val scope = rememberCoroutineScope()
-    val reloader = rememberReloader()
     var busy by remember { mutableStateOf<String?>(null) }
+    var pass by remember { mutableIntStateOf(0) }
 
     AdminOnly("l'assistant médias") {
-        val status = rememberLoad("butler-status", reloader = reloader) { deps.butler.status() }
-        val entries = rememberLoad("butler-entries", reloader = reloader) { deps.butler.entries() }
-        val unmatched = rememberLoad("butler-unmatched", reloader = reloader) { deps.butler.unmatched() }
+        val status = rememberLoad("butler-status", pass) { deps.butler.status() }
+        val entries = rememberLoad("butler-entries", pass) { deps.butler.entries() }
+        val unmatched = rememberLoad("butler-unmatched", pass) { deps.butler.unmatched() }
 
         fun run(label: String, block: suspend () -> Unit, done: String) {
             if (busy != null) return
             busy = label
             scope.launch {
-                runCatching { block() }
-                    .onSuccess { ItemMenu.message = done }
-                    .onFailure { ItemMenu.message = it.message ?: "Action impossible" }
+                val failure = runCatching { block() }.exceptionOrNull()
+                ItemMenu.message = failure?.message?.takeIf { it.isNotBlank() } ?: done
                 busy = null
-                reloader.reload()
+                pass++
             }
         }
 
@@ -97,79 +97,97 @@ fun ButlerScreen() {
                         colors = ButtonDefaults.buttonColors(containerColor = Nflix.Red),
                     ) {
                         if (busy == "run") {
-                            CircularProgressIndicator(Modifier.size(16.dp), color = Nflix.Text, strokeWidth = 2.dp)
+                            CircularProgressIndicator(
+                                Modifier.size(16.dp),
+                                color = Nflix.Text,
+                                strokeWidth = 2.dp,
+                            )
                         } else {
                             Text("Analyser maintenant")
                         }
                     }
-                    OutlinedButton(onClick = { reloader.reload() }, enabled = busy == null) {
+                    OutlinedButton(onClick = { pass++ }, enabled = busy == null) {
                         Icon(Icons.Rounded.Refresh, null, Modifier.size(18.dp))
                         Text("Rafraîchir", Modifier.padding(start = 6.dp))
                     }
                 }
             }
+
+            val state = status.value
+            val stateError = (status as? Load.Failed)?.message
             when {
-                status is Load.Failed -> item {
-                    EmptyState(Icons.Rounded.ErrorOutline, "État indisponible", status.message)
-                }
-                status.value == null -> item {
-                    Column(Modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator(color = Nflix.Red)
-                    }
-                }
-                else -> item { StatusCard(status.value!!) }
+                stateError != null -> item { EmptyState(Icons.Rounded.ErrorOutline, "État indisponible", stateError) }
+                state == null -> item { Spinner() }
+                else -> item { state?.let { StatusCard(it) } }
             }
-            item {
-                Text(
-                    "Dernières prises en charge",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp),
-                )
-            }
+
+            item { SectionTitle("Dernières prises en charge", 12.dp) }
+
             val journal = entries.value
+            val journalError = (entries as? Load.Failed)?.message
             when {
-                entries is Load.Failed -> item { EmptyState(Icons.Rounded.ErrorOutline, "Journal illisible", entries.message) }
-                journal == null || journal.isEmpty() -> item {
-                    Text(
-                        "Aucun passage enregistré pour le moment.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Nflix.Muted,
-                        modifier = Modifier.padding(horizontal = 16.dp),
-                    )
+                journalError != null -> item { EmptyState(Icons.Rounded.ErrorOutline, "Journal illisible", journalError) }
+                journal == null -> item { Spinner() }
+                journal.isEmpty() -> item { Hint("Aucun passage enregistré pour le moment.") }
+                else -> {
+                    val rows = journal.take(100)
+                    items(rows.size) { index -> EntryRow(rows[index]) }
                 }
-                else -> items(journal, key = { it.id }) { entry -> EntryRow(entry) }
             }
-            item {
-                Text(
-                    "Non identifiés",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp),
-                )
-            }
+
+            item { SectionTitle("Non identifiés", 16.dp) }
+
             val unknown = unmatched.value
+            val unknownError = (unmatched as? Load.Failed)?.message
             when {
-                unmatched is Load.Failed -> item { EmptyState(Icons.Rounded.ErrorOutline, "Liste illisible", unmatched.message) }
-                unknown == null || unknown.isEmpty() -> item {
-                    Text(
-                        "Toutes les fiches sont identifiées.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Nflix.Muted,
-                        modifier = Modifier.padding(horizontal = 16.dp),
-                    )
-                }
-                else -> items(unknown, key = { it.itemId }) { item ->
-                    UnmatchedRow(
-                        item = item,
-                        busy = busy,
-                        onFix = { run("fix", { deps.butler.fix(item.itemId) }, "Réparation demandée pour ${item.name}") },
-                        onRefresh = { run("refresh", { deps.butler.refresh(item.itemId) }, "Relecture demandée pour ${item.name}") },
-                    )
+                unknownError != null -> item { EmptyState(Icons.Rounded.ErrorOutline, "Liste illisible", unknownError) }
+                unknown == null -> item { Spinner() }
+                unknown.isEmpty() -> item { Hint("Toutes les fiches sont identifiées.") }
+                else -> {
+                    val rows = unknown.take(50)
+                    items(rows.size) { index ->
+                        val row = rows[index]
+                        UnmatchedRow(
+                            row = row,
+                            busy = busy,
+                            onFix = { run("fix", { deps.butler.fix(row.itemId) }, "Réparation demandée pour ${row.name}") },
+                            onRefresh = { run("refresh", { deps.butler.refresh(row.itemId) }, "Relecture demandée pour ${row.name}") },
+                        )
+                    }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun Spinner() {
+    Row(
+        Modifier.fillMaxWidth().padding(28.dp),
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        CircularProgressIndicator(Modifier.size(28.dp), color = Nflix.Red, strokeWidth = 2.dp)
+    }
+}
+
+@Composable
+private fun SectionTitle(text: String, top: androidx.compose.ui.unit.Dp) {
+    Text(
+        text,
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.Bold,
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = top),
+    )
+}
+
+@Composable
+private fun Hint(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.bodySmall,
+        color = Nflix.Muted,
+        modifier = Modifier.padding(horizontal = 16.dp),
+    )
 }
 
 @Composable
@@ -182,19 +200,26 @@ private fun StatusCard(status: ButlerStatus) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Rounded.AutoFixHigh, null, tint = if (status.running) Nflix.Success else Nflix.Muted)
             Text(
-                if (status.running) "  Passage en cours" else if (status.enabled) "  Actif" else "  Désactivé",
+                "  " + when {
+                    status.running -> "Passage en cours"
+                    status.enabled -> "Actif"
+                    else -> "Désactivé"
+                },
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold,
             )
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(18.dp),
+        ) {
             Stat("Fichiers vus", status.runs.toString())
             Stat("Classés", status.filed.toString())
             Stat("Réparés", status.repaired.toString())
             Stat("En attente", status.pending.toString())
         }
         Text(
-            "Dernier passage : ${relative(status.lastRunUtc)}",
+            "Dernier passage : ${stamp(status.lastRunUtc)}",
             style = MaterialTheme.typography.bodySmall,
             color = Nflix.Muted,
         )
@@ -207,16 +232,23 @@ private fun StatusCard(status: ButlerStatus) {
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        status.lastError?.let {
-            Text(it, style = MaterialTheme.typography.bodySmall, color = Nflix.Warning, maxLines = 3, overflow = TextOverflow.Ellipsis)
+        val error = status.lastError
+        if (!error.isNullOrBlank()) {
+            Text(
+                error,
+                style = MaterialTheme.typography.bodySmall,
+                color = Nflix.Warning,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
 
 @Composable
-private fun Stat(label: String, value: String) {
+private fun Stat(label: String, number: String) {
     Column {
-        Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+        Text(number, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
         Text(label, style = MaterialTheme.typography.labelSmall, color = Nflix.Muted)
     }
 }
@@ -229,11 +261,24 @@ private fun EntryRow(entry: ButlerEntry) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Text(time(entry.atUtc), style = MaterialTheme.typography.labelSmall, color = Nflix.Muted)
+        Text(hhmm(entry.atUtc), style = MaterialTheme.typography.labelSmall, color = Nflix.Muted)
         Column(Modifier.weight(1f)) {
-            Text(entry.label, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
-                "${entry.library.ifBlank { "—" }} · ${entry.action}${if (entry.message.isBlank()) "" else " · ${entry.message}"}",
+                entry.label.ifBlank { entry.title.ifBlank { "Sans titre" } },
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                buildString {
+                    append(entry.library.ifBlank { "—" })
+                    append(" · ")
+                    append(entry.action.ifBlank { "—" })
+                    if (entry.message.isNotBlank()) {
+                        append(" · ")
+                        append(entry.message)
+                    }
+                },
                 style = MaterialTheme.typography.labelSmall,
                 color = Nflix.Muted,
                 maxLines = 1,
@@ -241,7 +286,7 @@ private fun EntryRow(entry: ButlerEntry) {
             )
         }
         Text(
-            entry.status,
+            entry.status.ifBlank { "—" },
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Bold,
             color = when (entry.status) {
@@ -255,7 +300,7 @@ private fun EntryRow(entry: ButlerEntry) {
 
 @Composable
 private fun UnmatchedRow(
-    item: ButlerUnmatched,
+    row: ButlerUnmatched,
     busy: String?,
     onFix: () -> Unit,
     onRefresh: () -> Unit,
@@ -265,9 +310,24 @@ private fun UnmatchedRow(
             .background(Nflix.Surface).padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text(item.name.ifBlank { "Sans titre" }, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
         Text(
-            "${item.type}${item.year?.let { " · $it" } ?: ""} · ${item.path}",
+            row.name.ifBlank { "Sans titre" },
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Bold,
+        )
+        Text(
+            buildString {
+                append(row.type.ifBlank { "—" })
+                val year = row.year
+                if (year != null) {
+                    append(" · ")
+                    append(year)
+                }
+                if (row.path.isNotBlank()) {
+                    append(" · ")
+                    append(row.path)
+                }
+            },
             style = MaterialTheme.typography.labelSmall,
             color = Nflix.Muted,
             maxLines = 2,
@@ -286,20 +346,14 @@ private fun UnmatchedRow(
     }
 }
 
-/** "2026-11-07T12:34:56Z" → "12:34"; anything unexpected is shown as-is. */
-private fun time(iso: String?): String =
-    if (iso != null && iso.length >= 16 && iso[10] == 'T') iso.substring(11, 16) else ""
+/** "2026-11-07T12:34:56Z" → "2026-11-07 à 12:34"; anything shorter or empty → "jamais". */
+private fun stamp(iso: String?): String {
+    if (iso.isNullOrBlank() || iso.length < 16) return "jamais"
+    return iso.substring(0, 10) + " à " + iso.substring(11, 16)
+}
 
-private fun relative(iso: String?): String {
-    if (iso.isNullOrBlank()) return "jamais"
-    return runCatching {
-        val instant = java.time.Instant.parse(iso)
-        val minutes = java.time.Duration.between(instant, java.time.Instant.now()).toMinutes()
-        when {
-            minutes < 1 -> "à l'instant"
-            minutes < 60 -> "il y a $minutes min"
-            minutes < 1440 -> "il y a ${minutes / 60} h"
-            else -> "il y a ${minutes / 1440} j"
-        }
-    }.getOrDefault(iso)
+/** "2026-11-07T12:34:56Z" → "12:34"; anything unexpected → "". */
+private fun hhmm(iso: String?): String {
+    if (iso.isNullOrBlank() || iso.length < 16) return ""
+    return iso.substring(11, 16)
 }

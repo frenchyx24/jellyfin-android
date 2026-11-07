@@ -130,6 +130,8 @@ fun NflixRoot(deps: AppDeps, navigator: Navigator, backEnabled: Boolean = true) 
         deps.music.connect()
         deps.plugins.refreshConfigs()
         deps.plugins.refreshNotices()
+        // If the app crashed since the last start, send the stored trace to the server log.
+        runCatching { org.jellyfin.mobile.nflix.CrashLog.upload(deps.api) }
         if (deps.session.lastMethod == "mira" && deps.session.miraAvatar.isNullOrBlank()) {
             val account = withContext(Dispatchers.IO) { MiraAccountBridge(context).account() }
             account?.let { miraAccount ->
