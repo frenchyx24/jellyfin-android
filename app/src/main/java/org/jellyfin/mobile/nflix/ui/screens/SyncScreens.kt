@@ -63,6 +63,7 @@ import org.jellyfin.mobile.nflix.ui.Nflix
  * intercepts the redirect URI, so the code never leaves the device. Import matches tracks against
  * the local library (artist+title, server-side); Deezer export creates the playlist on the account.
  */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun SyncAccountsScreen() {
     val deps = LocalDeps.current
@@ -172,7 +173,7 @@ fun SyncAccountsScreen() {
             }
         }
         if (accounts.isNotEmpty()) {
-            item { Text("Liés", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 16.dp, top = 8.dp)) }
+            item { Text("Liés", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp)) }
             items(accounts, key = { it.service }) { account ->
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 16.dp).clip(RoundedCornerShape(12.dp)).background(Nflix.Surface).padding(14.dp),
@@ -193,7 +194,7 @@ fun SyncAccountsScreen() {
         accounts.forEach { account ->
             val lists = playlists[account.service].orEmpty()
             if (lists.isNotEmpty()) {
-                item { Text("Importer depuis ${account.service.replaceFirstChar { it.uppercase() }}", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 16.dp, top = 8.dp)) }
+                item { Text("Importer depuis ${account.service.replaceFirstChar { it.uppercase() }}", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp)) }
                 items(lists, key = { "${account.service}-${it.id}" }) { playlist ->
                     Row(
                         Modifier.fillMaxWidth().padding(horizontal = 16.dp).clip(RoundedCornerShape(12.dp)).background(Nflix.Surface)
@@ -228,7 +229,7 @@ fun SyncAccountsScreen() {
         val deezerLinked = accounts.any { it.service == "deezer" }
         val locals = localPlaylists.orEmpty()
         if (deezerLinked && locals.isNotEmpty()) {
-            item { Text("Envoyer sur Deezer", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 16.dp, top = 8.dp)) }
+            item { Text("Envoyer sur Deezer", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp)) }
             items(locals, key = { "local-${it.id}" }) { playlist ->
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 16.dp).clip(RoundedCornerShape(12.dp)).background(Nflix.Surface).padding(14.dp),
