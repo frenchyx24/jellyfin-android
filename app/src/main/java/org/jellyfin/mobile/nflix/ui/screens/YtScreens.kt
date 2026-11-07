@@ -209,6 +209,13 @@ fun YtFeedScreen() {
             .onSuccess { sections = it }
             .onFailure { error = it.message }
     }
+    val withTracks = remember(sections) {
+        sections?.map { section ->
+            section to section.tracks.filter { it.kind == "track" }.map {
+                org.jellyfin.mobile.nflix.data.YtTrack(videoId = it.videoId, title = it.title, artist = it.subtitle, thumbnail = it.thumbnail.orEmpty())
+            }
+        }.orEmpty()
+    }
     LazyColumn(
         Modifier.fillMaxSize(),
         contentPadding = PaddingValues(top = 8.dp, bottom = ContentBottomPadding),
@@ -226,13 +233,6 @@ fun YtFeedScreen() {
                 )
             }
             else -> {
-                val withTracks = remember(sections) {
-                    sections!!.map { section ->
-                        section to section.tracks.filter { it.kind == "track" }.map {
-                            org.jellyfin.mobile.nflix.data.YtTrack(videoId = it.videoId, title = it.title, artist = it.subtitle, thumbnail = it.thumbnail.orEmpty())
-                        }
-                    }
-                }
                 withTracks.forEachIndexed { sectionIndex, (section, tracks) ->
                     item(key = "t$sectionIndex") {
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
