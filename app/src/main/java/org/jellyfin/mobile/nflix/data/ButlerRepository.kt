@@ -38,24 +38,26 @@ data class ButlerStatus(
 )
 
 /** One journal entry (`GET .../api/entries`). */
+// The server serializes IntakeEntry in PascalCase (Jellyfin 12.4 default), while the
+// anonymous wrappers ("entries", "items", "started") keep their lower-case member names.
 @Immutable
 @Serializable
 data class ButlerEntry(
-    @SerialName("id") val id: String = "",
-    @SerialName("path") val path: String = "",
-    @SerialName("destination") val destination: String? = null,
-    @SerialName("kind") val kind: String = "",
-    @SerialName("title") val title: String = "",
-    @SerialName("year") val year: Int? = null,
-    @SerialName("season") val season: Int = 0,
-    @SerialName("episode") val episode: Int = 0,
-    @SerialName("library") val library: String = "",
-    @SerialName("action") val action: String = "",
-    @SerialName("status") val status: String = "",
-    @SerialName("message") val message: String = "",
-    @SerialName("itemId") val itemId: String? = null,
-    @SerialName("sizeBytes") val sizeBytes: Long = 0,
-    @SerialName("atUtc") val atUtc: String? = null,
+    @SerialName("Id") val id: String = "",
+    @SerialName("Path") val path: String = "",
+    @SerialName("Destination") val destination: String? = null,
+    @SerialName("Kind") val kind: String = "",
+    @SerialName("Title") val title: String = "",
+    @SerialName("Year") val year: Int? = null,
+    @SerialName("Season") val season: Int = 0,
+    @SerialName("Episode") val episode: Int = 0,
+    @SerialName("Library") val library: String = "",
+    @SerialName("Action") val action: String = "",
+    @SerialName("Status") val status: String = "",
+    @SerialName("Message") val message: String = "",
+    @SerialName("ItemId") val itemId: String? = null,
+    @SerialName("SizeBytes") val sizeBytes: Long = 0,
+    @SerialName("AtUtc") val atUtc: String? = null,
 ) {
     /** "Titre S01E02" for episodes, the title alone otherwise. */
     val label: String
