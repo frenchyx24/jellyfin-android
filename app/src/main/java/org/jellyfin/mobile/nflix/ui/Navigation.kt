@@ -43,6 +43,10 @@ sealed class Route(val key: String) {
     data object AdminRequests : Route("admin/requests")
     data object AdminActivity : Route("admin/activity")
     data object AdminButler : Route("admin/butler")
+    /** YouTube Music artist page (search by artist name). */
+    data class YtArtist(val name: String) : Route("ytartist/${java.net.URLEncoder.encode(name, "UTF-8")}")
+    /** YouTube Music album page (MPREb browse id). */
+    data class YtAlbum(val browseId: String, val title: String) : Route("ytalbum/$browseId/${java.net.URLEncoder.encode(title, "UTF-8")}")
     data class Saga(val name: String, val audio: Boolean) : Route("saga/$audio/$name")
     data object HorusRequests : Route("horus-requests")
     data object Releases : Route("releases")

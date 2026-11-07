@@ -83,6 +83,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material.icons.rounded.Album
+import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.AlertDialog
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -283,12 +287,17 @@ fun SearchScreen() {
     }
     // YouTube Music fills the gaps: results appear as ordinary audio items (`yt:` ids),
     // indistinguishable from library tracks, and play through the server proxy.
-    var ytTracks by remember { mutableStateOf<List<org.jellyfin.mobile.nflix.data.YtTrack>>(emptyList()) }
+    var ytResult by remember { mutableStateOf<org.jellyfin.mobile.nflix.data.YtSearchResult?>(null) }
     LaunchedEffect(Unit) {
         snapshotFlow { SearchQuery.parse(query).text }.debounce(600).distinctUntilChanged().collectLatest { q ->
-            ytTracks = emptyList()
+            ytResult = null
             if (q.length < 2) return@collectLatest
-            ytTracks = withTimeoutOrNull(10_000) { runCatching { deps.yt.search(q, 12) }.getOrNull() }.orEmpty()
+            ytResult = withTimeoutOrNull(10_000) { runCatching { deps.yt.search(q, 12) }.getOrNull() }
+        }
+    }
+    val ytTracks = remember(ytResult) {
+        ytResult?.results.orEmpty().map {
+            org.jellyfin.mobile.nflix.data.YtTrack(videoId = it.videoId, title = it.title, artist = it.subtitle, duration = 0, thumbnail = it.thumbnail.orEmpty())
         }
     }
 
@@ -317,6 +326,7 @@ fun SearchScreen() {
             requests[key] = runCatching { deps.horus.request(media) }.fold({ RequestState.Sent }, { error -> if (error.message?.contains("déjà") == true) RequestState.Sent else RequestState.Failed })
         }
     }
+    var ytMenu by remember { mutableStateOf<org.jellyfin.mobile.nflix.data.YtHit?>(null) }
     val done = state as? SearchState.Done
     val serverItems = done?.takeIf { it.query == parsed.text }?.items.orEmpty()
     val combined = remember(local, serverItems, parsed) { SearchEngine.merge(parsed, local, serverItems) }
@@ -346,6 +356,8 @@ fun SearchScreen() {
     val requestable = remember(horus, localTitles) { horus.filter { VideoCatalog.normalize(it.title) !in localTitles } }
 
     val busy = parsed.text.length >= 2 && (state is SearchState.Loading || done?.query != parsed.text)
+    var ytHistory by remember { mutableStateOf<List<org.jellyfin.mobile.nflix.data.YtSearchHistoryEntry>>(emptyList()) }
+    LaunchedEffect(Unit) { runCatching { deps.yt.history(10) }.onSuccess { ytHistory = it } }
     fun saveRecent(q: String = query) { if (q.trim().length >= 2) recent = SearchHistory.add(context, q) }
     fun open(item: Item) {
         saveRecent()
@@ -444,7 +456,7 @@ fun SearchScreen() {
             modifier = Modifier.fillMaxSize(),
         ) { current ->
             when (current) {
-                "idle" -> SearchIdle(recent, catalog, onPick = { query = it }, onOpen = ::open, onClear = { SearchHistory.clear(context); recent = emptyList() })
+                "idle" -> SearchIdle(recent, catalog, ytHistory, onPick = { query = it }, onOpen = ::open, onClear = { SearchHistory.clear(context); recent = emptyList() })
                 "loading" -> SearchSkeleton()
                 "error" -> SearchMessage(Icons.Rounded.CloudOff, "Recherche indisponible", (state as? SearchState.Failed)?.message)
                 "empty" -> SearchMessage(Icons.Rounded.SearchOff, "Aucun résultat pour « ${query.trim()} »", "Essayez quelques lettres du titre, un acteur, un genre ou une année.")
@@ -457,13 +469,70 @@ fun SearchScreen() {
                     jump = jump,
                     genre = genre,
                     genreItems = genreItems,
+                    ytAlbums = ytResult?.albums.orEmpty(),
+                    ytArtists = ytResult?.artists.orEmpty(),
                     onOpen = ::open,
+                    onYtLongPress = { hit -> ytMenu = hit },
                     onDetails = { media -> saveRecent(); navigator.open(Route.HorusDetail(media.type, media.id)) },
                     onRequest = { media -> saveRecent(); request(media) },
                 )
             }
         }
+        YtMenuDialog(hit = ytMenu, onDismiss = { ytMenu = null })
     }
+}
+
+@Composable
+private fun YtMenuDialog(hit: org.jellyfin.mobile.nflix.data.YtHit?, onDismiss: () -> Unit) {
+    if (hit == null || hit.kind != "track") return
+    val deps = LocalDeps.current
+    val navigator = LocalNavigator.current
+    val scope = rememberCoroutineScope()
+    var busy by remember { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(hit.title, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (hit.subtitle.isNotBlank()) Text(hit.subtitle, style = MaterialTheme.typography.bodySmall, color = Nflix.Muted)
+                Text("YouTube Music", style = MaterialTheme.typography.labelSmall, color = Nflix.Muted)
+            }
+        },
+        confirmButton = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(enabled = !busy, onClick = {
+                    scope.launch {
+                        busy = true
+                        val info = runCatching { deps.yt.info(hit.videoId) }.getOrNull()
+                        busy = false
+                        onDismiss()
+                        val artist = info?.artist ?: hit.subtitle
+                        if (artist.isNotBlank()) navigator.open(Route.YtArtist(artist))
+                    }
+                }) { Text("Voir l'artiste") }
+                TextButton(enabled = !busy, onClick = {
+                    scope.launch {
+                        busy = true
+                        val info = runCatching { deps.yt.info(hit.videoId) }.getOrNull()
+                        busy = false
+                        onDismiss()
+                        if (!info?.albumBrowseId.isNullOrBlank()) navigator.open(Route.YtAlbum(info!!.albumBrowseId, info.album.ifBlank { hit.title }))
+                    }
+                }) { Text("Voir l'album") }
+                TextButton(enabled = !busy, onClick = {
+                    scope.launch {
+                        busy = true
+                        runCatching { deps.yt.download(hit.videoId) }
+                            .onSuccess { ItemMenu.message = "Téléchargé dans la bibliothèque musique" }
+                            .onFailure { ItemMenu.message = it.message ?: "Téléchargement impossible" }
+                        busy = false
+                        onDismiss()
+                    }
+                }) { Text("Télécharger dans Nflix") }
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Fermer") } },
+    )
 }
 
 @Composable
@@ -523,7 +592,14 @@ private fun FilterPill(label: String, count: Int, selected: Boolean, onClick: ()
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun SearchIdle(recent: List<String>, catalog: List<Item>, onPick: (String) -> Unit, onOpen: (Item) -> Unit, onClear: () -> Unit) {
+private fun SearchIdle(
+    recent: List<String>,
+    catalog: List<Item>,
+    ytHistory: List<org.jellyfin.mobile.nflix.data.YtSearchHistoryEntry> = emptyList(),
+    onPick: (String) -> Unit,
+    onOpen: (Item) -> Unit,
+    onClear: () -> Unit,
+) {
     val navigator = LocalNavigator.current
     val genres = remember(catalog) { SearchEngine.topGenres(catalog) }
     // A few well-rated titles, different each visit.
@@ -562,6 +638,24 @@ private fun SearchIdle(recent: List<String>, catalog: List<Item>, onPick: (Strin
                                 .background(Brush.horizontalGradient(listOf(genreColor(genre).copy(alpha = 0.45f), genreColor(genre).copy(alpha = 0.18f))))
                                 .clickable { onPick(genre) }.padding(horizontal = 14.dp, vertical = 8.dp),
                         )
+                    }
+                }
+            }
+        }
+        if (ytHistory.isNotEmpty()) {
+            item(key = "yt-history-title") {
+                Text("Recherches YouTube Music", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 20.dp))
+            }
+            item(key = "yt-history") {
+                FlowRow(Modifier.padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ytHistory.forEach { entry ->
+                        Row(
+                            Modifier.clip(CircleShape).background(Nflix.Surface).clickable { onPick(entry.query) }.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Rounded.Album, null, tint = Nflix.Muted, modifier = Modifier.size(16.dp))
+                            Text(entry.query, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(start = 6.dp))
+                        }
                     }
                 }
             }
@@ -637,7 +731,10 @@ private fun SearchResults(
     jump: Jump?,
     genre: String?,
     genreItems: List<Item>,
+    ytAlbums: List<org.jellyfin.mobile.nflix.data.YtHit> = emptyList(),
+    ytArtists: List<org.jellyfin.mobile.nflix.data.YtHit> = emptyList(),
     onOpen: (Item) -> Unit,
+    onYtLongPress: (org.jellyfin.mobile.nflix.data.YtHit) -> Unit = {},
     onDetails: (HorusMedia) -> Unit,
     onRequest: (HorusMedia) -> Unit,
 ) {
@@ -646,6 +743,39 @@ private fun SearchResults(
         if (selected == SearchFilter.All) {
             val best = remember(items, query) { bestMatch(items, query) }
             LazyColumn(contentPadding = PaddingValues(bottom = ContentBottomPadding)) {
+                if (ytArtists.isNotEmpty()) {
+                    item(key = "yt-artists") {
+                        val navigator = LocalNavigator.current
+                        Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("Artistes · YouTube Music", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                            ytArtists.take(4).forEach { artist ->
+                                Row(
+                                    Modifier.fillMaxWidth().clickable { navigator.open(Route.YtArtist(artist.title)) }.padding(vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Icon(Icons.Rounded.Person, null, tint = Nflix.Muted, modifier = Modifier.size(20.dp))
+                                    Text(artist.title, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(start = 10.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+                if (ytAlbums.isNotEmpty()) {
+                    item(key = "yt-albums") {
+                        val navigator = LocalNavigator.current
+                        Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("Albums · YouTube Music", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                ytAlbums.take(6).forEach { album ->
+                                    Column(Modifier.width(110.dp).clickable { navigator.open(Route.YtAlbum(album.browseId, album.title)) }) {
+                                        NImage(null, Modifier.size(110.dp).clip(RoundedCornerShape(10.dp)), placeholderIcon = Icons.Rounded.Album)
+                                        Text(album.title, style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 jump?.let { item(key = "jump-${it.target.id}") { JumpCard(it, onOpen) } }
                 best?.takeIf { it.id != jump?.series?.id }?.let { item(key = "best-${it.id}") { BestMatch(it, onOpen) } }
                 if (genre != null && genreItems.isNotEmpty()) {
@@ -656,7 +786,7 @@ private fun SearchResults(
                     val extra: List<Any> = requestRows[key]?.let { type -> requestable.filter { it.type == type } }.orEmpty()
                     rowSection(key, title, local + extra, ::hitKey) { hit ->
                         when (hit) {
-                            is Item -> SearchCard(hit, onOpen)
+                            is Item -> SearchCard(hit, onOpen, onYtLongPress = onYtLongPress)
                             is HorusMedia -> RequestCard(hit, requests[requestKey(hit)], { onDetails(hit) }, { onRequest(hit) })
                             else -> Unit
                         }
@@ -767,9 +897,24 @@ private fun RequestCard(media: HorusMedia, state: RequestState?, onClick: () -> 
 }
 
 @Composable
-private fun SearchCard(item: Item, onOpen: (Item) -> Unit, modifier: Modifier = Modifier, gridWidth: Boolean = false) {
+private fun SearchCard(
+    item: Item,
+    onOpen: (Item) -> Unit,
+    modifier: Modifier = Modifier,
+    gridWidth: Boolean = false,
+    onYtLongPress: (org.jellyfin.mobile.nflix.data.YtHit) -> Unit = {},
+) {
     val deps = LocalDeps.current
     val square = item.type in setOf("MusicAlbum", "MusicArtist", "Audio", "Person", "Playlist")
+    val ytHit = remember(item) {
+        if (item.id.startsWith("yt:")) org.jellyfin.mobile.nflix.data.YtHit(
+            kind = "track",
+            videoId = item.id.removePrefix("yt:"),
+            title = item.name,
+            subtitle = item.artistItems.joinToString { it.name },
+            thumbnail = item.ytThumb,
+        ) else null
+    }
     PosterCard(
         item, item.ytThumb ?: deps.jellyfin.primary(item, 300), "search/${item.id}", { onOpen(item) },
         modifier = modifier.appear(),
@@ -777,6 +922,7 @@ private fun SearchCard(item: Item, onOpen: (Item) -> Unit, modifier: Modifier = 
         aspect = if (square) 1f else 2f / 3f,
         subtitle = item.seriesName ?: item.albumArtist ?: item.artistItems.joinToString { it.name }.takeIf { it.isNotBlank() } ?: item.year?.toString(),
         typeLabel = if (VideoCatalog.isAnime(item)) "ANIMÉ" else null,
+        onLongClick = ytHit?.let { { onYtLongPress(it) } },
     )
 }
 

@@ -245,6 +245,8 @@ private fun Screen(route: Route) {
         Route.AdminRequests -> org.jellyfin.mobile.nflix.ui.screens.AdminRequestsScreen()
         Route.AdminActivity -> org.jellyfin.mobile.nflix.ui.screens.AdminActivityScreen()
         Route.AdminButler -> org.jellyfin.mobile.nflix.ui.screens.ButlerScreen()
+        is Route.YtArtist -> org.jellyfin.mobile.nflix.ui.screens.YtArtistScreen(route.name)
+        is Route.YtAlbum -> org.jellyfin.mobile.nflix.ui.screens.YtAlbumScreen(route.browseId, route.title)
         Route.LikedSongs -> org.jellyfin.mobile.nflix.ui.screens.LikedSongsScreen()
         is Route.Audiobook -> org.jellyfin.mobile.nflix.ui.screens.AudiobookScreen(route.id)
         is Route.Saga -> org.jellyfin.mobile.nflix.ui.screens.SagaScreen(route.name, route.audio)
