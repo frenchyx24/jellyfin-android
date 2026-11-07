@@ -8,6 +8,17 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 
+/** A playable YT Music track (what the player queue holds). */
+@Immutable
+@Serializable
+data class YtTrack(
+    @SerialName("videoId") val videoId: String = "",
+    @SerialName("title") val title: String = "",
+    @SerialName("artist") val artist: String = "",
+    @SerialName("duration") val duration: Int = 0,
+    @SerialName("thumbnail") val thumbnail: String = "",
+)
+
 /** One YouTube Music search hit: track, or album/artist suggestion (browse id). */
 @Immutable
 @Serializable
