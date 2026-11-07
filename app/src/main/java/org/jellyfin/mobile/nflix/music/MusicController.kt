@@ -164,6 +164,30 @@ class MusicController(
         }
     }
 
+    /** Plays YouTube Music results through the butler stream proxy. */
+    fun playYt(tracks: List<org.jellyfin.mobile.nflix.data.YtTrack>, startIndex: Int = 0) {
+        if (tracks.isEmpty()) return
+        val items = tracks.map { track ->
+            val metadata = MediaMetadata.Builder()
+                .setTitle(track.title.ifBlank { "YouTube Music" })
+                .setArtist(track.artist)
+                .setArtworkUri(track.thumbnail.takeIf { it.isNotBlank() }?.let(Uri::parse))
+                .setDurationMs(track.duration.toLong() * 1000L)
+                .setIsPlayable(true)
+                .build()
+            MediaItem.Builder()
+                .setMediaId("yt:" + track.videoId)
+                .setUri(Uri.parse(repository.ytStreamUrl(track.videoId)))
+                .setMediaMetadata(metadata)
+                .build()
+        }
+        withController { player ->
+            player.setMediaItems(items, startIndex.coerceIn(0, items.lastIndex), 0L)
+            player.prepare()
+            player.play()
+        }
+    }
+
     fun playLocal(uri: Uri, title: String) = withController { player ->
         val mediaItem = MediaItem.Builder()
             .setMediaId(uri.toString())

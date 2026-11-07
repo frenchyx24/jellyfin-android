@@ -64,6 +64,8 @@ data class NameId(@SerialName("Id") val id: String = "", @SerialName("Name") val
 @Serializable
 data class Item(
     @SerialName("Id") val id: String,
+    /** YouTube Music result thumbnail URL for synthetic `yt:` items; never serialized. */
+    @kotlinx.serialization.Transient val ytThumb: String? = null,
     @SerialName("Name") val name: String = "",
     @SerialName("OriginalTitle") val originalTitle: String? = null,
     @SerialName("Type") val type: String = "",

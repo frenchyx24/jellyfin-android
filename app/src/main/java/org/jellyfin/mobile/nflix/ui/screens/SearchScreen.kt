@@ -120,6 +120,7 @@ import org.jellyfin.mobile.nflix.data.HorusStatus
 import org.jellyfin.mobile.nflix.data.HorusType
 import org.jellyfin.mobile.nflix.data.SearchRanking
 import org.jellyfin.mobile.nflix.data.Item
+import org.jellyfin.mobile.nflix.data.NameId
 import org.jellyfin.mobile.nflix.data.VideoCatalog
 import org.jellyfin.mobile.nflix.ui.ContentBottomPadding
 import org.jellyfin.mobile.nflix.ui.LocalDeps
@@ -280,6 +281,17 @@ fun SearchScreen() {
             }.getOrElse { SearchState.Failed(it.message ?: "Serveur injoignable") }
         }
     }
+    // YouTube Music fills the gaps: results appear as ordinary audio items (`yt:` ids),
+    // indistinguishable from library tracks, and play through the server proxy.
+    var ytTracks by remember { mutableStateOf<List<org.jellyfin.mobile.nflix.data.YtTrack>>(emptyList()) }
+    LaunchedEffect(Unit) {
+        snapshotFlow { SearchQuery.parse(query).text }.debounce(600).distinctUntilChanged().collectLatest { q ->
+            ytTracks = emptyList()
+            if (q.length < 2) return@collectLatest
+            ytTracks = withTimeoutOrNull(10_000) { runCatching { deps.yt.search(q, 12) }.getOrNull() }.orEmpty()
+        }
+    }
+
     // Horus runs on its own and never holds back local results.
     LaunchedEffect(Unit) {
         snapshotFlow { SearchQuery.parse(query).text }.debounce(450).distinctUntilChanged().collectLatest { q ->
@@ -325,12 +337,23 @@ fun SearchScreen() {
     val jump = loadedJump?.takeIf { it.series.id == jumpSeries?.id && it.query == parsed }
 
     val localTitles = remember(combined) { combined.mapTo(HashSet()) { VideoCatalog.normalize(it.name) } }
+    // YT Music results as fake Audio items, dropped when the library already has the title.
+    val ytItems = remember(ytTracks, localTitles) {
+        ytTracks.filter { org.jellyfin.mobile.nflix.data.VideoCatalog.normalize(it.title) !in localTitles }
+            .map { it.toItem() }
+    }
+    val display = remember(combined, ytItems) { combined + ytItems }
     val requestable = remember(horus, localTitles) { horus.filter { VideoCatalog.normalize(it.title) !in localTitles } }
 
     val busy = parsed.text.length >= 2 && (state is SearchState.Loading || done?.query != parsed.text)
     fun saveRecent(q: String = query) { if (q.trim().length >= 2) recent = SearchHistory.add(context, q) }
     fun open(item: Item) {
         saveRecent()
+        if (item.id.startsWith("yt:")) {
+            val index = ytTracks.indexOfFirst { "yt:${it.videoId}" == item.id }
+            deps.music.playYt(ytTracks, index.coerceAtLeast(0))
+            return
+        }
         val origin = "search/${item.id}"
         navigator.open(
             when (item.type) {
@@ -395,15 +418,15 @@ fun SearchScreen() {
                 parsed.year?.let { HintChip("Année $it") }
             }
         }
-        AnimatedVisibility(combined.isNotEmpty(), enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
+        AnimatedVisibility(display.isNotEmpty(), enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
             LazyRow(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(SearchFilter.entries.filter { f -> f == SearchFilter.All || combined.any(f::matches) || requestable.any(f::matches) }, key = { it.name }) { option ->
-                    FilterPill(option.label, combined.count(option::matches) + requestable.count(option::matches), option == filter) { filter = option }
+                items(SearchFilter.entries.filter { f -> f == SearchFilter.All || display.any(f::matches) || requestable.any(f::matches) }, key = { it.name }) { option ->
+                    FilterPill(option.label, display.count(option::matches) + requestable.count(option::matches), option == filter) { filter = option }
                 }
             }
         }
 
-        val hasResults = combined.isNotEmpty() || requestable.isNotEmpty() || genreItems.isNotEmpty() || jump != null
+        val hasResults = display.isNotEmpty() || requestable.isNotEmpty() || genreItems.isNotEmpty() || jump != null
         val phase = when {
             query.trim().length < 2 -> "idle"
             hasResults -> "results"
@@ -427,7 +450,7 @@ fun SearchScreen() {
                 "empty" -> SearchMessage(Icons.Rounded.SearchOff, "Aucun résultat pour « ${query.trim()} »", "Essayez quelques lettres du titre, un acteur, un genre ou une année.")
                 else -> SearchResults(
                     query = parsed.text,
-                    items = combined,
+                    items = display,
                     requestable = requestable,
                     requests = requests,
                     filter = filter,
@@ -748,11 +771,11 @@ private fun SearchCard(item: Item, onOpen: (Item) -> Unit, modifier: Modifier = 
     val deps = LocalDeps.current
     val square = item.type in setOf("MusicAlbum", "MusicArtist", "Audio", "Person", "Playlist")
     PosterCard(
-        item, deps.jellyfin.primary(item, 300), "search/${item.id}", { onOpen(item) },
+        item, item.ytThumb ?: deps.jellyfin.primary(item, 300), "search/${item.id}", { onOpen(item) },
         modifier = modifier.appear(),
         width = if (gridWidth) androidx.compose.ui.unit.Dp.Unspecified else 120.dp,
         aspect = if (square) 1f else 2f / 3f,
-        subtitle = item.seriesName ?: item.albumArtist ?: item.year?.toString(),
+        subtitle = item.seriesName ?: item.albumArtist ?: item.artistItems.joinToString { it.name }.takeIf { it.isNotBlank() } ?: item.year?.toString(),
         typeLabel = if (VideoCatalog.isAnime(item)) "ANIMÉ" else null,
     )
 }
@@ -784,3 +807,13 @@ private fun BestMatch(item: Item, onOpen: (Item) -> Unit) {
         }
     }
 }
+
+/** A YouTube Music result as a synthetic audio item; `yt:` ids are played via the proxy. */
+private fun org.jellyfin.mobile.nflix.data.YtTrack.toItem(): Item = Item(
+    id = "yt:$videoId",
+    name = if (artist.isBlank()) title else "$title — $artist",
+    type = "Audio",
+    runTimeTicks = duration.toLong() * 10_000_000L,
+    artistItems = listOfNotNull(artist.takeIf { it.isNotBlank() }?.let { NameId("", it) }),
+    ytThumb = thumbnail.takeIf { it.isNotBlank() },
+)

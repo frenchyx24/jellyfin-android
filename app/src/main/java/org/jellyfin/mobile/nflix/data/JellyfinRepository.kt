@@ -339,6 +339,12 @@ class JellyfinRepository(private val api: NflixApi) {
 
     fun downloadUrl(item: Item) = api.streamUrl("Items/${item.id}/Download", emptyMap())
 
+    /** Proxied YouTube Music audio (`yt/stream`) playable with the session api_key. */
+    fun ytStreamUrl(videoId: String) = api.url(
+        "Plugins/NflixButler/yt/stream",
+        mapOf("videoId" to videoId, "ApiKey" to api.token.orEmpty()),
+    ).toString()
+
     fun audioStreamUrl(itemId: String) = api.streamUrl(
         "Audio/$itemId/universal",
         mapOf(

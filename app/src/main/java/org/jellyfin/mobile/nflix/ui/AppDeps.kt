@@ -48,6 +48,9 @@ class AppDeps(
     /** Nflix Butler plugin: new media, targeted refresh, identification repair. */
     val butler: org.jellyfin.mobile.nflix.data.ButlerRepository by lazy { org.jellyfin.mobile.nflix.data.ButlerRepository(api) }
 
+    /** YouTube Music search + stream proxy (Nflix Butler plugin). */
+    val yt: org.jellyfin.mobile.nflix.data.YtMusicRepository by lazy { org.jellyfin.mobile.nflix.data.YtMusicRepository(api) }
+
     /** Starts the right native player for any item. */
     fun play(scope: CoroutineScope, item: Item, fromStart: Boolean = false, navigator: Navigator? = null) {
         scope.launch {
