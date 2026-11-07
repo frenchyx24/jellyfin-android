@@ -84,6 +84,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material.icons.rounded.Album
+import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.AlertDialog
@@ -483,6 +484,7 @@ fun SearchScreen() {
     }
 }
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun YtMenuDialog(hit: org.jellyfin.mobile.nflix.data.YtHit?, onDismiss: () -> Unit) {
     if (hit == null || hit.kind != "track") return
@@ -490,50 +492,54 @@ private fun YtMenuDialog(hit: org.jellyfin.mobile.nflix.data.YtHit?, onDismiss: 
     val navigator = LocalNavigator.current
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(hit.title, maxLines = 2, overflow = TextOverflow.Ellipsis) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                if (hit.subtitle.isNotBlank()) Text(hit.subtitle, style = MaterialTheme.typography.bodySmall, color = Nflix.Muted)
-                Text("YouTube Music", style = MaterialTheme.typography.labelSmall, color = Nflix.Muted)
+    var sheet by remember { mutableStateOf(true) }
+    if (!sheet) { onDismiss(); return }
+    androidx.compose.material3.ModalBottomSheet(onDismissRequest = { sheet = false; onDismiss() }) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(hit.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            if (hit.subtitle.isNotBlank()) Text(hit.subtitle, style = MaterialTheme.typography.bodySmall, color = Nflix.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            androidx.compose.foundation.layout.Spacer(Modifier.size(8.dp))
+            YtMenuRow(Icons.Rounded.Person, "Voir l'artiste", busy) {
+                scope.launch {
+                    busy = true
+                    val info = runCatching { deps.yt.info(hit.videoId) }.getOrNull()
+                    busy = false; sheet = false; onDismiss()
+                    val artist = info?.artist ?: hit.subtitle
+                    if (artist.isNotBlank()) navigator.open(Route.YtArtist(artist))
+                }
             }
-        },
-        confirmButton = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(enabled = !busy, onClick = {
-                    scope.launch {
-                        busy = true
-                        val info = runCatching { deps.yt.info(hit.videoId) }.getOrNull()
-                        busy = false
-                        onDismiss()
-                        val artist = info?.artist ?: hit.subtitle
-                        if (artist.isNotBlank()) navigator.open(Route.YtArtist(artist))
-                    }
-                }) { Text("Voir l'artiste") }
-                TextButton(enabled = !busy, onClick = {
-                    scope.launch {
-                        busy = true
-                        val info = runCatching { deps.yt.info(hit.videoId) }.getOrNull()
-                        busy = false
-                        onDismiss()
-                        if (!info?.albumBrowseId.isNullOrBlank()) navigator.open(Route.YtAlbum(info!!.albumBrowseId, info.album.ifBlank { hit.title }))
-                    }
-                }) { Text("Voir l'album") }
-                TextButton(enabled = !busy, onClick = {
-                    scope.launch {
-                        busy = true
-                        runCatching { deps.yt.download(hit.videoId) }
-                            .onSuccess { ItemMenu.message = "Téléchargé dans la bibliothèque musique" }
-                            .onFailure { ItemMenu.message = it.message ?: "Téléchargement impossible" }
-                        busy = false
-                        onDismiss()
-                    }
-                }) { Text("Télécharger dans Nflix") }
+            YtMenuRow(Icons.Rounded.Album, "Voir l'album", busy) {
+                scope.launch {
+                    busy = true
+                    val info = runCatching { deps.yt.info(hit.videoId) }.getOrNull()
+                    busy = false; sheet = false; onDismiss()
+                    if (!info?.albumBrowseId.isNullOrBlank()) navigator.open(Route.YtAlbum(info!!.albumBrowseId, info.album.ifBlank { hit.title }))
+                }
             }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Fermer") } },
-    )
+            YtMenuRow(Icons.Rounded.Download, "Télécharger dans Nflix", busy) {
+                scope.launch {
+                    busy = true
+                    runCatching { deps.yt.download(hit.videoId) }
+                        .onSuccess { ItemMenu.message = "Téléchargé dans la bibliothèque musique" }
+                        .onFailure { ItemMenu.message = it.message ?: "Téléchargement impossible" }
+                    busy = false; sheet = false; onDismiss()
+                }
+            }
+            androidx.compose.foundation.layout.Spacer(Modifier.size(12.dp))
+        }
+    }
+}
+
+@Composable
+private fun YtMenuRow(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, busy: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(enabled = !busy, onClick = onClick).padding(horizontal = 12.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Icon(icon, null, tint = Nflix.Red, modifier = Modifier.size(22.dp))
+        Text(label, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+    }
 }
 
 @Composable
@@ -645,7 +651,7 @@ private fun SearchIdle(
         }
         if (ytHistory.isNotEmpty()) {
             item(key = "yt-history-title") {
-                Text("Recherches YouTube Music", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 20.dp))
+                Text("Recherches récentes", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 20.dp))
             }
             item(key = "yt-history") {
                 FlowRow(Modifier.padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -748,7 +754,7 @@ private fun SearchResults(
                     item(key = "yt-artists") {
                         val navigator = LocalNavigator.current
                         Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text("Artistes · YouTube Music", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                            Text("Artistes", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                             ytArtists.take(4).forEach { artist ->
                                 Row(
                                     Modifier.fillMaxWidth().clickable { navigator.open(Route.YtArtist(artist.title)) }.padding(vertical = 4.dp),
@@ -765,7 +771,7 @@ private fun SearchResults(
                     item(key = "yt-albums") {
                         val navigator = LocalNavigator.current
                         Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text("Albums · YouTube Music", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                            Text("Albums", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 ytAlbums.take(6).forEach { album ->
                                     Column(Modifier.width(110.dp).clickable { navigator.open(Route.YtAlbum(album.browseId, album.title)) }) {

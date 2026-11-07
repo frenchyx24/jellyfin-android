@@ -64,7 +64,7 @@ private fun YtTrackList(hits: List<YtHit>, onPlay: (List<org.jellyfin.mobile.nfl
             ) {
                 NImage(
                     hit.thumbnail,
-                    Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)),
+                    Modifier.size(56.dp).clip(RoundedCornerShape(10.dp)),
                     placeholderIcon = Icons.Rounded.MusicNote,
                 )
                 Column(Modifier.weight(1f)) {
@@ -107,7 +107,7 @@ fun YtArtistScreen(name: String) {
             BackButton()
             Column(Modifier.weight(1f).padding(start = 8.dp)) {
                 Text(name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text("YouTube Music", style = MaterialTheme.typography.bodySmall, color = Nflix.Muted)
+                Text("Artiste", style = MaterialTheme.typography.bodySmall, color = Nflix.Muted)
             }
         }
         when {
@@ -120,15 +120,20 @@ fun YtArtistScreen(name: String) {
             else -> {
                 val albums = result!!.albums
                 if (albums.isNotEmpty()) {
-                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Icon(Icons.Rounded.Album, null, tint = Nflix.Muted, modifier = Modifier.size(18.dp))
-                        Text("Albums", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                    }
-                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        albums.take(5).forEach { album ->
-                            Column(Modifier.width(110.dp).clickable { navigator.open(Route.YtAlbum(album.browseId, album.title)) }) {
-                                NImage(null, Modifier.size(110.dp).clip(RoundedCornerShape(10.dp)), placeholderIcon = Icons.Rounded.Album)
-                                Text(album.title, style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text("Albums", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+                    androidx.compose.foundation.layout.FlowRow(
+                        Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        albums.take(8).forEach { album ->
+                            Row(
+                                Modifier.clip(CircleShape).background(Nflix.Surface).clickable { navigator.open(Route.YtAlbum(album.browseId, album.title)) }.padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                Icon(Icons.Rounded.Album, null, tint = Nflix.Muted, modifier = Modifier.size(16.dp))
+                                Text(album.title, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                         }
                     }
@@ -155,7 +160,7 @@ fun YtAlbumScreen(browseId: String, title: String) {
             BackButton()
             Column(Modifier.weight(1f).padding(start = 8.dp)) {
                 Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text("Album · YouTube Music", style = MaterialTheme.typography.bodySmall, color = Nflix.Muted)
+                Text("Album", style = MaterialTheme.typography.bodySmall, color = Nflix.Muted)
             }
         }
         when {
