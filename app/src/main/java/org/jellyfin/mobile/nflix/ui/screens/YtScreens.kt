@@ -70,7 +70,7 @@ private fun YtTrackList(hits: List<YtHit>, onPlay: (List<org.jellyfin.mobile.nfl
                 Column(Modifier.weight(1f)) {
                     Text(hit.title, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(
-                        hit.subtitle.ifBlank { "YouTube Music" },
+                        hit.subtitle.ifBlank { "Musique" },
                         style = MaterialTheme.typography.labelSmall,
                         color = Nflix.Muted,
                         maxLines = 1,
