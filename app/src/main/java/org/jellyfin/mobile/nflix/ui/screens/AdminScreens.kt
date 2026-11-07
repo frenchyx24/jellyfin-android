@@ -34,6 +34,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AdminPanelSettings
+import androidx.compose.material.icons.rounded.AutoFixHigh
 import androidx.compose.material.icons.rounded.Business
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
@@ -105,7 +106,7 @@ import java.io.ByteArrayOutputStream
 
 /** Shows [content] only to Jellyfin administrators; the server enforces the same rule on every call. */
 @Composable
-private fun AdminOnly(title: String, content: @Composable () -> Unit) {
+internal fun AdminOnly(title: String, content: @Composable () -> Unit) {
     val deps = LocalDeps.current
     val admin = rememberLoad("is-admin") { deps.admin.isAdmin(it) }
     Box(Modifier.fillMaxSize()) {
@@ -120,7 +121,7 @@ private fun AdminOnly(title: String, content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun AdminTitle(title: String, subtitle: String? = null, trailing: @Composable () -> Unit = {}) {
+internal fun AdminTitle(title: String, subtitle: String? = null, trailing: @Composable () -> Unit = {}) {
     Row(Modifier.statusBarsPadding().fillMaxWidth().padding(start = 64.dp, end = 8.dp, top = 12.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
@@ -167,6 +168,12 @@ fun AdminScreen() {
                 ) { navigator.open(Route.AdminActivity) }
             }
             item {
+                AdminCard(
+                    Icons.Rounded.AutoFixHigh, "Assistant médias",
+                    "Surveille les nouveautés, relit le bon dossier, répare les fiches incomplètes", Nflix.Info,
+                ) { navigator.open(Route.AdminButler) }
+            }
+            item {
                 AdminCard(Icons.Rounded.LibraryBooks, "Analyser les bibliothèques", "Recherche les nouveaux fichiers sur le serveur", Nflix.Success) { confirmScan = true }
             }
         }
@@ -193,7 +200,7 @@ fun AdminScreen() {
 }
 
 @Composable
-private fun AdminCard(icon: ImageVector, title: String, subtitle: String, color: Color, badge: Int? = null, onClick: () -> Unit) {
+internal fun AdminCard(icon: ImageVector, title: String, subtitle: String, color: Color, badge: Int? = null, onClick: () -> Unit) {
     Row(
         Modifier.padding(horizontal = 16.dp, vertical = 6.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Nflix.Surface)
             .clickable(onClick = onClick).padding(16.dp),

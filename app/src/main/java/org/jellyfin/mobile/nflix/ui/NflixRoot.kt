@@ -242,6 +242,7 @@ private fun Screen(route: Route) {
         is Route.AdminDistributorEdit -> org.jellyfin.mobile.nflix.ui.screens.AdminDistributorEditScreen(route.id)
         Route.AdminRequests -> org.jellyfin.mobile.nflix.ui.screens.AdminRequestsScreen()
         Route.AdminActivity -> org.jellyfin.mobile.nflix.ui.screens.AdminActivityScreen()
+        Route.AdminButler -> org.jellyfin.mobile.nflix.ui.screens.ButlerScreen()
         Route.LikedSongs -> org.jellyfin.mobile.nflix.ui.screens.LikedSongsScreen()
         is Route.Audiobook -> org.jellyfin.mobile.nflix.ui.screens.AudiobookScreen(route.id)
         is Route.Saga -> org.jellyfin.mobile.nflix.ui.screens.SagaScreen(route.name, route.audio)

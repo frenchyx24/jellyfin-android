@@ -45,6 +45,9 @@ class AppDeps(
     /** Administration tools; the server enforces rights, the app only hides what a member cannot use. */
     val admin: org.jellyfin.mobile.nflix.data.AdminRepository by lazy { org.jellyfin.mobile.nflix.data.AdminRepository(api, jellyfin, horus) }
 
+    /** Nflix Butler plugin: new media, targeted refresh, identification repair. */
+    val butler: org.jellyfin.mobile.nflix.data.ButlerRepository by lazy { org.jellyfin.mobile.nflix.data.ButlerRepository(api) }
+
     /** Starts the right native player for any item. */
     fun play(scope: CoroutineScope, item: Item, fromStart: Boolean = false, navigator: Navigator? = null) {
         scope.launch {

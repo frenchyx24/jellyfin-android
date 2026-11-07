@@ -42,6 +42,7 @@ sealed class Route(val key: String) {
     data class AdminDistributorEdit(val id: String?) : Route("admin/distributor/${id ?: "new"}")
     data object AdminRequests : Route("admin/requests")
     data object AdminActivity : Route("admin/activity")
+    data object AdminButler : Route("admin/butler")
     data class Saga(val name: String, val audio: Boolean) : Route("saga/$audio/$name")
     data object HorusRequests : Route("horus-requests")
     data object Releases : Route("releases")
