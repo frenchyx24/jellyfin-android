@@ -92,7 +92,7 @@ fun SyncAccountsScreen() {
     if (oauth != null && config != null) {
         val service = oauth!!
         val url = if (service == "deezer") {
-            "https://connect.deezer.com/oauth/auth.php?app_id=${config!!.deezerAppId}&redirect_uri=${java.net.URLEncoder.encode(config!!.redirectUri, "UTF-8")}&perms=basic_access,manage_library&output=code"
+            "https://connect.deezer.com/oauth/auth.php?app_id=${config!!.deezerAppId}&redirect_uri=${java.net.URLEncoder.encode(config!!.redirectUri, "UTF-8")}&perms=basic_access,manage_library,offline_access&output=code"
         } else {
             "https://accounts.spotify.com/authorize?client_id=${config!!.spotifyClientId}&response_type=code&redirect_uri=${java.net.URLEncoder.encode(config!!.redirectUri, "UTF-8")}&scope=playlist-read-private%20user-library-read&show_dialog=true"
         }
@@ -127,9 +127,9 @@ fun SyncAccountsScreen() {
                                     return false
                                 }
                             }
+                            loadUrl(url)
                         }
                     },
-                    update = { it.loadUrl(url) },
                 )
             }
         }
@@ -203,11 +203,18 @@ fun SyncAccountsScreen() {
                                 scope.launch {
                                     runCatching { deps.sync.import(account.service, playlist.id) }
                                         .onSuccess { result ->
-                                            val ids = result.matched.map { it.itemId }
-                                            val created = if (ids.isNotEmpty()) deps.jellyfin.createPlaylist(playlist.title, ids) else null
-                                            ItemMenu.message = if (created != null)
-                                                "Playlist « ${playlist.title} » créée : ${ids.size}/${result.total} morceaux trouvés"
-                                            else "Aucun morceau trouvé localement sur ${result.total}"
+                                            val ids = result.matched.map { it.itemId }.distinct()
+                                            if (ids.isEmpty()) {
+                                                ItemMenu.message = "Aucun morceau trouvé localement sur ${result.total}"
+                                            } else {
+                                                val created = runCatching { deps.jellyfin.createPlaylist(playlist.title, ids) }.getOrNull()
+                                                val missing = if (result.missing.isNotEmpty()) " · ${result.missing.size} à télécharger" else ""
+                                                ItemMenu.message = if (created != null)
+                                                    "« ${playlist.title} » ajoutée : ${ids.size}/${result.total} morceaux$missing"
+                                                else
+                                                    "Import terminé, playlist non créée (${ids.size}/${result.total})"
+                                                localPlaylists = runCatching { deps.jellyfin.audioPlaylists(force = true) }.getOrNull()
+                                            }
                                         }
                                         .onFailure { ItemMenu.message = it.message ?: "Import impossible" }
                                     importing = null

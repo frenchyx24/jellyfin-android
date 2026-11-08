@@ -1,50 +1,57 @@
 package org.jellyfin.mobile.nflix.ui.screens
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Album
+import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import org.jellyfin.mobile.nflix.data.YtHit
 import org.jellyfin.mobile.nflix.ui.ContentBottomPadding
 import org.jellyfin.mobile.nflix.ui.EmptyState
+import org.jellyfin.mobile.nflix.ui.ItemMenu
 import org.jellyfin.mobile.nflix.ui.LocalDeps
 import org.jellyfin.mobile.nflix.ui.LocalNavigator
 import org.jellyfin.mobile.nflix.ui.NImage
@@ -52,43 +59,50 @@ import org.jellyfin.mobile.nflix.ui.Nflix
 import org.jellyfin.mobile.nflix.ui.Route
 import org.jellyfin.mobile.nflix.ui.Skeleton
 
-/** Shared list of YT Music tracks; tap plays the whole list from the tapped index. */
+/** Shared list of YT Music tracks: tap plays the list from that index, long press opens the track menu. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun YtTrackList(hits: List<YtHit>, onPlay: (List<org.jellyfin.mobile.nflix.data.YtTrack>, Int) -> Unit) {
-    val deps = LocalDeps.current
     val tracks = remember(hits) { hits.filter { it.kind == "track" }.map { it.toTrack() } }
-    LazyColumn(
-        Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = ContentBottomPadding),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        items(hits.size) { index ->
-            val hit = hits[index]
-            if (hit.kind != "track") return@items
-            Row(
-                Modifier.fillMaxWidth().clickable {
-                    onPlay(tracks, tracks.indexOfFirst { it.videoId == hit.videoId }.coerceAtLeast(0))
-                }.padding(horizontal = 16.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                NImage(
-                    hit.thumbnail,
-                    Modifier.size(56.dp).clip(RoundedCornerShape(10.dp)),
-                    placeholderIcon = Icons.Rounded.MusicNote,
-                )
-                Column(Modifier.weight(1f)) {
-                    Text(hit.title, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(
-                        hit.subtitle.ifBlank { "Musique" },
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Nflix.Muted,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+    var menu by remember { mutableStateOf<YtHit?>(null) }
+    Box(Modifier.fillMaxSize()) {
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = ContentBottomPadding),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            items(hits.size) { index ->
+                val hit = hits[index]
+                if (hit.kind != "track") return@items
+                Row(
+                    Modifier.fillMaxWidth().combinedClickable(
+                        onClick = {
+                            onPlay(tracks, tracks.indexOfFirst { it.videoId == hit.videoId }.coerceAtLeast(0))
+                        },
+                        onLongClick = { menu = hit },
+                    ).padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    NImage(
+                        hit.thumbnail,
+                        Modifier.size(56.dp).clip(RoundedCornerShape(10.dp)),
+                        placeholderIcon = Icons.Rounded.MusicNote,
                     )
+                    Column(Modifier.weight(1f)) {
+                        Text(hit.title, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            hit.subtitle.ifBlank { "Musique" },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Nflix.Muted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
             }
         }
+        YtTrackMenu(menu) { menu = null }
     }
 }
 
@@ -199,11 +213,13 @@ fun YtAlbumScreen(browseId: String, title: String) {
 }
 
 /** Personalized feed ("Pour toi" tab): sections built server-side from play history + online recents. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun YtFeedScreen() {
     val deps = LocalDeps.current
     var sections by remember { mutableStateOf<List<org.jellyfin.mobile.nflix.data.YtMusicRepository.YtFeedSection>?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    var menu by remember { mutableStateOf<YtHit?>(null) }
     LaunchedEffect(Unit) {
         runCatching { deps.yt.feed() }
             .onSuccess { sections = it }
@@ -216,46 +232,61 @@ fun YtFeedScreen() {
             }
         }.orEmpty()
     }
-    LazyColumn(
-        Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(top = 8.dp, bottom = ContentBottomPadding),
-        verticalArrangement = Arrangement.spacedBy(18.dp),
-    ) {
-        when {
-            error != null -> item { EmptyState(Icons.Rounded.MusicNote, "Fil indisponible", error) }
-            sections == null -> items(3) { Skeleton(Modifier.padding(horizontal = 16.dp).fillMaxWidth().height(190.dp)) }
-            sections!!.isEmpty() -> item {
-                Text(
-                    "Écoute quelques morceaux pour que le fil se remplisse.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Nflix.Muted,
-                    modifier = Modifier.padding(24.dp),
-                )
-            }
-            else -> {
-                withTracks.forEachIndexed { sectionIndex, (section, tracks) ->
-                    item(key = "t$sectionIndex") {
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(section.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, modifier = Modifier.padding(horizontal = 16.dp))
-                            if (section.subtitle.isNotBlank()) Text(section.subtitle, style = MaterialTheme.typography.bodySmall, color = Nflix.Muted, modifier = Modifier.padding(horizontal = 16.dp))
+    Box(Modifier.fillMaxSize()) {
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(top = 8.dp, bottom = ContentBottomPadding),
+            verticalArrangement = Arrangement.spacedBy(18.dp),
+        ) {
+            when {
+                error != null -> item { EmptyState(Icons.Rounded.MusicNote, "Fil indisponible", error) }
+                sections == null -> items(3) { Skeleton(Modifier.padding(horizontal = 16.dp).fillMaxWidth().height(190.dp)) }
+                sections!!.isEmpty() -> item {
+                    Text(
+                        "Écoute quelques morceaux pour que le fil se remplisse.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Nflix.Muted,
+                        modifier = Modifier.padding(24.dp),
+                    )
+                }
+                else -> {
+                    withTracks.forEachIndexed { sectionIndex, (section, tracks) ->
+                        item(key = "t$sectionIndex") {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(section.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, modifier = Modifier.padding(horizontal = 16.dp))
+                                if (section.subtitle.isNotBlank()) Text(section.subtitle, style = MaterialTheme.typography.bodySmall, color = Nflix.Muted, modifier = Modifier.padding(horizontal = 16.dp))
+                            }
                         }
-                    }
-                    item(key = "r$sectionIndex") {
-                        LazyRow(
-                            contentPadding = PaddingValues(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            items(tracks.size) { index ->
-                                val track = tracks[index]
-                                Column(Modifier.width(150.dp).clickable { deps.music.playYt(tracks, index) }) {
-                                    NImage(
-                                        track.thumbnail.takeIf { it.isNotBlank() },
-                                        Modifier.size(150.dp).clip(RoundedCornerShape(14.dp)),
-                                        placeholderIcon = Icons.Rounded.MusicNote,
-                                    )
-                                    Spacer(Modifier.size(6.dp))
-                                    Text(track.title, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    Text(track.artist, style = MaterialTheme.typography.bodySmall, color = Nflix.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        item(key = "r$sectionIndex") {
+                            LazyRow(
+                                contentPadding = PaddingValues(horizontal = 16.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                items(tracks.size) { index ->
+                                    val track = tracks[index]
+                                    Column(
+                                        Modifier.width(150.dp).combinedClickable(
+                                            onClick = { deps.music.playYt(tracks, index) },
+                                            onLongClick = {
+                                                menu = YtHit(
+                                                    kind = "track",
+                                                    videoId = track.videoId,
+                                                    title = track.title,
+                                                    subtitle = track.artist,
+                                                    thumbnail = track.thumbnail.takeIf { it.isNotBlank() },
+                                                )
+                                            },
+                                        ),
+                                    ) {
+                                        NImage(
+                                            track.thumbnail.takeIf { it.isNotBlank() },
+                                            Modifier.size(150.dp).clip(RoundedCornerShape(14.dp)),
+                                            placeholderIcon = Icons.Rounded.MusicNote,
+                                        )
+                                        Spacer(Modifier.size(6.dp))
+                                        Text(track.title, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text(track.artist, style = MaterialTheme.typography.bodySmall, color = Nflix.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
                                 }
                             }
                         }
@@ -263,5 +294,68 @@ fun YtFeedScreen() {
                 }
             }
         }
+        YtTrackMenu(menu) { menu = null }
+    }
+}
+
+/**
+ * Long-press actions for one online track. The album row only appears once the server resolved the
+ * album browse id: a visible row that does nothing is worse than no row at all.
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+internal fun YtTrackMenu(hit: YtHit?, onDismiss: () -> Unit) {
+    if (hit == null || hit.kind != "track") return
+    val deps = LocalDeps.current
+    val navigator = LocalNavigator.current
+    val scope = rememberCoroutineScope()
+    var busy by remember(hit.videoId) { mutableStateOf(false) }
+    var info by remember(hit.videoId) { mutableStateOf<org.jellyfin.mobile.nflix.data.YtItemInfo?>(null) }
+    LaunchedEffect(hit.videoId) {
+        info = runCatching { deps.yt.info(hit.videoId) }.getOrNull()
+    }
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(hit.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            if (hit.subtitle.isNotBlank()) {
+                Text(hit.subtitle, style = MaterialTheme.typography.bodySmall, color = Nflix.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            Spacer(Modifier.size(8.dp))
+            YtMenuRow(Icons.Rounded.Person, "Voir l'artiste", busy) {
+                val artist = info?.artist?.takeIf { it.isNotBlank() } ?: hit.subtitle
+                onDismiss()
+                if (artist.isNotBlank()) navigator.open(Route.YtArtist(artist))
+            }
+            val albumBrowseId = info?.albumBrowseId.orEmpty()
+            if (albumBrowseId.isNotBlank()) {
+                YtMenuRow(Icons.Rounded.Album, "Voir l'album", busy) {
+                    onDismiss()
+                    navigator.open(Route.YtAlbum(albumBrowseId, info?.album?.ifBlank { hit.title } ?: hit.title))
+                }
+            }
+            YtMenuRow(Icons.Rounded.Download, "Télécharger dans Nflix", busy) {
+                scope.launch {
+                    busy = true
+                    runCatching { deps.yt.download(hit.videoId) }
+                        .onSuccess { ItemMenu.message = "Ajouté à la bibliothèque musique" }
+                        .onFailure { ItemMenu.message = it.message ?: "Téléchargement impossible" }
+                    busy = false
+                    onDismiss()
+                }
+            }
+            Spacer(Modifier.size(12.dp))
+        }
+    }
+}
+
+@Composable
+private fun YtMenuRow(icon: ImageVector, label: String, busy: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(enabled = !busy, onClick = onClick).padding(horizontal = 12.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Icon(icon, null, tint = Nflix.Red, modifier = Modifier.size(22.dp))
+        Text(label, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
     }
 }

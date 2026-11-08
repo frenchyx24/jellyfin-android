@@ -172,7 +172,8 @@ class MusicController(
                 .setTitle(track.title.ifBlank { "YouTube Music" })
                 .setArtist(track.artist)
                 .setArtworkUri(track.thumbnail.takeIf { it.isNotBlank() }?.let(Uri::parse))
-                .setDurationMs(track.duration.toLong() * 1000L)
+                // Unknown length (search results carry no duration): leave it unset, 0 would show a dead progress bar.
+                .apply { if (track.duration > 0) setDurationMs(track.duration.toLong() * 1000L) }
                 .setIsPlayable(true)
                 .build()
             MediaItem.Builder()

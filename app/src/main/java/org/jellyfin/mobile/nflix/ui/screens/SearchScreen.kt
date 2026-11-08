@@ -359,7 +359,8 @@ fun SearchScreen() {
 
     val busy = parsed.text.length >= 2 && (state is SearchState.Loading || done?.query != parsed.text)
     var ytHistory by remember { mutableStateOf<List<org.jellyfin.mobile.nflix.data.YtSearchHistoryEntry>>(emptyList()) }
-    LaunchedEffect(Unit) { runCatching { deps.yt.history(10) }.onSuccess { ytHistory = it } }
+    // Refresh after each completed search so the "recherches récentes" line is never stale.
+    LaunchedEffect(done?.query) { runCatching { deps.yt.history(10) }.onSuccess { ytHistory = it } }
     fun saveRecent(q: String = query) { if (q.trim().length >= 2) recent = SearchHistory.add(context, q) }
     fun open(item: Item) {
         saveRecent()
@@ -480,65 +481,7 @@ fun SearchScreen() {
                 )
             }
         }
-        YtMenuDialog(hit = ytMenu, onDismiss = { ytMenu = null })
-    }
-}
-
-@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
-@Composable
-private fun YtMenuDialog(hit: org.jellyfin.mobile.nflix.data.YtHit?, onDismiss: () -> Unit) {
-    if (hit == null || hit.kind != "track") return
-    val deps = LocalDeps.current
-    val navigator = LocalNavigator.current
-    val scope = rememberCoroutineScope()
-    var busy by remember { mutableStateOf(false) }
-    var sheet by remember { mutableStateOf(true) }
-    if (!sheet) { onDismiss(); return }
-    androidx.compose.material3.ModalBottomSheet(onDismissRequest = { sheet = false; onDismiss() }) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(hit.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            if (hit.subtitle.isNotBlank()) Text(hit.subtitle, style = MaterialTheme.typography.bodySmall, color = Nflix.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            androidx.compose.foundation.layout.Spacer(Modifier.size(8.dp))
-            YtMenuRow(Icons.Rounded.Person, "Voir l'artiste", busy) {
-                scope.launch {
-                    busy = true
-                    val info = runCatching { deps.yt.info(hit.videoId) }.getOrNull()
-                    busy = false; sheet = false; onDismiss()
-                    val artist = info?.artist ?: hit.subtitle
-                    if (artist.isNotBlank()) navigator.open(Route.YtArtist(artist))
-                }
-            }
-            YtMenuRow(Icons.Rounded.Album, "Voir l'album", busy) {
-                scope.launch {
-                    busy = true
-                    val info = runCatching { deps.yt.info(hit.videoId) }.getOrNull()
-                    busy = false; sheet = false; onDismiss()
-                    if (!info?.albumBrowseId.isNullOrBlank()) navigator.open(Route.YtAlbum(info!!.albumBrowseId, info.album.ifBlank { hit.title }))
-                }
-            }
-            YtMenuRow(Icons.Rounded.Download, "Télécharger dans Nflix", busy) {
-                scope.launch {
-                    busy = true
-                    runCatching { deps.yt.download(hit.videoId) }
-                        .onSuccess { ItemMenu.message = "Téléchargé dans la bibliothèque musique" }
-                        .onFailure { ItemMenu.message = it.message ?: "Téléchargement impossible" }
-                    busy = false; sheet = false; onDismiss()
-                }
-            }
-            androidx.compose.foundation.layout.Spacer(Modifier.size(12.dp))
-        }
-    }
-}
-
-@Composable
-private fun YtMenuRow(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, busy: Boolean, onClick: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(enabled = !busy, onClick = onClick).padding(horizontal = 12.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        Icon(icon, null, tint = Nflix.Red, modifier = Modifier.size(22.dp))
-        Text(label, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+        YtTrackMenu(hit = ytMenu, onDismiss = { ytMenu = null })
     }
 }
 

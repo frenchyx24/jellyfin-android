@@ -6,6 +6,8 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonObject
 
 /** Sync config returned by the butler plugin. */
@@ -72,8 +74,20 @@ class SyncRepository(private val api: NflixApi) {
     suspend fun config(): SyncConfig =
         api.get("Plugins/NflixButler/sync/config", SyncConfig.serializer())
 
-    suspend fun status(): List<SyncAccountInfo> =
-        api.get("Plugins/NflixButler/sync/status", StatusResponse.serializer(), mapOf("userId" to api.userId)).accounts
+    suspend fun status(): List<SyncAccountInfo> {
+        val root = runCatching {
+            api.getJson("Plugins/NflixButler/sync/status", mapOf("userId" to api.userId)).jsonObject
+        }.getOrNull() ?: return emptyList()
+        val accounts = root["accounts"] as? kotlinx.serialization.json.JsonArray ?: return emptyList()
+        return accounts.mapNotNull { element ->
+            val row = element as? JsonObject ?: return@mapNotNull null
+            SyncAccountInfo(
+                service = row.text("service", "Service"),
+                profileName = row.text("profileName", "ProfileName"),
+                profileId = row.text("profileId", "ProfileId"),
+            ).takeIf { it.service.isNotBlank() }
+        }
+    }
 
     suspend fun link(service: String, code: String): JsonObject =
         api.send("POST", "Plugins/NflixButler/sync/link", body = buildJsonObject {
@@ -89,8 +103,16 @@ class SyncRepository(private val api: NflixApi) {
     suspend fun playlists(service: String): List<SyncPlaylist> =
         api.get("Plugins/NflixButler/sync/playlists", PlaylistsResponse.serializer(), mapOf("service" to service, "userId" to api.userId)).playlists
 
-    suspend fun import(service: String, playlistId: String): ImportResult =
-        api.get("Plugins/NflixButler/sync/import", ImportResult.serializer(), mapOf("service" to service, "playlistId" to playlistId, "userId" to api.userId))
+    suspend fun import(service: String, playlistId: String): ImportResult {
+        // The route is a POST (it may create nothing itself, but matching a whole playlist is not
+        // idempotent enough for a cacheable GET).
+        val payload = api.send("POST", "Plugins/NflixButler/sync/import", body = buildJsonObject {
+            put("service", JsonPrimitive(service))
+            put("playlistId", JsonPrimitive(playlistId))
+            put("userId", JsonPrimitive(api.userId))
+        }) ?: error("Réponse vide")
+        return api.json.decodeFromJsonElement(ImportResult.serializer(), payload)
+    }
 
     suspend fun deezerSearch(q: String): List<DeezerTrack> =
         api.get("Plugins/NflixButler/sync/deezer-search", SearchResponse.serializer(), mapOf("q" to q)).tracks
@@ -105,11 +127,12 @@ class SyncRepository(private val api: NflixApi) {
         })?.jsonObject ?: error("Réponse vide")
 
     @Serializable
-    private data class StatusResponse(@SerialName("accounts") val accounts: List<SyncAccountInfo> = emptyList())
-
-    @Serializable
     private data class PlaylistsResponse(@SerialName("playlists") val playlists: List<SyncPlaylist> = emptyList())
 
     @Serializable
     private data class SearchResponse(@SerialName("tracks") val tracks: List<DeezerTrack> = emptyList())
+
+    /** Reads a string field, accepting both camelCase and the PascalCase the server used before 0.4.1. */
+    private fun JsonObject.text(vararg keys: String): String =
+        keys.firstNotNullOfOrNull { (this[it] as? JsonPrimitive)?.contentOrNull } ?: ""
 }
