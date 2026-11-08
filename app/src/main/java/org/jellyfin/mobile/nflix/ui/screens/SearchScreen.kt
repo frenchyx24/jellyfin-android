@@ -302,6 +302,11 @@ fun SearchScreen() {
             org.jellyfin.mobile.nflix.data.YtTrack(videoId = it.videoId, title = it.title, artist = it.subtitle, duration = 0, thumbnail = it.thumbnail.orEmpty())
         }
     }
+    // One call for the visible results: cards already in the library show a check instead of an arrow.
+    LaunchedEffect(ytTracks) {
+        val ids = ytTracks.map { it.videoId }.filter { it.isNotBlank() }
+        if (ids.isNotEmpty()) runCatching { deps.yt.downloaded(ids) }.onSuccess { org.jellyfin.mobile.nflix.ui.YtDownloads.markDownloaded(it) }
+    }
 
     // Horus runs on its own and never holds back local results.
     LaunchedEffect(Unit) {
@@ -865,15 +870,27 @@ private fun SearchCard(
             thumbnail = item.ytThumb,
         ) else null
     }
-    PosterCard(
-        item, item.ytThumb ?: deps.jellyfin.primary(item, 300), "search/${item.id}", { onOpen(item) },
-        modifier = modifier.appear(),
-        width = if (gridWidth) androidx.compose.ui.unit.Dp.Unspecified else 120.dp,
-        aspect = if (square) 1f else 2f / 3f,
-        subtitle = item.seriesName ?: item.albumArtist ?: item.artistItems.joinToString { it.name }.takeIf { it.isNotBlank() } ?: item.year?.toString(),
-        typeLabel = if (VideoCatalog.isAnime(item)) "ANIMÉ" else null,
-        onLongClick = ytHit?.let { { onYtLongPress(it) } },
-    )
+    val width = if (gridWidth) androidx.compose.ui.unit.Dp.Unspecified else 120.dp
+    androidx.compose.foundation.layout.Box(modifier.width(width)) {
+        PosterCard(
+            item, item.ytThumb ?: deps.jellyfin.primary(item, 300), "search/${item.id}", { onOpen(item) },
+            modifier = Modifier.appear(),
+            width = width,
+            aspect = if (square) 1f else 2f / 3f,
+            subtitle = item.seriesName ?: item.albumArtist ?: item.artistItems.joinToString { it.name }.takeIf { it.isNotBlank() } ?: item.year?.toString(),
+            typeLabel = if (VideoCatalog.isAnime(item)) "ANIMÉ" else null,
+            onLongClick = ytHit?.let { { onYtLongPress(it) } },
+        )
+        if (ytHit != null) {
+            org.jellyfin.mobile.nflix.ui.YtDownloadButton(
+                ytHit.videoId,
+                title = ytHit.title,
+                onImage = true,
+                size = 30.dp,
+                modifier = Modifier.align(androidx.compose.ui.Alignment.TopEnd).padding(4.dp),
+            )
+        }
+    }
 }
 
 @Composable

@@ -51,26 +51,39 @@ import kotlinx.coroutines.launch
 import org.jellyfin.mobile.nflix.data.YtHit
 import org.jellyfin.mobile.nflix.ui.ContentBottomPadding
 import org.jellyfin.mobile.nflix.ui.EmptyState
-import org.jellyfin.mobile.nflix.ui.ItemMenu
 import org.jellyfin.mobile.nflix.ui.LocalDeps
 import org.jellyfin.mobile.nflix.ui.LocalNavigator
 import org.jellyfin.mobile.nflix.ui.NImage
 import org.jellyfin.mobile.nflix.ui.Nflix
 import org.jellyfin.mobile.nflix.ui.Route
 import org.jellyfin.mobile.nflix.ui.Skeleton
+import org.jellyfin.mobile.nflix.ui.YtDownloadAllButton
+import org.jellyfin.mobile.nflix.ui.YtDownloadButton
+import org.jellyfin.mobile.nflix.ui.YtDownloads
 
 /** Shared list of YT Music tracks: tap plays the list from that index, long press opens the track menu. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun YtTrackList(hits: List<YtHit>, onPlay: (List<org.jellyfin.mobile.nflix.data.YtTrack>, Int) -> Unit) {
+    val deps = LocalDeps.current
     val tracks = remember(hits) { hits.filter { it.kind == "track" }.map { it.toTrack() } }
     var menu by remember { mutableStateOf<YtHit?>(null) }
+    val videoIds = remember(hits) { hits.filter { it.kind == "track" }.map { it.videoId } }
+    // One call: the rows already in the library show their check mark without a per-row lookup.
+    LaunchedEffect(videoIds) {
+        runCatching { deps.yt.downloaded(videoIds) }.onSuccess { YtDownloads.markDownloaded(it) }
+    }
     Box(Modifier.fillMaxSize()) {
         LazyColumn(
             Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = ContentBottomPadding),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
+            if (tracks.size > 1) {
+                item(key = "download-all") {
+                    YtDownloadAllButton(tracks.map { it.videoId to it.title }, Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+                }
+            }
             items(hits.size) { index ->
                 val hit = hits[index]
                 if (hit.kind != "track") return@items
@@ -80,7 +93,7 @@ private fun YtTrackList(hits: List<YtHit>, onPlay: (List<org.jellyfin.mobile.nfl
                             onPlay(tracks, tracks.indexOfFirst { it.videoId == hit.videoId }.coerceAtLeast(0))
                         },
                         onLongClick = { menu = hit },
-                    ).padding(horizontal = 16.dp, vertical = 8.dp),
+                    ).padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
@@ -99,6 +112,7 @@ private fun YtTrackList(hits: List<YtHit>, onPlay: (List<org.jellyfin.mobile.nfl
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
+                    YtDownloadButton(hit.videoId, title = hit.title)
                 }
             }
         }
@@ -232,6 +246,12 @@ fun YtFeedScreen() {
             }
         }.orEmpty()
     }
+    val feedIds = remember(sections) {
+        sections.orEmpty().flatMap { section -> section.tracks.map { it.videoId } }.filter { it.isNotBlank() }
+    }
+    LaunchedEffect(feedIds) {
+        runCatching { deps.yt.downloaded(feedIds) }.onSuccess { YtDownloads.markDownloaded(it) }
+    }
     Box(Modifier.fillMaxSize()) {
         LazyColumn(
             Modifier.fillMaxSize(),
@@ -278,11 +298,19 @@ fun YtFeedScreen() {
                                             },
                                         ),
                                     ) {
-                                        NImage(
-                                            track.thumbnail.takeIf { it.isNotBlank() },
-                                            Modifier.size(150.dp).clip(RoundedCornerShape(14.dp)),
-                                            placeholderIcon = Icons.Rounded.MusicNote,
-                                        )
+                                        Box(Modifier.size(150.dp)) {
+                                            NImage(
+                                                track.thumbnail.takeIf { it.isNotBlank() },
+                                                Modifier.fillMaxSize().clip(RoundedCornerShape(14.dp)),
+                                                placeholderIcon = Icons.Rounded.MusicNote,
+                                            )
+                                            YtDownloadButton(
+                                                track.videoId,
+                                                title = track.title,
+                                                onImage = true,
+                                                modifier = Modifier.align(Alignment.TopEnd).padding(6.dp),
+                                            )
+                                        }
                                         Spacer(Modifier.size(6.dp))
                                         Text(track.title, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                         Text(track.artist, style = MaterialTheme.typography.bodySmall, color = Nflix.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -336,9 +364,7 @@ internal fun YtTrackMenu(hit: YtHit?, onDismiss: () -> Unit) {
             YtMenuRow(Icons.Rounded.Download, "Télécharger dans Nflix", busy) {
                 scope.launch {
                     busy = true
-                    runCatching { deps.yt.download(hit.videoId) }
-                        .onSuccess { ItemMenu.message = "Ajouté à la bibliothèque musique" }
-                        .onFailure { ItemMenu.message = it.message ?: "Téléchargement impossible" }
+                    YtDownloads.download(deps, hit.videoId, hit.title)
                     busy = false
                     onDismiss()
                 }

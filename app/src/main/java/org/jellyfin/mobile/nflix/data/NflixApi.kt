@@ -129,6 +129,26 @@ class NflixApi(cacheDir: File, private val session: NflixSession, private val ap
         return if (text.isBlank()) null else withContext(Dispatchers.Default) { runCatching { json.parseToJsonElement(text) }.getOrNull() }
     }
 
+    /**
+     * POST that may run for minutes (the server downloads a whole track): the shared client's
+     * 30 s read timeout would abort it, so this call gets its own client.
+     */
+    suspend fun sendLong(method: String, path: String, query: Map<String, Any?> = emptyMap(), body: JsonElement? = null, minutes: Long = 10): JsonElement? = withContext(Dispatchers.IO) {
+        val target = url(path, query)
+        val payload = body?.toString()?.toByteArray(Charsets.UTF_8)?.toRequestBody("application/json".toMediaType())
+        val request = Request.Builder().url(target)
+            .header("Authorization", authorization())
+            .header("Accept", "application/json")
+            .method(method, payload ?: ByteArray(0).toRequestBody(null))
+            .build()
+        val longClient = client.newBuilder().readTimeout(minutes, TimeUnit.MINUTES).writeTimeout(minutes, TimeUnit.MINUTES).build()
+        longClient.newCall(request).execute().use { response ->
+            val text = response.body?.string().orEmpty()
+            if (!response.isSuccessful) throw NflixHttpException(response.code, "HTTP ${response.code} ${target.encodedPath}", text.take(2048))
+            if (text.isBlank()) null else runCatching { json.parseToJsonElement(text) }.getOrNull()
+        }
+    }
+
     /** Sends raw bytes (image uploads); the media type is sent verbatim. */
     suspend fun sendBytes(method: String, path: String, bytes: ByteArray, mediaType: String, query: Map<String, Any?> = emptyMap()): JsonElement? = withContext(Dispatchers.IO) {
         val target = url(path, query)

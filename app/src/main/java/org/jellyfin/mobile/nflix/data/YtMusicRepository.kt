@@ -6,7 +6,10 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /** A playable YT Music track (what the player queue holds). */
 @Immutable
@@ -87,8 +90,18 @@ class YtMusicRepository(private val api: NflixApi) {
 
     /** Downloads the track into the Jellyfin music library (admin). Server answers {downloaded,path,title,artist}. */
     suspend fun download(videoId: String): JsonObject =
-        api.send("POST", "Plugins/NflixButler/yt/download", body = buildJsonObject { put("videoId", JsonPrimitive(videoId)) })?.jsonObject
+        api.sendLong("POST", "Plugins/NflixButler/yt/download", body = buildJsonObject { put("videoId", JsonPrimitive(videoId)) })?.jsonObject
             ?: error("Réponse vide")
+
+    /** Which of these tracks already sit in the library (one call per list). */
+    suspend fun downloaded(videoIds: List<String>): Set<String> {
+        val ids = videoIds.filter { it.isNotBlank() }.distinct().take(200)
+        if (ids.isEmpty()) return emptySet()
+        val json = api.getJson("Plugins/NflixButler/yt/downloaded", mapOf("ids" to ids.joinToString(",")))
+        return json.jsonObject["ids"]?.let { element ->
+            runCatching { element.jsonArray.mapNotNull { it.jsonPrimitive.contentOrNull } }.getOrNull()
+        }.orEmpty().toSet()
+    }
 
     /** Directly playable proxied audio URL (signed-in via `api_key`). */
     fun streamUrl(videoId: String): String =
