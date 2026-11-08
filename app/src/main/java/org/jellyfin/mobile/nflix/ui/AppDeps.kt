@@ -51,6 +51,12 @@ class AppDeps(
     /** YouTube Music search + stream proxy (Nflix Butler plugin). */
     val yt: org.jellyfin.mobile.nflix.data.YtMusicRepository by lazy { org.jellyfin.mobile.nflix.data.YtMusicRepository(api) }
 
+    /** Online music catalogue (clean metadata, covers, library downloads). */
+    val online: org.jellyfin.mobile.nflix.data.OnlineMusicRepository by lazy { org.jellyfin.mobile.nflix.data.OnlineMusicRepository(api) }
+
+    fun playOnline(tracks: List<org.jellyfin.mobile.nflix.data.OnlineTrack>, index: Int = 0) =
+        music.playOnline(tracks, index) { online.streamUrl(it) }
+
     /** Deezer/Spotify account linking and playlist sync. */
     val sync: org.jellyfin.mobile.nflix.data.SyncRepository by lazy { org.jellyfin.mobile.nflix.data.SyncRepository(api) }
 

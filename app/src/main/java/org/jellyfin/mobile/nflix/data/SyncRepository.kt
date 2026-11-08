@@ -19,6 +19,17 @@ data class SyncConfig(
     @SerialName("deezerAppId") val deezerAppId: String = "",
     @SerialName("spotifyConfigured") val spotifyConfigured: Boolean = false,
     @SerialName("spotifyClientId") val spotifyClientId: String = "",
+    @SerialName("youtubeConfigured") val youtubeConfigured: Boolean = false,
+)
+
+/** Google device-flow code shown to the user. */
+@Immutable
+@Serializable
+data class GoogleDeviceCode(
+    @SerialName("userCode") val userCode: String = "",
+    @SerialName("verificationUrl") val verificationUrl: String = "https://www.google.com/device",
+    @SerialName("interval") val interval: Int = 5,
+    @SerialName("expiresIn") val expiresIn: Int = 1800,
 )
 
 @Immutable
@@ -51,6 +62,7 @@ data class SyncMatch(
 data class SyncMissing(
     @SerialName("title") val title: String = "",
     @SerialName("artist") val artist: String = "",
+    @SerialName("videoId") val videoId: String = "",
 )
 
 @Immutable
@@ -95,6 +107,21 @@ class SyncRepository(private val api: NflixApi) {
             put("code", JsonPrimitive(code))
             put("userId", JsonPrimitive(api.userId))
         })?.jsonObject ?: error("Réponse vide")
+
+    suspend fun googleStart(): GoogleDeviceCode {
+        val payload = api.send("POST", "Plugins/NflixButler/sync/google/start", body = buildJsonObject {
+            put("userId", JsonPrimitive(api.userId))
+        }) ?: error("Réponse vide")
+        return api.json.decodeFromJsonElement(GoogleDeviceCode.serializer(), payload)
+    }
+
+    /** One poll: "pending", "slow_down", "linked", "denied" or "expired". */
+    suspend fun googlePoll(): String {
+        val payload = api.send("POST", "Plugins/NflixButler/sync/google/poll", body = buildJsonObject {
+            put("userId", JsonPrimitive(api.userId))
+        })?.jsonObject
+        return (payload?.get("status") as? JsonPrimitive)?.contentOrNull ?: "pending"
+    }
 
     suspend fun unlink(service: String) {
         api.send("DELETE", "Plugins/NflixButler/sync/unlink", mapOf("userId" to api.userId, "service" to service))

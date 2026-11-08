@@ -84,6 +84,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material.icons.rounded.Album
+import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material3.TextButton
@@ -289,23 +290,20 @@ fun SearchScreen() {
     }
     // YouTube Music fills the gaps: results appear as ordinary audio items (`yt:` ids),
     // indistinguishable from library tracks, and play through the server proxy.
-    var ytResult by remember { mutableStateOf<org.jellyfin.mobile.nflix.data.YtSearchResult?>(null) }
+    var ytResult by remember { mutableStateOf<org.jellyfin.mobile.nflix.data.OnlineSearch?>(null) }
     LaunchedEffect(Unit) {
-        snapshotFlow { SearchQuery.parse(query).text }.debounce(600).distinctUntilChanged().collectLatest { q ->
+        snapshotFlow { SearchQuery.parse(query).text }.debounce(500).distinctUntilChanged().collectLatest { q ->
             ytResult = null
             if (q.length < 2) return@collectLatest
-            ytResult = withTimeoutOrNull(10_000) { runCatching { deps.yt.search(q, 12) }.getOrNull() }
+            ytResult = withTimeoutOrNull(10_000) { runCatching { deps.online.search(q, 20) }.getOrNull() }
         }
     }
-    val ytTracks = remember(ytResult) {
-        ytResult?.results.orEmpty().map {
-            org.jellyfin.mobile.nflix.data.YtTrack(videoId = it.videoId, title = it.title, artist = it.subtitle, duration = 0, thumbnail = it.thumbnail.orEmpty())
-        }
-    }
-    // One call for the visible results: cards already in the library show a check instead of an arrow.
+    val ytTracks = remember(ytResult) { ytResult?.tracks.orEmpty() }
+    // One call for the visible results: tracks already in the library play from Nflix and show a check.
     LaunchedEffect(ytTracks) {
-        val ids = ytTracks.map { it.videoId }.filter { it.isNotBlank() }
-        if (ids.isNotEmpty()) runCatching { deps.yt.downloaded(ids) }.onSuccess { org.jellyfin.mobile.nflix.ui.YtDownloads.markDownloaded(it) }
+        if (ytTracks.isEmpty()) return@LaunchedEffect
+        OnlineLibrary.seed(ytTracks)
+        OnlineLibrary.refresh(deps, ytTracks.map { it.id })
     }
 
     // Horus runs on its own and never holds back local results.
@@ -333,7 +331,7 @@ fun SearchScreen() {
             requests[key] = runCatching { deps.horus.request(media) }.fold({ RequestState.Sent }, { error -> if (error.message?.contains("déjà") == true) RequestState.Sent else RequestState.Failed })
         }
     }
-    var ytMenu by remember { mutableStateOf<org.jellyfin.mobile.nflix.data.YtHit?>(null) }
+    var ytMenu by remember { mutableStateOf<org.jellyfin.mobile.nflix.data.OnlineTrack?>(null) }
     val done = state as? SearchState.Done
     val serverItems = done?.takeIf { it.query == parsed.text }?.items.orEmpty()
     val combined = remember(local, serverItems, parsed) { SearchEngine.merge(parsed, local, serverItems) }
@@ -354,10 +352,19 @@ fun SearchScreen() {
     val jump = loadedJump?.takeIf { it.series.id == jumpSeries?.id && it.query == parsed }
 
     val localTitles = remember(combined) { combined.mapTo(HashSet()) { VideoCatalog.normalize(it.name) } }
-    // YT Music results as fake Audio items, dropped when the library already has the title.
-    val ytItems = remember(ytTracks, localTitles) {
-        ytTracks.filter { org.jellyfin.mobile.nflix.data.VideoCatalog.normalize(it.title) !in localTitles }
-            .map { it.toItem() }
+    // Library tracks by "artist|title": an online hit the server already has is not shown twice.
+    val localTracks = remember(combined) {
+        combined.filter { it.type == "Audio" }.flatMapTo(HashSet()) { item ->
+            val title = VideoCatalog.normalize(item.name)
+            (item.artistItems.map { it.name } + listOfNotNull(item.albumArtist)).map { VideoCatalog.normalize(it) + "|" + title } + title
+        }
+    }
+    // Online results as ordinary audio items with their album cover, after the library ones.
+    val ytItems = remember(ytTracks, localTracks) {
+        ytTracks.filter { t ->
+            val title = VideoCatalog.normalize(t.title)
+            (VideoCatalog.normalize(t.artist) + "|" + title) !in localTracks && OnlineLibrary.itemId(t.id) == null
+        }.map { it.toItem() }
     }
     val display = remember(combined, ytItems) { combined + ytItems }
     val requestable = remember(horus, localTitles) { horus.filter { VideoCatalog.normalize(it.title) !in localTitles } }
@@ -369,9 +376,9 @@ fun SearchScreen() {
     fun saveRecent(q: String = query) { if (q.trim().length >= 2) recent = SearchHistory.add(context, q) }
     fun open(item: Item) {
         saveRecent()
-        if (item.id.startsWith("yt:")) {
-            val index = ytTracks.indexOfFirst { "yt:${it.videoId}" == item.id }
-            deps.music.playYt(ytTracks, index.coerceAtLeast(0))
+        if (item.id.startsWith("dz:")) {
+            val index = ytTracks.indexOfFirst { "dz:${it.id}" == item.id }
+            deps.playOnline(ytTracks.withLibrary(), index.coerceAtLeast(0))
             return
         }
         val origin = "search/${item.id}"
@@ -480,13 +487,13 @@ fun SearchScreen() {
                     ytAlbums = ytResult?.albums.orEmpty(),
                     ytArtists = ytResult?.artists.orEmpty(),
                     onOpen = ::open,
-                    onYtLongPress = { hit -> ytMenu = hit },
+                    onYtLongPress = { id -> ytMenu = ytTracks.firstOrNull { "dz:${it.id}" == id } },
                     onDetails = { media -> saveRecent(); navigator.open(Route.HorusDetail(media.type, media.id)) },
                     onRequest = { media -> saveRecent(); request(media) },
                 )
             }
         }
-        YtTrackMenu(hit = ytMenu, onDismiss = { ytMenu = null })
+        OnlineTrackMenu(ytMenu) { ytMenu = null }
     }
 }
 
@@ -686,10 +693,10 @@ private fun SearchResults(
     jump: Jump?,
     genre: String?,
     genreItems: List<Item>,
-    ytAlbums: List<org.jellyfin.mobile.nflix.data.YtHit> = emptyList(),
-    ytArtists: List<org.jellyfin.mobile.nflix.data.YtHit> = emptyList(),
+    ytAlbums: List<org.jellyfin.mobile.nflix.data.OnlineAlbum> = emptyList(),
+    ytArtists: List<org.jellyfin.mobile.nflix.data.OnlineArtist> = emptyList(),
     onOpen: (Item) -> Unit,
-    onYtLongPress: (org.jellyfin.mobile.nflix.data.YtHit) -> Unit = {},
+    onYtLongPress: (String) -> Unit = {},
     onDetails: (HorusMedia) -> Unit,
     onRequest: (HorusMedia) -> Unit,
 ) {
@@ -699,34 +706,11 @@ private fun SearchResults(
             val best = remember(items, query) { bestMatch(items, query) }
             LazyColumn(contentPadding = PaddingValues(bottom = ContentBottomPadding)) {
                 if (ytArtists.isNotEmpty()) {
-                    item(key = "yt-artists") {
-                        val navigator = LocalNavigator.current
-                        Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text("Artistes", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                            ytArtists.take(4).forEach { artist ->
-                                Row(
-                                    Modifier.fillMaxWidth().clickable { navigator.open(Route.YtArtist(artist.title)) }.padding(vertical = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Icon(Icons.Rounded.Person, null, tint = Nflix.Muted, modifier = Modifier.size(20.dp))
-                                    Text(artist.title, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(start = 10.dp))
-                                }
-                            }
-                        }
-                    }
-                }
-                if (ytAlbums.isNotEmpty()) {
-                    item(key = "yt-albums") {
-                        val navigator = LocalNavigator.current
-                        Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text("Albums", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                ytAlbums.take(6).forEach { album ->
-                                    Column(Modifier.width(110.dp).clickable { navigator.open(Route.YtAlbum(album.browseId, album.title)) }) {
-                                        NImage(null, Modifier.size(110.dp).clip(RoundedCornerShape(10.dp)), placeholderIcon = Icons.Rounded.Album)
-                                        Text(album.title, style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                    }
-                                }
+                    item(key = "online-artists") {
+                        Column(Modifier.padding(vertical = 6.dp)) {
+                            Text("Artistes", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+                            androidx.compose.foundation.lazy.LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                items(ytArtists.take(8), key = { "oa-${it.id}" }) { OnlineArtistBubble(it, size = 84.dp) }
                             }
                         }
                     }
@@ -744,6 +728,16 @@ private fun SearchResults(
                             is Item -> SearchCard(hit, onOpen, onYtLongPress = onYtLongPress)
                             is HorusMedia -> RequestCard(hit, requests[requestKey(hit)], { onDetails(hit) }, { onRequest(hit) })
                             else -> Unit
+                        }
+                    }
+                }
+                if (ytAlbums.isNotEmpty()) {
+                    item(key = "online-albums") {
+                        Column(Modifier.padding(vertical = 6.dp)) {
+                            Text("Albums", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+                            androidx.compose.foundation.lazy.LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                items(ytAlbums.take(12), key = { "oal-${it.id}" }) { OnlineAlbumCard(it, width = 120.dp) }
+                            }
                         }
                     }
                 }
@@ -857,19 +851,11 @@ private fun SearchCard(
     onOpen: (Item) -> Unit,
     modifier: Modifier = Modifier,
     gridWidth: Boolean = false,
-    onYtLongPress: (org.jellyfin.mobile.nflix.data.YtHit) -> Unit = {},
+    onYtLongPress: (String) -> Unit = {},
 ) {
     val deps = LocalDeps.current
     val square = item.type in setOf("MusicAlbum", "MusicArtist", "Audio", "Person", "Playlist")
-    val ytHit = remember(item) {
-        if (item.id.startsWith("yt:")) org.jellyfin.mobile.nflix.data.YtHit(
-            kind = "track",
-            videoId = item.id.removePrefix("yt:"),
-            title = item.name,
-            subtitle = item.artistItems.joinToString { it.name },
-            thumbnail = item.ytThumb,
-        ) else null
-    }
+    val online = item.id.startsWith("dz:")
     val width = if (gridWidth) androidx.compose.ui.unit.Dp.Unspecified else 120.dp
     androidx.compose.foundation.layout.Box(modifier.width(width)) {
         PosterCard(
@@ -879,16 +865,20 @@ private fun SearchCard(
             aspect = if (square) 1f else 2f / 3f,
             subtitle = item.seriesName ?: item.albumArtist ?: item.artistItems.joinToString { it.name }.takeIf { it.isNotBlank() } ?: item.year?.toString(),
             typeLabel = if (VideoCatalog.isAnime(item)) "ANIMÉ" else null,
-            onLongClick = ytHit?.let { { onYtLongPress(it) } },
+            onLongClick = if (online) { { onYtLongPress(item.id) } } else null,
         )
-        if (ytHit != null) {
-            org.jellyfin.mobile.nflix.ui.YtDownloadButton(
-                ytHit.videoId,
-                title = ytHit.title,
-                onImage = true,
-                size = 30.dp,
-                modifier = Modifier.align(androidx.compose.ui.Alignment.TopEnd).padding(4.dp),
-            )
+        if (online) {
+            val state = OnlineLibrary.state(item.id.removePrefix("dz:"))
+            if (state == "done" || state == "running" || state == "queued") {
+                Box(
+                    Modifier.align(androidx.compose.ui.Alignment.TopEnd).padding(4.dp).size(26.dp).clip(androidx.compose.foundation.shape.CircleShape)
+                        .background(Color.Black.copy(alpha = 0.55f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (state == "done") Icon(Icons.Rounded.CheckCircle, "Dans la bibliothèque", tint = Color.White, modifier = Modifier.size(18.dp))
+                    else androidx.compose.material3.CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = Color.White)
+                }
+            }
         }
     }
 }
@@ -921,12 +911,13 @@ private fun BestMatch(item: Item, onOpen: (Item) -> Unit) {
     }
 }
 
-/** A YouTube Music result as a synthetic audio item; `yt:` ids are played via the proxy. */
-private fun org.jellyfin.mobile.nflix.data.YtTrack.toItem(): Item = Item(
-    id = "yt:$videoId",
-    name = if (artist.isBlank()) title else "$title — $artist",
+/** An online result as an ordinary audio item with its album cover; `dz:` ids play through the server. */
+private fun org.jellyfin.mobile.nflix.data.OnlineTrack.toItem(): Item = Item(
+    id = "dz:$id",
+    name = title,
     type = "Audio",
     runTimeTicks = duration.toLong() * 10_000_000L,
     artistItems = listOfNotNull(artist.takeIf { it.isNotBlank() }?.let { NameId("", it) }),
-    ytThumb = thumbnail.takeIf { it.isNotBlank() },
+    album = album.takeIf { it.isNotBlank() },
+    ytThumb = cover.takeIf { it.isNotBlank() },
 )

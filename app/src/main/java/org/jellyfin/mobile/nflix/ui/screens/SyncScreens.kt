@@ -148,6 +148,47 @@ fun SyncAccountsScreen() {
         }
     }
 
+    // Google device flow: show the code, open google.com/device, poll until linked.
+    var googleCode by remember { mutableStateOf<org.jellyfin.mobile.nflix.data.GoogleDeviceCode?>(null) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    LaunchedEffect(googleCode) {
+        val code = googleCode ?: return@LaunchedEffect
+        var wait = code.interval.coerceAtLeast(5) * 1000L
+        val deadline = System.currentTimeMillis() + code.expiresIn * 1000L
+        while (System.currentTimeMillis() < deadline) {
+            kotlinx.coroutines.delay(wait)
+            when (runCatching { deps.sync.googlePoll() }.getOrDefault("pending")) {
+                "linked" -> { ItemMenu.message = "Compte YouTube Music lié"; googleCode = null; refresh(); return@LaunchedEffect }
+                "denied" -> { ItemMenu.message = "Liaison refusée"; googleCode = null; return@LaunchedEffect }
+                "expired" -> { ItemMenu.message = "Code expiré, recommencez"; googleCode = null; return@LaunchedEffect }
+                "slow_down" -> wait += 5_000
+            }
+        }
+        googleCode = null
+    }
+    googleCode?.let { code ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { googleCode = null },
+            containerColor = Nflix.SurfaceHigh,
+            title = { Text("Lier YouTube Music") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Ouvrez ${code.verificationUrl.removePrefix("https://")} et saisissez ce code :", style = MaterialTheme.typography.bodyMedium)
+                    Text(code.userCode, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black, color = Nflix.Red)
+                    Text("La liaison se termine toute seule ici.", style = MaterialTheme.typography.bodySmall, color = Nflix.Muted)
+                }
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    val clip = context.getSystemService(android.content.ClipboardManager::class.java)
+                    clip?.setPrimaryClip(android.content.ClipData.newPlainText("code", code.userCode))
+                    runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(code.verificationUrl)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                }) { Text("Copier et ouvrir", color = Nflix.Red) }
+            },
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { googleCode = null }) { Text("Annuler") } },
+        )
+    }
+
     LazyColumn(
         Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = ContentBottomPadding),
@@ -178,9 +219,24 @@ fun SyncAccountsScreen() {
                     modifier = Modifier.weight(1f),
                 ) { Icon(Icons.Rounded.Link, null, Modifier.size(18.dp)); Text("Lier Spotify", Modifier.padding(start = 6.dp)) }
             }
-            if (config != null && !config!!.deezerConfigured && !config!!.spotifyConfigured) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
+                OutlinedButton(
+                    onClick = {
+                        scope.launch {
+                            runCatching { deps.sync.googleStart() }
+                                .onSuccess { googleCode = it }
+                                .onFailure { ItemMenu.message = if ((it as? org.jellyfin.mobile.nflix.data.NflixHttpException)?.code == 412) "Compte Google non configuré sur le serveur" else "Google injoignable" }
+                        }
+                    },
+                    enabled = config?.youtubeConfigured == true && !busy && accounts.none { it.service == "youtube" },
+                    border = androidx.compose.foundation.BorderStroke(1.dp, if (config?.youtubeConfigured == true) Nflix.Red else Nflix.Outline),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Nflix.Text),
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Icon(Icons.Rounded.Link, null, Modifier.size(18.dp)); Text("Lier YouTube Music", Modifier.padding(start = 6.dp)) }
+            }
+            if (config != null && !config!!.deezerConfigured && !config!!.spotifyConfigured && !config!!.youtubeConfigured) {
                 Text(
-                    "Aucune app configurée côté serveur : renseigne DeezerAppId/DeezerAppSecret et SpotifyClientId/SpotifyClientSecret dans les réglages du greffon.",
+                    "Aucun service configuré côté serveur : un administrateur doit renseigner les identifiants Deezer, Spotify ou Google dans les réglages de Nflix Butler.",
                     style = MaterialTheme.typography.bodySmall,
                     color = Nflix.Warning,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
@@ -196,7 +252,7 @@ fun SyncAccountsScreen() {
                 ) {
                     Icon(Icons.Rounded.SyncAlt, null, tint = Nflix.Success)
                     Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-                        Text(account.service.replaceFirstChar { it.uppercase() }, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                        Text(serviceLabel(account.service), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
                         Text(account.profileName.ifBlank { account.profileId }, style = MaterialTheme.typography.labelSmall, color = Nflix.Muted)
                     }
                     IconButton(onClick = { scope.launch { runCatching { deps.sync.unlink(account.service) }; refresh() } }) {
@@ -209,7 +265,7 @@ fun SyncAccountsScreen() {
         accounts.forEach { account ->
             val lists = playlists[account.service].orEmpty()
             if (lists.isNotEmpty()) {
-                item { Text("Importer depuis ${account.service.replaceFirstChar { it.uppercase() }}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Nflix.Text, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp)) }
+                item { Text("Importer depuis ${serviceLabel(account.service)}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Nflix.Text, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp)) }
                 items(lists, key = { "${account.service}-${it.id}" }) { playlist ->
                     Row(
                         Modifier.fillMaxWidth().padding(horizontal = 16.dp).clip(RoundedCornerShape(12.dp)).background(Nflix.Surface)
@@ -279,7 +335,14 @@ fun SyncAccountsScreen() {
             }
         }
         if (accounts.isEmpty() && config != null) {
-            item { EmptyState(Icons.Rounded.SyncAlt, "Aucun compte lié", "Liez Deezer ou Spotify pour synchroniser vos playlists.") }
+            item { EmptyState(Icons.Rounded.SyncAlt, "Aucun compte lié", "Liez Deezer, Spotify ou YouTube Music pour importer vos playlists.") }
         }
     }
+}
+
+private fun serviceLabel(service: String): String = when (service) {
+    "youtube" -> "YouTube Music"
+    "deezer" -> "Deezer"
+    "spotify" -> "Spotify"
+    else -> service.replaceFirstChar { it.uppercase() }
 }

@@ -102,6 +102,8 @@ class NflixMusicService : MediaSessionService(), KoinComponent {
     }
 
     private fun reportStart(itemId: String) {
+        // Online tracks ("yt:", "dz:") are not Jellyfin items: nothing to report.
+        if (itemId.contains(':')) { progressJob?.cancel(); reportedItem = null; return }
         reportedItem = itemId
         report("Sessions/Playing", itemId, ticks(), !player.isPlaying)
         progressJob?.cancel()

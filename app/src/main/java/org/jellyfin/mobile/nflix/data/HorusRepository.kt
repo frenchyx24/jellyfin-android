@@ -160,6 +160,49 @@ class HorusRepository(private val api: NflixApi) {
         requestsAt = 0L
     }
 
+    /**
+     * Requests every studio album (and EP) of an artist that Nflix does not have yet, through Horus
+     * (quotas and approval rules apply; Horus forwards music requests to the music manager).
+     * Returns (requested, alreadyHandled, total).
+     */
+    suspend fun requestDiscography(artistName: String): Triple<Int, Int, Int> {
+        val wanted = VideoCatalog.normalize(artistName)
+        val search = call("GET", "music/search", mapOf("query" to artistName, "page" to 1)).obj()
+            ?: throw HorusException("Recherche Horus indisponible.")
+        val artistId = (search["results"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }
+            .firstOrNull { VideoCatalog.normalize((it["artistName"] as? JsonPrimitive)?.contentOrNull.orEmpty()) == wanted }
+            ?.let { (it["artistId"] as? JsonPrimitive)?.contentOrNull }
+            ?: throw HorusException("Artiste introuvable dans Horus.")
+        val artist = call("GET", "music/artist/$artistId").obj() ?: throw HorusException("Artiste introuvable dans Horus.")
+        val albums = (artist["albums"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }.filter {
+            val type = (it["primaryType"] as? JsonPrimitive)?.contentOrNull
+            val secondary = (it["secondaryTypes"] as? JsonArray).orEmpty()
+            (type == "Album" || type == "EP") && secondary.isEmpty()
+        }
+        var requested = 0
+        var handled = 0
+        for (album in albums) {
+            val id = (album["id"] as? JsonPrimitive)?.contentOrNull ?: continue
+            val status = ((album["mediaInfo"] as? JsonObject)?.get("status") as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: 1
+            if (status >= 2) { handled++; continue } // pending, processing, partially or fully available
+            val ok = runCatching {
+                call("POST", "request", body = buildJsonObject {
+                    put("mediaType", "music")
+                    put("mediaId", 0)
+                    put("externalId", id)
+                    put("is4k", false)
+                })
+            }
+            if (ok.isSuccess) requested++ else {
+                val code = (ok.exceptionOrNull() as? NflixHttpException)?.code
+                if (code == 409) handled++ else if (code == 403) break
+            }
+        }
+        cachedRequests = null
+        requestsAt = 0L
+        return Triple(requested, handled, albums.size)
+    }
+
     suspend fun myRequests(force: Boolean = false): List<HorusRequest> {
         cachedRequests?.takeIf { !force && System.currentTimeMillis() - requestsAt < 60_000 }?.let { return it }
         val me = call("GET", "auth/me").obj()

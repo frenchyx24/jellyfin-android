@@ -132,6 +132,7 @@ private data class HomeData(
     val requests: List<HorusRequest>,
     val upcoming: List<HorusMedia>,
     val trending: List<HorusMedia>,
+    val distributors: List<Pair<org.jellyfin.mobile.nflix.data.Distributor, List<Item>>> = emptyList(),
 )
 
 private const val HeroHeightDp = 560
@@ -174,6 +175,9 @@ fun HomeScreen() {
                 }
                 data is Load.Failed -> item(key = "home-error") { EmptyState(Icons.Rounded.Info, "Accueil indisponible", data.message) }
                 home != null -> {
+                    // Distributor logos + rows sit right after "Nouveautés" (or at the end).
+                    val distributorsAfter = home.rows.firstOrNull { it.key == "fresh" }?.key ?: home.rows.lastOrNull()?.key
+                    if (distributorsAfter == null) distributorSection(home.distributors)
                     home.rows.forEach { row ->
                         rowSection(
                             key = row.key,
@@ -206,6 +210,7 @@ fun HomeScreen() {
                                 RowStyle.Poster -> PosterCard(merged, deps.jellyfin.primary(merged, 300), origin, { navigator.open(Route.Item(merged.id, origin)) }, subtitle = posterSubtitle(merged))
                             }
                         }
+                        if (row.key == distributorsAfter) distributorSection(home.distributors)
                     }
                     rowSection("horus-upcoming", "Prochainement au cinéma", home.upcoming, { "up-${it.id}" }, onSeeAll = { navigator.selectTab(Route.Horus) }) { media ->
                         UpcomingCard(media)
@@ -263,6 +268,14 @@ private suspend fun loadHome(deps: AppDeps, force: Boolean): HomeData = coroutin
     val requests = async { runCatching { deps.horus.myRequests(force).take(15) }.getOrDefault(emptyList()) }
     val upcoming = async { runCatching { deps.horus.upcoming(HorusType.Movie).results.filter { it.backdrop != null }.take(15) }.getOrDefault(emptyList()) }
     val trending = async { runCatching { deps.horus.trendingAll().results.take(20) }.getOrDefault(emptyList()) }
+    // Distributor rows configured by an administrator ("Netflix", "Disney+"…), only those with titles.
+    val distributorRows = async {
+        runCatching {
+            deps.admin.distributors(force = force).filter { it.enabled }
+                .map { d -> async { d to runCatching { deps.admin.titles(d, limit = 20, force = force).items }.getOrDefault(emptyList()) } }
+                .map { it.await() }.filter { it.second.isNotEmpty() }
+        }.getOrDefault(emptyList())
+    }
     // Plugin sections and per-library "latest" rows load in parallel with everything else.
     val sectionRows = async {
         sections.await().map { section ->
@@ -302,7 +315,45 @@ private suspend fun loadHome(deps: AppDeps, force: Boolean): HomeData = coroutin
 
     // Hero: curated items from the server plugin, otherwise the newest titles that have artwork.
     val heroItems = hero.await().ifEmpty { freshItems.filter { it.backdropTags.isNotEmpty() || it.parentBackdropTags.isNotEmpty() }.take(8) }
-    HomeData(heroItems, rows.filter { it.items.isNotEmpty() }.distinctBy { it.key }, requests.await(), upcoming.await(), trending.await())
+    HomeData(heroItems, rows.filter { it.items.isNotEmpty() }.distinctBy { it.key }, requests.await(), upcoming.await(), trending.await(), distributorRows.await())
+}
+
+/** "Plateformes" logo strip, then one row per distributor with its logo as the title. */
+private fun androidx.compose.foundation.lazy.LazyListScope.distributorSection(rows: List<Pair<org.jellyfin.mobile.nflix.data.Distributor, List<Item>>>) {
+    if (rows.isEmpty()) return
+    item(key = "platforms") {
+        Column {
+            org.jellyfin.mobile.nflix.ui.SectionHeader("Plateformes")
+            DistributorStrip(rows.map { it.first })
+        }
+    }
+    rows.forEach { (distributor, titles) ->
+        item(key = "distributor-${distributor.id}") {
+            val deps = LocalDeps.current
+            val navigator = LocalNavigator.current
+            Column {
+                Row(
+                    Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 22.dp, bottom = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    DistributorLogo(distributor, Modifier.width(110.dp), height = 36.dp)
+                    Spacer(Modifier.width(10.dp))
+                    Text("Les titres ${distributor.name}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    Text(
+                        "Tout voir", style = MaterialTheme.typography.labelMedium, color = Nflix.Red,
+                        modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { navigator.open(Route.Distributor(distributor.id)) }.padding(8.dp),
+                    )
+                }
+                LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    items(titles.size, key = { titles[it].id }) { index ->
+                        val item = titles[index]
+                        val origin = "distributor-${distributor.id}/${item.id}"
+                        PosterCard(item, deps.jellyfin.primary(item, 300), origin, { navigator.open(Route.Item(item.id, origin)) }, subtitle = posterSubtitle(item))
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable

@@ -165,6 +165,35 @@ class MusicController(
     }
 
     /** Plays YouTube Music results through the butler stream proxy. */
+    /**
+     * Plays online catalogue tracks; a track already in the library plays from Jellyfin, the
+     * others through the server audio proxy. Album covers come with the catalogue.
+     */
+    fun playOnline(tracks: List<org.jellyfin.mobile.nflix.data.OnlineTrack>, startIndex: Int = 0, streamUrl: (String) -> String) {
+        if (tracks.isEmpty()) return
+        val items = tracks.map { track ->
+            val metadata = MediaMetadata.Builder()
+                .setTitle(track.title.ifBlank { "Musique en ligne" })
+                .setArtist(track.artist)
+                .setAlbumTitle(track.album.takeIf { it.isNotBlank() })
+                .setArtworkUri(track.cover.takeIf { it.isNotBlank() }?.let(Uri::parse))
+                .apply { if (track.duration > 0) setDurationMs(track.duration.toLong() * 1000L) }
+                .setIsPlayable(true)
+                .build()
+            val local = track.itemId
+            MediaItem.Builder()
+                .setMediaId(local ?: "dz:" + track.id)
+                .setUri(Uri.parse(if (local != null) repository.audioStreamUrl(local) else streamUrl(track.id)))
+                .setMediaMetadata(metadata)
+                .build()
+        }
+        withController { player ->
+            player.setMediaItems(items, startIndex.coerceIn(0, items.lastIndex), 0L)
+            player.prepare()
+            player.play()
+        }
+    }
+
     fun playYt(tracks: List<org.jellyfin.mobile.nflix.data.YtTrack>, startIndex: Int = 0) {
         if (tracks.isEmpty()) return
         val items = tracks.map { track ->

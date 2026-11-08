@@ -271,11 +271,25 @@ fun ArtistScreen(id: String) {
                     item(span = { GridItemSpan(maxLineSpan) }, key = "top-${track.id}") { TrackRow(track, index + 1, showArt = true) { deps.music.play(top, index) } }
                 }
             }
-            item(span = { GridItemSpan(maxLineSpan) }, key = "albums-title") { org.jellyfin.mobile.nflix.ui.SectionHeader("Albums") }
+            artist?.name?.let { name ->
+                item(span = { GridItemSpan(maxLineSpan) }, key = "cross-links") { CrossLinks(name, showArtist = false, showPerson = true) }
+            }
+            if (albums.isNotEmpty()) {
+                item(span = { GridItemSpan(maxLineSpan) }, key = "albums-title") { org.jellyfin.mobile.nflix.ui.SectionHeader("Sur Nflix") }
+            }
             items(albums.distinctBy { it.id }, key = { it.id }) { album ->
                 Box(Modifier.padding(horizontal = 8.dp)) {
                     PosterCard(album, deps.jellyfin.primary(album, 300), "artist-$id/${album.id}", { navigator.open(Route.Album(album.id)) },
                         width = androidx.compose.ui.unit.Dp.Unspecified, aspect = 1f, modifier = Modifier.fillMaxWidth())
+                }
+            }
+            artist?.name?.let { name ->
+                item(span = { GridItemSpan(maxLineSpan) }, key = "online-section") {
+                    val localTitles = rememberLoad("artist-all-titles", id) {
+                        deps.jellyfin.items(includeTypes = "Audio", limit = 1000, extra = mapOf("artistIds" to id)).items
+                            .map { org.jellyfin.mobile.nflix.data.VideoCatalog.normalize(it.name) }.toSet()
+                    }.value
+                    if (localTitles != null) OnlineArtistSection(name, localTitles)
                 }
             }
         }

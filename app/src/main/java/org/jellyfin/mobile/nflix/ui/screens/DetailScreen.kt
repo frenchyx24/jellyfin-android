@@ -559,6 +559,7 @@ fun PersonScreen(id: String, name: String) {
                         NImage(deps.api.imageUrl(id, "Primary", null, 400), Modifier.size(140.dp).clip(CircleShape), placeholderIcon = Icons.Rounded.Person)
                         Spacer(Modifier.height(12.dp))
                         Text(name, style = MaterialTheme.typography.headlineSmall)
+                        PersonMusicLink(name)
                     }
                 }
             },
