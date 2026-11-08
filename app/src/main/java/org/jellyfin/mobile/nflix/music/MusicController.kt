@@ -169,7 +169,7 @@ class MusicController(
         if (tracks.isEmpty()) return
         val items = tracks.map { track ->
             val metadata = MediaMetadata.Builder()
-                .setTitle(track.title.ifBlank { "YouTube Music" })
+                .setTitle(track.title.ifBlank { "Musique en ligne" })
                 .setArtist(track.artist)
                 .setArtworkUri(track.thumbnail.takeIf { it.isNotBlank() }?.let(Uri::parse))
                 // Unknown length (search results carry no duration): leave it unset, 0 would show a dead progress bar.

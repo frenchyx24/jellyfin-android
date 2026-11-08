@@ -66,9 +66,10 @@ import org.jellyfin.mobile.nflix.ui.YtDownloads
 @Composable
 private fun YtTrackList(hits: List<YtHit>, onPlay: (List<org.jellyfin.mobile.nflix.data.YtTrack>, Int) -> Unit) {
     val deps = LocalDeps.current
-    val tracks = remember(hits) { hits.filter { it.kind == "track" }.map { it.toTrack() } }
+    val trackHits = remember(hits) { hits.filter { it.kind == "track" && it.videoId.isNotBlank() } }
+    val tracks = remember(trackHits) { trackHits.map { it.toTrack() } }
     var menu by remember { mutableStateOf<YtHit?>(null) }
-    val videoIds = remember(hits) { hits.filter { it.kind == "track" }.map { it.videoId } }
+    val videoIds = remember(trackHits) { trackHits.map { it.videoId }.distinct() }
     // One call: the rows already in the library show their check mark without a per-row lookup.
     LaunchedEffect(videoIds) {
         runCatching { deps.yt.downloaded(videoIds) }.onSuccess { YtDownloads.markDownloaded(it) }
@@ -84,26 +85,32 @@ private fun YtTrackList(hits: List<YtHit>, onPlay: (List<org.jellyfin.mobile.nfl
                     YtDownloadAllButton(tracks.map { it.videoId to it.title }, Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
                 }
             }
-            items(hits.size) { index ->
-                val hit = hits[index]
-                if (hit.kind != "track") return@items
+            items(trackHits.size, key = { "$it-${trackHits[it].videoId}" }) { index ->
+                val hit = trackHits[index]
                 Row(
-                    Modifier.fillMaxWidth().combinedClickable(
-                        onClick = {
-                            onPlay(tracks, tracks.indexOfFirst { it.videoId == hit.videoId }.coerceAtLeast(0))
-                        },
-                        onLongClick = { menu = hit },
-                    ).padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+                    Modifier.fillMaxWidth()
+                        .padding(horizontal = 8.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .combinedClickable(
+                            onClick = { onPlay(tracks, index) },
+                            onLongClick = { menu = hit },
+                        ).padding(start = 8.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
+                    Text(
+                        "${index + 1}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = Nflix.Muted,
+                        modifier = Modifier.width(22.dp),
+                    )
                     NImage(
                         hit.thumbnail,
                         Modifier.size(56.dp).clip(RoundedCornerShape(10.dp)),
                         placeholderIcon = Icons.Rounded.MusicNote,
                     )
                     Column(Modifier.weight(1f)) {
-                        Text(hit.title, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(hit.title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = Nflix.Text, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(
                             hit.subtitle.ifBlank { "Musique" },
                             style = MaterialTheme.typography.labelSmall,
@@ -128,7 +135,7 @@ private fun YtHit.toTrack() = org.jellyfin.mobile.nflix.data.YtTrack(
     thumbnail = thumbnail.orEmpty(),
 )
 
-/** YouTube Music artist page: top tracks for the artist name. */
+/** Online music artist page: top tracks for the artist name. */
 @Composable
 fun YtArtistScreen(name: String) {
     val deps = LocalDeps.current
@@ -342,7 +349,12 @@ internal fun YtTrackMenu(hit: YtHit?, onDismiss: () -> Unit) {
     LaunchedEffect(hit.videoId) {
         info = runCatching { deps.yt.info(hit.videoId) }.getOrNull()
     }
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = Nflix.SurfaceHigh,
+        contentColor = Nflix.Text,
+        scrimColor = Color.Black.copy(alpha = 0.6f),
+    ) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(hit.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
             if (hit.subtitle.isNotBlank()) {
@@ -382,6 +394,6 @@ private fun YtMenuRow(icon: ImageVector, label: String, busy: Boolean, onClick: 
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Icon(icon, null, tint = Nflix.Red, modifier = Modifier.size(22.dp))
-        Text(label, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+        Text(label, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, color = if (busy) Nflix.Muted else Nflix.Text)
     }
 }

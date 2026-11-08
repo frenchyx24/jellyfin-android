@@ -49,7 +49,11 @@ object YtDownloads {
         if (videoId.isBlank()) return false
         if (state(videoId) != State.Idle) return state(videoId) == State.Done
         states[videoId] = State.Running
-        val result = runCatching { deps.yt.download(videoId) }
+        // NonCancellable: closing the menu or leaving the screen must not abort a running download
+        // (the server keeps writing the file anyway, the state would be lost).
+        val result = kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+            runCatching { deps.yt.download(videoId) }
+        }
         val done = result.isSuccess
         states[videoId] = if (done) State.Done else State.Idle
         val label = title.takeIf { it.isNotBlank() }?.let { "« $it » " } ?: ""
@@ -80,9 +84,10 @@ object YtDownloads {
             401 -> "Session expirée : reconnectez-vous."
             403 -> "Téléchargement réservé au compte administrateur."
             412 -> "Aucun dossier musique configuré dans le plugin."
-            else -> "Téléchargement impossible : ${error.message}"
+            502, 504 -> "Titre indisponible pour le moment."
+            else -> "Téléchargement impossible (${error.code})."
         }
-        else -> error?.message ?: "Téléchargement impossible"
+        else -> "Téléchargement impossible : vérifiez la connexion."
     }
 }
 

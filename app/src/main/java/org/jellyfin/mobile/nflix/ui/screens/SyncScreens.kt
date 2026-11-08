@@ -89,14 +89,21 @@ fun SyncAccountsScreen() {
     LaunchedEffect(Unit) { refresh() }
 
     // OAuth sheet: loads the provider's consent page, intercepts the redirect to grab the code.
-    if (oauth != null && config != null) {
+    if (oauth != null && config != null && config!!.redirectUri.isNotBlank()) {
         val service = oauth!!
+        // Anti-CSRF: the redirect is only accepted with the state this sheet generated.
+        val state = remember(service) { java.util.UUID.randomUUID().toString().replace("-", "") }
         val url = if (service == "deezer") {
-            "https://connect.deezer.com/oauth/auth.php?app_id=${config!!.deezerAppId}&redirect_uri=${java.net.URLEncoder.encode(config!!.redirectUri, "UTF-8")}&perms=basic_access,manage_library,offline_access&output=code"
+            "https://connect.deezer.com/oauth/auth.php?app_id=${config!!.deezerAppId}&redirect_uri=${java.net.URLEncoder.encode(config!!.redirectUri, "UTF-8")}&perms=basic_access,manage_library,offline_access&state=$state"
         } else {
-            "https://accounts.spotify.com/authorize?client_id=${config!!.spotifyClientId}&response_type=code&redirect_uri=${java.net.URLEncoder.encode(config!!.redirectUri, "UTF-8")}&scope=playlist-read-private%20user-library-read&show_dialog=true"
+            "https://accounts.spotify.com/authorize?client_id=${config!!.spotifyClientId}&response_type=code&redirect_uri=${java.net.URLEncoder.encode(config!!.redirectUri, "UTF-8")}&scope=playlist-read-private%20user-library-read&show_dialog=true&state=$state"
         }
-        ModalBottomSheet(onDismissRequest = { oauth = null }, modifier = Modifier.fillMaxWidth().height(560.dp)) {
+        ModalBottomSheet(
+            onDismissRequest = { oauth = null },
+            modifier = Modifier.fillMaxWidth().height(560.dp),
+            containerColor = Nflix.SurfaceHigh,
+            contentColor = Nflix.Text,
+        ) {
             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Connexion ${service.replaceFirstChar { it.uppercase() }}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Text("Connecte-toi, puis reviens ici.", style = MaterialTheme.typography.bodySmall, color = Nflix.Muted)
@@ -111,7 +118,12 @@ fun SyncAccountsScreen() {
                                     val u = request?.url?.toString().orEmpty()
                                     if (u.startsWith(config!!.redirectUri)) {
                                         val code = request!!.url.getQueryParameter("code")
-                                        if (!code.isNullOrBlank()) {
+                                        val returnedState = request.url.getQueryParameter("state")
+                                        // Deezer may not echo "state": only Spotify must return it, a mismatch is always refused.
+                                        if (returnedState != state && (service == "spotify" || returnedState != null)) {
+                                            ItemMenu.message = "Liaison refusée (réponse inattendue)"
+                                            oauth = null
+                                        } else if (!code.isNullOrBlank()) {
                                             scope.launch {
                                                 busy = true
                                                 runCatching { deps.sync.link(service, code) }
@@ -130,6 +142,7 @@ fun SyncAccountsScreen() {
                             loadUrl(url)
                         }
                     },
+                    onRelease = { web -> web.stopLoading(); web.destroy() },
                 )
             }
         }
@@ -153,13 +166,15 @@ fun SyncAccountsScreen() {
             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button(
                     onClick = { oauth = "deezer" },
-                    enabled = config?.deezerConfigured == true && !busy,
+                    enabled = config?.deezerConfigured == true && config?.redirectUri?.isNotBlank() == true && !busy,
                     colors = ButtonDefaults.buttonColors(containerColor = Nflix.Red),
                     modifier = Modifier.weight(1f),
                 ) { Icon(Icons.Rounded.Link, null, Modifier.size(18.dp)); Text("Lier Deezer", Modifier.padding(start = 6.dp)) }
                 OutlinedButton(
                     onClick = { oauth = "spotify" },
-                    enabled = config?.spotifyConfigured == true && !busy,
+                    enabled = config?.spotifyConfigured == true && config?.redirectUri?.isNotBlank() == true && !busy,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, if (config?.spotifyConfigured == true) Nflix.Red else Nflix.Outline),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Nflix.Text),
                     modifier = Modifier.weight(1f),
                 ) { Icon(Icons.Rounded.Link, null, Modifier.size(18.dp)); Text("Lier Spotify", Modifier.padding(start = 6.dp)) }
             }
@@ -173,7 +188,7 @@ fun SyncAccountsScreen() {
             }
         }
         if (accounts.isNotEmpty()) {
-            item { Text("Liés", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp)) }
+            item { Text("Liés", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Nflix.Text, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp)) }
             items(accounts, key = { it.service }) { account ->
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 16.dp).clip(RoundedCornerShape(12.dp)).background(Nflix.Surface).padding(14.dp),
@@ -194,7 +209,7 @@ fun SyncAccountsScreen() {
         accounts.forEach { account ->
             val lists = playlists[account.service].orEmpty()
             if (lists.isNotEmpty()) {
-                item { Text("Importer depuis ${account.service.replaceFirstChar { it.uppercase() }}", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp)) }
+                item { Text("Importer depuis ${account.service.replaceFirstChar { it.uppercase() }}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Nflix.Text, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp)) }
                 items(lists, key = { "${account.service}-${it.id}" }) { playlist ->
                     Row(
                         Modifier.fillMaxWidth().padding(horizontal = 16.dp).clip(RoundedCornerShape(12.dp)).background(Nflix.Surface)
@@ -236,7 +251,7 @@ fun SyncAccountsScreen() {
         val deezerLinked = accounts.any { it.service == "deezer" }
         val locals = localPlaylists.orEmpty()
         if (deezerLinked && locals.isNotEmpty()) {
-            item { Text("Envoyer sur Deezer", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp)) }
+            item { Text("Envoyer sur Deezer", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Nflix.Text, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp)) }
             items(locals, key = { "local-${it.id}" }) { playlist ->
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 16.dp).clip(RoundedCornerShape(12.dp)).background(Nflix.Surface).padding(14.dp),
