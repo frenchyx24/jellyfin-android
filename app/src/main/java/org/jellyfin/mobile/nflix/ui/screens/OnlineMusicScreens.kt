@@ -175,7 +175,7 @@ internal fun OnlineAddButton(track: OnlineTrack, modifier: Modifier = Modifier) 
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-internal fun OnlineTrackRow(track: OnlineTrack, number: Int?, showCover: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
+internal fun OnlineTrackRow(track: OnlineTrack, number: Int?, showCover: Boolean, onClick: () -> Unit, onLongClick: () -> Unit, status: String? = null) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 8.dp).clip(RoundedCornerShape(12.dp))
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
@@ -194,7 +194,8 @@ internal fun OnlineTrackRow(track: OnlineTrack, number: Int?, showCover: Boolean
             Text(sub, style = MaterialTheme.typography.labelSmall, color = Nflix.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Text(formatDuration(track.duration), style = MaterialTheme.typography.labelSmall, color = Nflix.Muted)
-        OnlineAddButton(track)
+        if (status == null) OnlineAddButton(track)
+        else Text(status, style = MaterialTheme.typography.labelSmall, color = Nflix.Muted, maxLines = 1)
     }
 }
 

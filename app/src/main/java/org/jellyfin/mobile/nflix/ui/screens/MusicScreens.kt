@@ -374,12 +374,18 @@ fun PlaylistScreen(id: String) {
     val deps = LocalDeps.current
     val scope = rememberCoroutineScope()
     val playlist = rememberLoad("playlist", id, initial = deps.jellyfin.cachedItem(id)) { deps.jellyfin.item(id, it) }.value
-    val items = rememberLoad("playlist-items", id, org.jellyfin.mobile.nflix.ui.ItemMenu.revision) { deps.jellyfin.playlistItems(id) }.value
+    var pendingRevision by remember { mutableStateOf(0) }
+    val items = rememberLoad("playlist-items", id, org.jellyfin.mobile.nflix.ui.ItemMenu.revision, pendingRevision) { deps.jellyfin.playlistItems(id) }.value
+    val pending = rememberLoad("playlist-pending", id, org.jellyfin.mobile.nflix.ui.ItemMenu.revision, pendingRevision) { runCatching { deps.sync.pending(id) }.getOrDefault(emptyList()) }.value.orEmpty()
+    // Pending tracks move into the playlist once the server has them: re-check now and then.
+    LaunchedEffect(id, pending.isNotEmpty()) {
+        while (pending.isNotEmpty()) { kotlinx.coroutines.delay(90_000); pendingRevision++ }
+    }
     Box(Modifier.fillMaxSize()) {
         LazyColumn(contentPadding = PaddingValues(bottom = ContentBottomPadding)) {
             item(key = "header") {
                 CollectionHeader(
-                    title = playlist?.name ?: "", subtitle = items?.let { "${it.size} éléments" },
+                    title = playlist?.name ?: "", subtitle = items?.let { "${it.size + pending.size} éléments" },
                     image = playlist?.let { deps.jellyfin.primary(it, 600) }, origin = "grid-playlists/$id", kind = "Playlist",
                     onMore = playlist?.let { p -> { org.jellyfin.mobile.nflix.ui.ItemMenu.show(p) } },
                     onPlay = { playlist?.let { deps.play(scope, it) } },
@@ -390,6 +396,38 @@ fun PlaylistScreen(id: String) {
                 itemsIndexed(list, key = { i, t -> "$i-${t.id}" }) { index, entry ->
                     if (entry.type == "Audio") TrackRow(entry, index + 1, showArt = true, playlistId = id) { deps.music.play(list, index) }
                     else TrackRow(entry, index + 1, showArt = true, playlistId = id) { deps.play(scope, entry) }
+                }
+            }
+            if (pending.isNotEmpty()) {
+                item(key = "pending-title") {
+                    Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp)) {
+                        Text("En ligne", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Nflix.Text)
+                        Text("Lus en streaming, ajoutés automatiquement au serveur dès qu'ils sont disponibles", style = MaterialTheme.typography.labelSmall, color = Nflix.Muted)
+                    }
+                }
+                itemsIndexed(pending, key = { _, t -> "p-${t.id}" }) { index, track ->
+                    OnlineTrackRow(
+                        track.toOnline(), null, showCover = true,
+                        onClick = {
+                            val playable = pending.filter { it.videoId.isNotBlank() }
+                            val start = playable.indexOfFirst { it.id == track.id }
+                            if (start >= 0) deps.music.playOnline(playable.map { it.toOnline() }, start) { deps.sync.pendingStreamUrl(it) }
+                            else org.jellyfin.mobile.nflix.ui.ItemMenu.message = "Titre indisponible en ligne"
+                        },
+                        onLongClick = {
+                            scope.launch {
+                                val ok = runCatching { deps.sync.removePending(id, track.id) }.isSuccess
+                                org.jellyfin.mobile.nflix.ui.ItemMenu.message = if (ok) "« ${track.title} » retiré de la playlist" else "Suppression impossible"
+                                pendingRevision++
+                            }
+                        },
+                        status = when (track.state) {
+                            "requested" -> "Ajout en cours"
+                            "notfound" -> "En ligne"
+                            "disabled" -> "En ligne"
+                            else -> "En attente"
+                        },
+                    )
                 }
             }
         }

@@ -55,6 +55,7 @@ data class SyncMatch(
     @SerialName("title") val title: String = "",
     @SerialName("artist") val artist: String = "",
     @SerialName("localName") val localName: String = "",
+    @SerialName("position") val position: Int = 0,
 )
 
 @Immutable
@@ -63,7 +64,25 @@ data class SyncMissing(
     @SerialName("title") val title: String = "",
     @SerialName("artist") val artist: String = "",
     @SerialName("videoId") val videoId: String = "",
+    @SerialName("position") val position: Int = 0,
 )
+
+/** A playlist track not in the library yet: played online until the server has the file. */
+@Immutable
+@Serializable
+data class PendingTrack(
+    @SerialName("id") val id: String = "",
+    @SerialName("title") val title: String = "",
+    @SerialName("artist") val artist: String = "",
+    @SerialName("album") val album: String = "",
+    @SerialName("cover") val cover: String = "",
+    @SerialName("duration") val duration: Int = 0,
+    @SerialName("videoId") val videoId: String = "",
+    @SerialName("position") val position: Int = 0,
+    @SerialName("state") val state: String = "queued",
+) {
+    fun toOnline() = OnlineTrack(id = videoId, title = title, artist = artist, album = album, cover = cover, duration = duration)
+}
 
 @Immutable
 @Serializable
@@ -141,6 +160,33 @@ class SyncRepository(private val api: NflixApi) {
         return api.json.decodeFromJsonElement(ImportResult.serializer(), payload)
     }
 
+    /** Keeps the missing tracks inside the new playlist; the server fetches them in the background. */
+    suspend fun addPending(playlistId: String, tracks: List<SyncMissing>) {
+        api.send("POST", "Plugins/NflixButler/sync/pending", body = buildJsonObject {
+            put("userId", JsonPrimitive(api.userId))
+            put("playlistId", JsonPrimitive(playlistId))
+            put("tracks", kotlinx.serialization.json.JsonArray(tracks.map { t ->
+                buildJsonObject {
+                    put("title", JsonPrimitive(t.title))
+                    put("artist", JsonPrimitive(t.artist))
+                    put("videoId", JsonPrimitive(t.videoId))
+                    put("position", JsonPrimitive(t.position))
+                }
+            }))
+        })
+    }
+
+    suspend fun pending(playlistId: String): List<PendingTrack> =
+        api.get("Plugins/NflixButler/sync/pending", PendingResponse.serializer(), mapOf("userId" to api.userId, "playlistId" to playlistId)).tracks
+
+    suspend fun removePending(playlistId: String, id: String) {
+        api.send("DELETE", "Plugins/NflixButler/sync/pending", mapOf("userId" to api.userId, "playlistId" to playlistId, "id" to id))
+    }
+
+    /** Online stream of a pending track (audio proxy, no download). */
+    fun pendingStreamUrl(videoId: String): String =
+        api.url("Plugins/NflixButler/yt/stream", mapOf("videoId" to videoId, "ApiKey" to api.token.orEmpty())).toString()
+
     suspend fun deezerSearch(q: String): List<DeezerTrack> =
         api.get("Plugins/NflixButler/sync/deezer-search", SearchResponse.serializer(), mapOf("q" to q)).tracks
 
@@ -155,6 +201,9 @@ class SyncRepository(private val api: NflixApi) {
 
     @Serializable
     private data class PlaylistsResponse(@SerialName("playlists") val playlists: List<SyncPlaylist> = emptyList())
+
+    @Serializable
+    private data class PendingResponse(@SerialName("tracks") val tracks: List<PendingTrack> = emptyList())
 
     @Serializable
     private data class SearchResponse(@SerialName("tracks") val tracks: List<DeezerTrack> = emptyList())

@@ -274,16 +274,18 @@ fun SyncAccountsScreen() {
                                 scope.launch {
                                     runCatching { deps.sync.import(account.service, playlist.id) }
                                         .onSuccess { result ->
-                                            val ids = result.matched.map { it.itemId }.distinct()
-                                            if (ids.isEmpty()) {
-                                                ItemMenu.message = "Aucun morceau trouvé localement sur ${result.total}"
+                                            val ids = result.matched.sortedBy { it.position }.map { it.itemId }.distinct()
+                                            val online = result.missing.filter { it.videoId.isNotBlank() }
+                                            if (ids.isEmpty() && online.isEmpty()) {
+                                                ItemMenu.message = "Aucun morceau lisible sur ${result.total}"
                                             } else {
                                                 val created = runCatching { deps.jellyfin.createPlaylist(playlist.title, ids) }.getOrNull()
-                                                val missing = if (result.missing.isNotEmpty()) " · ${result.missing.size} à télécharger" else ""
-                                                ItemMenu.message = if (created != null)
-                                                    "« ${playlist.title} » ajoutée : ${ids.size}/${result.total} morceaux$missing"
-                                                else
-                                                    "Import terminé, playlist non créée (${ids.size}/${result.total})"
+                                                val queued = created != null && online.isNotEmpty() && runCatching { deps.sync.addPending(created, online) }.isSuccess
+                                                ItemMenu.message = when {
+                                                    created == null -> "Import terminé, playlist non créée"
+                                                    queued -> "« ${playlist.title} » ajoutée : ${ids.size + online.size}/${result.total} morceaux · ${online.size} en ligne, ajout au serveur en cours"
+                                                    else -> "« ${playlist.title} » ajoutée : ${ids.size}/${result.total} morceaux"
+                                                }
                                                 localPlaylists = runCatching { deps.jellyfin.audioPlaylists(force = true) }.getOrNull()
                                             }
                                         }
