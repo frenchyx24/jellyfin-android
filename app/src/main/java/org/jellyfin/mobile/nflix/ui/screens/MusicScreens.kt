@@ -109,25 +109,82 @@ import org.jellyfin.mobile.nflix.ui.rowSection
 import org.jellyfin.mobile.nflix.ui.sharedPoster
 import org.jellyfin.mobile.nflix.ui.value
 
+/** One artist of the grid once duplicates are folded: the item to open and the name to show. */
+@androidx.compose.runtime.Immutable
+private data class ArtistTile(val item: Item, val name: String, val image: String?)
+
+private enum class ArtistSort(val label: String) { Name("A-Z"), NameDesc("Z-A"), Added("Ajoutés récemment"), Played("Les plus écoutés") }
+
 @Composable
 internal fun ArtistsGrid(viewId: String) {
     val deps = LocalDeps.current
     val navigator = LocalNavigator.current
-    val artists = rememberLoad("artists", viewId) { deps.jellyfin.artists(viewId, 0, 300).items }
+    var sort by rememberSaveable { mutableStateOf(ArtistSort.Name) }
+    val artists = rememberLoad("artists", viewId, sort) {
+        when (sort) {
+            ArtistSort.Added -> deps.jellyfin.artists(viewId, 0, 500, sortBy = "DateCreated,SortName", descending = true).items
+            ArtistSort.Played -> deps.jellyfin.artists(viewId, 0, 500, sortBy = "PlayCount,SortName", descending = true).items
+            else -> deps.jellyfin.artists(viewId, 0, 500).items
+        }
+    }.value
+    // Same artist under several spellings or credits ("Daft Punk, Pharrell Williams") shows once.
+    val tiles = remember(artists, sort) {
+        artists?.let { list ->
+            val groups = org.jellyfin.mobile.nflix.data.ArtistNames.group(list.distinctBy { it.id }, { it.name }) { deps.jellyfin.primary(it, 300) != null }
+            val mapped = groups.map { (name, members) ->
+                val best = members.first()
+                ArtistTile(best, name, members.firstNotNullOfOrNull { deps.jellyfin.primary(it, 300) })
+            }
+            when (sort) {
+                ArtistSort.Name -> mapped.sortedBy { org.jellyfin.mobile.nflix.data.ArtistNames.key(it.name) }
+                ArtistSort.NameDesc -> mapped.sortedByDescending { org.jellyfin.mobile.nflix.data.ArtistNames.key(it.name) }
+                else -> mapped
+            }
+        }
+    }
+    // Real pictures for artists the library has none for.
+    val missing = remember(tiles) { tiles.orEmpty().filter { it.image == null }.map { it.name } }
+    val pictures = rememberLoad("artist-pictures", missing) {
+        if (missing.isEmpty()) emptyMap() else runCatching { deps.online.pictures(missing) }.getOrDefault(emptyMap())
+    }.value.orEmpty()
+    val similar = rememberLoad("music-online-feed") { force -> runCatching { deps.online.feed(refresh = force) }.getOrDefault(emptyList()) }
+        .value.orEmpty().firstOrNull { it.key == "similar" }
     LazyVerticalGrid(
         columns = GridCells.Adaptive(104.dp),
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = ContentBottomPadding),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        val list = artists.value
-        if (list == null) items(12) { Skeleton(Modifier.fillMaxWidth().aspectRatio(1f), RoundedCornerShape(100.dp)) }
-        else items(list.distinctBy { it.id }, key = { it.id }) { artist ->
-            Column(Modifier.pressable({ navigator.open(Route.Artist(artist.id)) }), horizontalAlignment = Alignment.CenterHorizontally) {
-                NImage(deps.jellyfin.primary(artist, 300), Modifier.fillMaxWidth().aspectRatio(1f).clip(CircleShape).sharedPoster("artist/${artist.id}"), placeholderIcon = Icons.Rounded.Person)
-                Spacer(Modifier.height(6.dp))
-                Text(artist.name, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+        item(key = "sort", span = { GridItemSpan(maxLineSpan) }) {
+            androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(ArtistSort.entries.size, key = { ArtistSort.entries[it].name }) { index ->
+                    val option = ArtistSort.entries[index]
+                    val selected = option == sort
+                    Box(
+                        Modifier.height(30.dp).clip(CircleShape).background(if (selected) Nflix.Text else Nflix.SurfaceHigh).clickable { sort = option }.padding(horizontal = 14.dp),
+                        contentAlignment = Alignment.Center,
+                    ) { Text(option.label, style = MaterialTheme.typography.labelMedium, color = if (selected) Nflix.Night else Nflix.Text) }
+                }
             }
+        }
+        val list = tiles
+        if (list == null) items(12, key = { "sk$it" }) { Skeleton(Modifier.fillMaxWidth().aspectRatio(1f), RoundedCornerShape(100.dp)) }
+        else items(list, key = { it.item.id }) { tile ->
+            Column(Modifier.pressable({ navigator.open(Route.Artist(tile.item.id)) }, { org.jellyfin.mobile.nflix.ui.ItemMenu.show(tile.item) }), horizontalAlignment = Alignment.CenterHorizontally) {
+                NImage(tile.image ?: pictures[tile.name], Modifier.fillMaxWidth().aspectRatio(1f).clip(CircleShape).sharedPoster("artist/${tile.item.id}"), description = tile.name, placeholderIcon = Icons.Rounded.Person)
+                Spacer(Modifier.height(6.dp))
+                Text(tile.name, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+            }
+        }
+        if (similar != null && similar.artists.isNotEmpty()) {
+            item(key = "online-title", span = { GridItemSpan(maxLineSpan) }) {
+                Column {
+                    Spacer(Modifier.height(8.dp))
+                    Text("À découvrir", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                    Text(similar.title, style = MaterialTheme.typography.bodySmall, color = Nflix.Muted)
+                }
+            }
+            items(similar.artists, key = { "online-${it.id}" }) { OnlineArtistBubble(it, 96.dp) }
         }
     }
 }
@@ -249,6 +306,11 @@ fun ArtistScreen(id: String) {
     val albums = rememberLoad("artist-albums", id) { deps.jellyfin.artistAlbums(id) }.value.orEmpty()
     val top = rememberLoad("artist-top", id) { deps.jellyfin.artistTopTracks(id) }.value.orEmpty()
     val scope = rememberCoroutineScope()
+    val ownImage = artist?.let { deps.jellyfin.primary(it, 600) }
+    val onlinePicture = rememberLoad("artist-picture", artist?.name, ownImage == null) {
+        val name = artist?.name
+        if (name == null || ownImage != null) null else runCatching { deps.online.pictures(listOf(name))[name] }.getOrNull()
+    }.value
     Box(Modifier.fillMaxSize()) {
         LazyVerticalGrid(
             columns = GridCells.Adaptive(140.dp),
@@ -259,7 +321,7 @@ fun ArtistScreen(id: String) {
             item(span = { GridItemSpan(maxLineSpan) }, key = "header") {
                 CollectionHeader(
                     title = artist?.name ?: "", subtitle = "${albums.size} albums",
-                    image = artist?.let { deps.jellyfin.primary(it, 600) }, origin = "artist/$id", round = true, kind = "Artiste",
+                    image = ownImage ?: onlinePicture, origin = "artist/$id", round = true, kind = "Artiste",
                     onMore = artist?.let { a -> { org.jellyfin.mobile.nflix.ui.ItemMenu.show(a) } },
                     onPlay = { if (top.isNotEmpty()) deps.music.play(top) else artist?.let { a -> deps.play(scope, a) } },
                     onShuffle = { artist?.let { a -> deps.play(scope, a) } },
@@ -273,6 +335,16 @@ fun ArtistScreen(id: String) {
             }
             artist?.name?.let { name ->
                 item(span = { GridItemSpan(maxLineSpan) }, key = "cross-links") { CrossLinks(name, showArtist = false, showPerson = true) }
+            }
+            artist?.overview?.takeIf { it.isNotBlank() }?.let { bio ->
+                item(span = { GridItemSpan(maxLineSpan) }, key = "bio") {
+                    var expanded by remember { mutableStateOf(false) }
+                    Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp).clip(RoundedCornerShape(10.dp)).background(Nflix.SurfaceHigh).clickable { expanded = !expanded }.padding(14.dp)) {
+                        Text("À propos", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(6.dp))
+                        Text(bio, style = MaterialTheme.typography.bodyMedium, color = Nflix.Text.copy(alpha = 0.8f), maxLines = if (expanded) Int.MAX_VALUE else 4, overflow = TextOverflow.Ellipsis)
+                    }
+                }
             }
             if (albums.isNotEmpty()) {
                 item(span = { GridItemSpan(maxLineSpan) }, key = "albums-title") { org.jellyfin.mobile.nflix.ui.SectionHeader("Sur Nflix") }
@@ -348,7 +420,16 @@ fun NowPlayingScreen() {
         LaunchedEffect(Unit) { navigator.back() }
         return
     }
-    val lyrics = rememberLoad("lyrics", track.id) { deps.jellyfin.lyrics(track.id) }.value
+    // Library lyrics first (file or Jellyfin provider), then the server lookup by artist + title,
+    // which also covers online tracks. Synced lines keep their timestamps (ticks).
+    val lyrics = rememberLoad("lyrics", track.id) {
+        val local = if (!track.id.contains(':')) deps.jellyfin.lyrics(track.id) else null
+        if (local != null && local.lines.isNotEmpty()) local
+        else runCatching {
+            val found = deps.online.lyrics(track.artist, track.title, track.album, ((if (track.durationMs > 0) track.durationMs else deps.music.duration()) / 1000).toInt())
+            org.jellyfin.mobile.nflix.data.Lyrics(found.lines.map { org.jellyfin.mobile.nflix.data.LyricLine(it.text, if (found.synced && it.startMs >= 0) it.startMs * 10_000 else null) })
+        }.getOrNull() ?: local ?: org.jellyfin.mobile.nflix.data.Lyrics()
+    }.value
     val context = androidx.compose.ui.platform.LocalContext.current
     val visualPrefs = remember { context.getSharedPreferences("nflix_player", android.content.Context.MODE_PRIVATE) }
     var vinyl by remember { mutableStateOf(visualPrefs.getBoolean("vinyl", true)) }
@@ -363,7 +444,7 @@ fun NowPlayingScreen() {
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 AnimatedContent(panel, transitionSpec = { fadeIn(tween(250)) togetherWith fadeOut(tween(150)) }, label = "np-panel") { p ->
                     when (p) {
-                        1 -> LyricsPanel(lyrics, position)
+                        1 -> LyricsPanel(lyrics, position) { deps.music.seekTo(it) }
                         2 -> QueuePanel()
                         else -> AnimatedArtwork(track.artwork, state.isPlaying, vinyl, Modifier.sharedPoster("now-playing-art"))
                     }
@@ -419,8 +500,14 @@ fun NowPlayingScreen() {
 }
 
 @Composable
-private fun LyricsPanel(lyrics: org.jellyfin.mobile.nflix.data.Lyrics?, positionMs: Long) {
-    val lines = lyrics?.lines.orEmpty()
+private fun LyricsPanel(lyrics: org.jellyfin.mobile.nflix.data.Lyrics?, positionMs: Long, onSeek: (Long) -> Unit) {
+    if (lyrics == null) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            androidx.compose.material3.CircularProgressIndicator(color = Nflix.Red, strokeWidth = 2.dp, modifier = Modifier.size(28.dp))
+        }
+        return
+    }
+    val lines = lyrics.lines
     if (lines.isEmpty()) {
         EmptyState(Icons.Rounded.Lyrics, "Pas de paroles", "Aucune parole n'est disponible pour ce titre.")
         return
@@ -429,17 +516,21 @@ private fun LyricsPanel(lyrics: org.jellyfin.mobile.nflix.data.Lyrics?, position
     val ticks = positionMs * 10_000
     val current = if (synced) lines.indexOfLast { (it.start ?: Long.MAX_VALUE) <= ticks } else -1
     val list = rememberLazyListState()
-    LaunchedEffect(current) { if (current > 2) list.animateScrollToItem((current - 2).coerceAtLeast(0)) }
+    // Keep the current line in the upper third, like a karaoke screen.
+    LaunchedEffect(current) { if (current >= 0) list.animateScrollToItem((current - 2).coerceAtLeast(0)) }
     LazyColumn(state = list, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 40.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        itemsIndexed(lines) { index, line ->
+        itemsIndexed(lines, key = { index, _ -> index }) { index, line ->
             val active = index == current
             val alpha by animateFloatAsState(if (!synced || active) 1f else if (index < current) 0.35f else 0.55f, tween(300), label = "lyric")
             val scale by animateFloatAsState(if (active) 1.04f else 1f, spring(dampingRatio = 0.7f), label = "lyric-scale")
+            val start = line.start
             Text(
                 line.text.ifBlank { "♪" },
                 fontSize = 24.sp, lineHeight = 31.sp, fontWeight = FontWeight.Bold,
                 color = Color.White.copy(alpha = alpha),
-                modifier = Modifier.graphicsLayer { scaleX = scale; scaleY = scale; transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0.5f) },
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+                    .then(if (start != null) Modifier.clickable { onSeek(start / 10_000) } else Modifier)
+                    .graphicsLayer { scaleX = scale; scaleY = scale; transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0.5f) },
             )
         }
     }

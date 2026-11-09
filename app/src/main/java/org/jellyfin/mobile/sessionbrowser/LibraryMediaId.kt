@@ -17,4 +17,17 @@ sealed interface LibraryMediaId {
     @Serializable
     @SerialName("route")
     data class Route(val route: LibraryRoute) : LibraryMediaId
+
+    /** A playable online track; carries its metadata so playback needs no extra lookup. */
+    @Serializable
+    @SerialName("online")
+    data class Online(
+        val kind: String,
+        val id: String,
+        val title: String,
+        val artist: String,
+        val album: String? = null,
+        val cover: String? = null,
+        val route: LibraryRoute,
+    ) : LibraryMediaId
 }

@@ -33,6 +33,9 @@ import org.jellyfin.mobile.sessionbrowser.page.AudioBooksLibraryPage
 import org.jellyfin.mobile.sessionbrowser.page.FavoritesLibraryPage
 import org.jellyfin.mobile.sessionbrowser.page.GenreLibraryPage
 import org.jellyfin.mobile.sessionbrowser.page.GenresLibraryPage
+import org.jellyfin.mobile.sessionbrowser.page.OnlineAlbumLibraryPage
+import org.jellyfin.mobile.sessionbrowser.page.OnlineLibraryPage
+import org.jellyfin.mobile.sessionbrowser.page.OnlineMusic
 import org.jellyfin.mobile.sessionbrowser.page.PlaylistLibraryPage
 import org.jellyfin.mobile.sessionbrowser.page.PlaylistsLibraryPage
 import org.jellyfin.mobile.sessionbrowser.page.RecentLibraryPage
@@ -79,6 +82,8 @@ class SessionBrowserCallback(
         RecentLibraryPage(api),
         SuggestedLibraryPage(api),
         SearchLibraryPage(context, api),
+        OnlineLibraryPage(api),
+        OnlineAlbumLibraryPage(api),
     )
 
     private val LibraryRoute.page get() = pages.firstOrNull { page -> page.route == this::class }
@@ -102,6 +107,8 @@ class SessionBrowserCallback(
             extras.putInt(MediaConstants.EXTRAS_KEY_CONTENT_STYLE_BROWSABLE, contentStyle)
             extras.putInt(MediaConstants.EXTRAS_KEY_CONTENT_STYLE_PLAYABLE, contentStyle)
             setMediaId(Json.encodeToString<LibraryMediaId>(LibraryMediaId.Route(action.route)))
+        } else if (action is LibraryItemAction.PlayOnline) {
+            setMediaId(Json.encodeToString<LibraryMediaId>(LibraryMediaId.Online(action.kind, action.id, action.title, action.artist, action.album, action.cover, route)))
         } else if (action is LibraryItemAction.Play) {
             setMediaId(Json.encodeToString<LibraryMediaId>(LibraryMediaId.Item(action.item.id, route)))
             action.item.userData?.playbackPositionTicks?.ticks?.inWholeMilliseconds?.let {
@@ -115,7 +122,7 @@ class SessionBrowserCallback(
                 setArtist(artist)
                 setAlbumTitle(album)
                 setIsBrowsable(action is LibraryItemAction.Navigate)
-                setIsPlayable(action is LibraryItemAction.Play)
+                setIsPlayable(action is LibraryItemAction.Play || action is LibraryItemAction.PlayOnline)
 
                 if (image != null) {
                     setArtworkUri(image)
@@ -291,6 +298,17 @@ class SessionBrowserCallback(
                 LibraryResult.ofItem(LibraryPageElement.baseItem(api, item).toMediaItem(libraryMediaId.route), null)
             }
 
+            is LibraryMediaId.Online -> LibraryResult.ofItem(
+                LibraryPageElement.Item(
+                    title = libraryMediaId.title,
+                    artist = libraryMediaId.artist,
+                    album = libraryMediaId.album,
+                    image = libraryMediaId.cover?.let(Uri::parse),
+                    action = LibraryItemAction.PlayOnline(libraryMediaId.kind, libraryMediaId.id, libraryMediaId.title, libraryMediaId.artist, libraryMediaId.album, libraryMediaId.cover),
+                ).toMediaItem(libraryMediaId.route),
+                null,
+            )
+
             is LibraryMediaId.Route -> {
                 val page = libraryMediaId.route.page
 
@@ -321,6 +339,18 @@ class SessionBrowserCallback(
 
         mediaItems.mapNotNull {
             val libraryMediaId = runCatching { Json.decodeFromString<LibraryMediaId>(it.mediaId) }.getOrNull()
+            if (libraryMediaId is LibraryMediaId.Online) {
+                val uri = OnlineMusic.streamUrl(api, libraryMediaId.kind, libraryMediaId.id) ?: return@mapNotNull null
+                return@mapNotNull it.buildUpon().setUri(uri).setMediaMetadata(
+                    it.mediaMetadata.buildUpon()
+                        .setTitle(libraryMediaId.title)
+                        .setArtist(libraryMediaId.artist)
+                        .setAlbumTitle(libraryMediaId.album)
+                        .setArtworkUri(libraryMediaId.cover?.let(Uri::parse))
+                        .setIsPlayable(true)
+                        .build(),
+                ).build()
+            }
             if (libraryMediaId !is LibraryMediaId.Item) return@mapNotNull null
 
             val playbackUri = api.universalAudioApi.getUniversalAudioStreamUrl(
@@ -398,6 +428,26 @@ class SessionBrowserCallback(
                     }
 
                     newStartIndex = 0
+                }
+
+                // Online track: play its whole row (section, mix or album) from that track.
+                libraryMediaId is LibraryMediaId.Online -> {
+                    @Suppress("UNCHECKED_CAST")
+                    val siblings = (libraryMediaId.route.page as? LibraryPage<LibraryRoute>)
+                        ?.getContent(libraryMediaId.route, 0, MAX_PAGE_SIZE)
+                        ?.let { elements ->
+                            // Only the group holding the requested track, in its order.
+                            elements.firstOrNull { e ->
+                                e is LibraryPageElement.Group && e.items.any { (it.action as? LibraryItemAction.PlayOnline)?.id == libraryMediaId.id }
+                            }?.let { listOf(it) } ?: elements
+                        }
+                        ?.toMediaItems(libraryMediaId.route)
+                        ?.filter { it.mediaMetadata.isPlayable == true }
+                        .orEmpty()
+                    expandedItems = siblings.ifEmpty { mediaItems }
+                    newStartIndex = expandedItems.indexOfFirst {
+                        (runCatching { Json.decodeFromString<LibraryMediaId>(it.mediaId) }.getOrNull() as? LibraryMediaId.Online)?.id == libraryMediaId.id
+                    }.coerceAtLeast(0)
                 }
 
                 // Expand media item to full playlist

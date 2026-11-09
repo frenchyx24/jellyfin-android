@@ -56,13 +56,18 @@ val SearchLibraryPage = { context: Context, api: ApiClient ->
             deferred.await().content.items.map(mapper)
         }
 
+        // Online results after the library ones, minus titles the library already has.
+        val localTitles = tracks.map { it.title.lowercase() }.toSet()
+        val online = OnlineMusic.searchTracks(api, route.query).filter { it.title.lowercase() !in localTitles }
+        // Voice search ("joue X") plays the first group: online tracks first when the library has none.
+        val trackGroups = if (tracks.isEmpty()) listOf(LibraryPageElement.Group("Morceaux", online))
+        else listOf(LibraryPageElement.Group("Morceaux", tracks), LibraryPageElement.Group("Plus de titres", online))
         val groups = listOf(
             LibraryPageElement.Group(context.getString(R.string.media_service_car_section_playlists), playlists),
             LibraryPageElement.Group(context.getString(R.string.media_service_car_section_albums), albums),
             LibraryPageElement.Group(context.getString(R.string.media_service_car_section_artists), artists),
             LibraryPageElement.Group(context.getString(R.string.media_service_car_section_audiobooks), audioBooks),
-            LibraryPageElement.Group("Morceaux", tracks),
-        )
+        ) + trackGroups
         var itemOffset = 0
         groups.mapNotNull { group ->
             val start = itemOffset

@@ -187,9 +187,9 @@ class JellyfinRepository(private val api: NflixApi) {
     suspend fun localTrailers(id: String): List<Item> =
         api.get("Items/$id/LocalTrailers", ListSerializer(Item.serializer()), mapOf("userId" to api.userId))
 
-    suspend fun artists(parentId: String?, start: Int = 0, limit: Int = 60) = page(
+    suspend fun artists(parentId: String?, start: Int = 0, limit: Int = 60, sortBy: String = "SortName", descending: Boolean = false) = page(
         "Artists/AlbumArtists",
-        baseQuery() + mapOf("userId" to api.userId, "parentId" to parentId, "startIndex" to start, "limit" to limit, "sortBy" to "SortName"),
+        baseQuery() + mapOf("userId" to api.userId, "parentId" to parentId, "startIndex" to start, "limit" to limit, "sortBy" to sortBy, "sortOrder" to if (descending) "Descending" else "Ascending"),
     )
 
     suspend fun albumTracks(albumId: String) = page(

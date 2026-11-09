@@ -79,6 +79,49 @@ data class OnlineAlbumPage(
 @Immutable
 data class OnlineState(val state: String, val itemId: String?, val message: String)
 
+/** A ready-made mix (artist radio): cover, name and its tracks. */
+@Immutable
+@Serializable
+data class OnlineMix(
+    @SerialName("id") val id: String = "",
+    @SerialName("title") val title: String = "",
+    @SerialName("subtitle") val subtitle: String = "",
+    @SerialName("cover") val cover: String = "",
+    @SerialName("tracks") val tracks: List<OnlineTrack> = emptyList(),
+)
+
+/** One row of online suggestions: tracks, albums, artists or mixes. */
+@Immutable
+@Serializable
+data class OnlineFeedSection(
+    @SerialName("key") val key: String = "",
+    @SerialName("title") val title: String = "",
+    @SerialName("subtitle") val subtitle: String = "",
+    @SerialName("type") val type: String = "tracks",
+    @SerialName("tracks") val tracks: List<OnlineTrack> = emptyList(),
+    @SerialName("albums") val albums: List<OnlineAlbum> = emptyList(),
+    @SerialName("artists") val artists: List<OnlineArtist> = emptyList(),
+    @SerialName("mixes") val mixes: List<OnlineMix> = emptyList(),
+)
+
+@Serializable
+private data class OnlineFeed(@SerialName("sections") val sections: List<OnlineFeedSection> = emptyList())
+
+@Immutable
+@Serializable
+data class OnlineLyricLine(@SerialName("startMs") val startMs: Long = -1, @SerialName("text") val text: String = "")
+
+@Immutable
+@Serializable
+data class OnlineLyrics(
+    @SerialName("synced") val synced: Boolean = false,
+    @SerialName("instrumental") val instrumental: Boolean = false,
+    @SerialName("lines") val lines: List<OnlineLyricLine> = emptyList(),
+)
+
+@Serializable
+private data class PicturesResponse(@SerialName("pictures") val pictures: Map<String, String> = emptyMap())
+
 /** Online music catalogue through the Nflix Butler plugin (music routes). */
 class OnlineMusicRepository(private val api: NflixApi) {
     suspend fun search(query: String, limit: Int = 20): OnlineSearch =
@@ -92,6 +135,25 @@ class OnlineMusicRepository(private val api: NflixApi) {
 
     suspend fun album(id: String): OnlineAlbumPage =
         api.get("Plugins/NflixButler/music/album", OnlineAlbumPage.serializer(), mapOf("id" to id))
+
+    /** Online suggestions (for you, mixes, releases, similar artists, trends). */
+    suspend fun feed(refresh: Boolean = false): List<OnlineFeedSection> =
+        api.get("Plugins/NflixButler/music/feed", OnlineFeed.serializer(), if (refresh) mapOf("refresh" to true) else emptyMap()).sections
+
+    /** Lyrics by artist + title (synced when available); works for library and online tracks. */
+    suspend fun lyrics(artist: String, title: String, album: String?, durationSeconds: Int): OnlineLyrics =
+        api.get(
+            "Plugins/NflixButler/music/lyrics",
+            OnlineLyrics.serializer(),
+            mapOf("artist" to artist, "title" to title, "album" to album, "duration" to durationSeconds.takeIf { it > 0 }),
+        )
+
+    /** Pictures for artist names that have none in the library (exact name match). */
+    suspend fun pictures(names: List<String>): Map<String, String> {
+        val wanted = names.filter { it.isNotBlank() && !it.contains('|') }.distinct().take(120)
+        if (wanted.isEmpty()) return emptyMap()
+        return api.get("Plugins/NflixButler/music/pictures", PicturesResponse.serializer(), mapOf("names" to wanted.joinToString("|"))).pictures
+    }
 
     fun streamUrl(trackId: String): String =
         api.url("Plugins/NflixButler/music/stream", mapOf("trackId" to trackId, "ApiKey" to api.token.orEmpty())).toString()

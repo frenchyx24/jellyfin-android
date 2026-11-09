@@ -17,11 +17,9 @@ private val collectionTypes = setOf(CollectionType.MUSIC, CollectionType.BOOKS, 
 val RootLibraryPage = { api: ApiClient ->
     libraryPage<LibraryRoute.Root>(grid = true) { _, offset, limit ->
         val userViews by api.userViewsApi.getUserViews()
-        userViews
+        val views = userViews
             .items
             .filter { collectionTypes.contains(it.collectionType) }
-            .drop(offset)
-            .take(limit)
             .map {
                 LibraryPageElement.baseItem(
                     api = api,
@@ -34,5 +32,10 @@ val RootLibraryPage = { api: ApiClient ->
                     },
                 )
             }
+        // Online suggestions sit right after the music library.
+        val online = LibraryPageElement.Item(title = "Pour toi", iconRes = org.jellyfin.mobile.R.drawable.ic_notification, action = LibraryItemAction.Navigate(LibraryRoute.Online))
+        val musicIndex = userViews.items.filter { collectionTypes.contains(it.collectionType) }.indexOfFirst { it.collectionType == CollectionType.MUSIC }
+        val all = views.toMutableList<LibraryPageElement>().apply { add(if (musicIndex >= 0) musicIndex + 1 else size, online) }
+        all.drop(offset).take(limit)
     }
 }

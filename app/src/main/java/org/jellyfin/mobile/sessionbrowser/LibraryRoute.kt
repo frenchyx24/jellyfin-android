@@ -63,4 +63,12 @@ sealed interface LibraryRoute {
 
     @Serializable
     data class Playlist(val playlistId: UUID) : LibraryRoute
+
+    /** Online suggestions (for you, mixes, recent online listens). */
+    @Serializable
+    data object Online : LibraryRoute
+
+    /** Tracks of an online catalogue album. */
+    @Serializable
+    data class OnlineAlbum(val albumId: String) : LibraryRoute
 }

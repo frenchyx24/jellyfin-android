@@ -166,7 +166,7 @@ fun MusicScreen() {
                 music == null && views.isNotEmpty() -> EmptyState(Icons.Rounded.MusicNote, "Pas de bibliothèque musicale", null)
                 music == null -> Box(Modifier.fillMaxSize())
                 current == MusicTab.Home -> MusicHome(music.id, playlists?.id)
-                current == MusicTab.PourToi -> YtFeedScreen()
+                current == MusicTab.PourToi -> OnlineForYouScreen()
                 current == MusicTab.Albums -> BrowseGrid(viewId = music.id, types = "MusicAlbum", key = "albums-${music.id}", square = true)
                 current == MusicTab.Artists -> ArtistsGrid(music.id)
                 else -> BrowseGrid(viewId = playlists?.id, types = "Playlist", key = "playlists", square = true)
@@ -193,6 +193,12 @@ private fun MusicHome(viewId: String, playlistsId: String?) {
     val scope = rememberCoroutineScope()
     val load = rememberLoad("music-home", viewId) { force -> loadMusicHome(deps, viewId, playlistsId, force) }
     val data = load.value
+    // Online suggestions mixed into the library rows (never blocks the library part).
+    val online = rememberLoad("music-online-feed") { force -> runCatching { deps.online.feed(refresh = force) }.getOrDefault(emptyList()) }.value.orEmpty()
+    var menu by remember { mutableStateOf<org.jellyfin.mobile.nflix.data.OnlineTrack?>(null) }
+    TrackFeedStates(online)
+    fun pick(vararg keys: String) = online.filter { it.key in keys }
+    Box(Modifier.fillMaxSize()) {
     LazyColumn(contentPadding = PaddingValues(bottom = ContentBottomPadding)) {
         when {
             load is Load.Failed -> item(key = "error") { EmptyState(Icons.Rounded.MusicNote, "Musique indisponible", load.message) }
@@ -237,6 +243,7 @@ private fun MusicHome(viewId: String, playlistsId: String?) {
                         itemsIndexed(data.mixArtists, key = { _, a -> "mix-${a.id}" }) { index, artist -> MixCard(artist, index) }
                     }
                 }
+                onlineFeedSections(pick("for-you", "mixes"), deps, "home") { menu = it }
                 if (data.recentAlbums.isNotEmpty()) item(key = "recent") {
                     SectionHeader("Écoutés récemment")
                     LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -249,6 +256,7 @@ private fun MusicHome(viewId: String, playlistsId: String?) {
                         items(data.latest, key = { "l-${it.id}" }) { AlbumTile(it, "music-latest") }
                     }
                 }
+                onlineFeedSections(pick("releases"), deps, "home") { menu = it }
                 if (data.artists.isNotEmpty()) item(key = "artists") {
                     SectionHeader("Vos artistes")
                     LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -279,8 +287,11 @@ private fun MusicHome(viewId: String, playlistsId: String?) {
                         items(data.discover, key = { "d-${it.id}" }) { AlbumTile(it, "music-discover") }
                     }
                 }
+                onlineFeedSections(pick("similar", "trends"), deps, "home") { menu = it }
             }
         }
+    }
+    OnlineTrackMenu(menu) { menu = null }
     }
 }
 
