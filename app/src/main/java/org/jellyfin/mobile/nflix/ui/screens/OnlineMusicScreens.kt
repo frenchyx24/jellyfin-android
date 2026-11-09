@@ -175,7 +175,7 @@ internal fun OnlineAddButton(track: OnlineTrack, modifier: Modifier = Modifier) 
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-internal fun OnlineTrackRow(track: OnlineTrack, number: Int?, showCover: Boolean, onClick: () -> Unit, onLongClick: () -> Unit, status: String? = null) {
+internal fun OnlineTrackRow(track: OnlineTrack, number: Int?, showCover: Boolean, onClick: () -> Unit, onLongClick: () -> Unit, status: String? = null, progress: Int = -1) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 8.dp).clip(RoundedCornerShape(12.dp))
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
@@ -192,10 +192,24 @@ internal fun OnlineTrackRow(track: OnlineTrack, number: Int?, showCover: Boolean
             Text(track.title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = Nflix.Text, maxLines = 1, overflow = TextOverflow.Ellipsis)
             val sub = listOf(track.artist, if (showCover) track.album else "").filter { it.isNotBlank() }.joinToString(" · ")
             Text(sub, style = MaterialTheme.typography.labelSmall, color = Nflix.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (status != null) {
+                Text(status, style = MaterialTheme.typography.labelSmall, color = if (progress >= 0) Nflix.Red else Nflix.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (progress >= 0) {
+                    val shown by androidx.compose.animation.core.animateFloatAsState(progress / 100f, androidx.compose.animation.core.tween(600), label = "dl-progress")
+                    androidx.compose.material3.LinearProgressIndicator(
+                        progress = { shown }, color = Nflix.Red, trackColor = Nflix.Muted.copy(alpha = 0.25f),
+                        modifier = Modifier.fillMaxWidth().padding(top = 3.dp).height(3.dp).clip(RoundedCornerShape(2.dp)),
+                    )
+                } else {
+                    androidx.compose.material3.LinearProgressIndicator(
+                        color = Nflix.Muted, trackColor = Nflix.Muted.copy(alpha = 0.15f),
+                        modifier = Modifier.fillMaxWidth().padding(top = 3.dp).height(2.dp).clip(RoundedCornerShape(2.dp)),
+                    )
+                }
+            }
         }
         Text(formatDuration(track.duration), style = MaterialTheme.typography.labelSmall, color = Nflix.Muted)
         if (status == null) OnlineAddButton(track)
-        else Text(status, style = MaterialTheme.typography.labelSmall, color = Nflix.Muted, maxLines = 1)
     }
 }
 

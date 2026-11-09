@@ -80,6 +80,8 @@ data class PendingTrack(
     @SerialName("videoId") val videoId: String = "",
     @SerialName("position") val position: Int = 0,
     @SerialName("state") val state: String = "queued",
+    @SerialName("status") val status: String = "",
+    @SerialName("progress") val progress: Int = -1,
 ) {
     fun toOnline() = OnlineTrack(id = videoId, title = title, artist = artist, album = album, cover = cover, duration = duration)
 }

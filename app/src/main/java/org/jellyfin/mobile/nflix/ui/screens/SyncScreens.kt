@@ -279,10 +279,19 @@ fun SyncAccountsScreen() {
                                             if (ids.isEmpty() && online.isEmpty()) {
                                                 ItemMenu.message = "Aucun morceau lisible sur ${result.total}"
                                             } else {
-                                                val created = runCatching { deps.jellyfin.createPlaylist(playlist.title, ids) }.getOrNull()
+                                                // Re-importing updates the playlist of the same name instead of creating a twin.
+                                                val existing = runCatching { deps.jellyfin.audioPlaylists(force = true) }.getOrNull()
+                                                    ?.firstOrNull { it.name.equals(playlist.title, ignoreCase = true) }
+                                                val created = if (existing != null) runCatching {
+                                                    val have = deps.jellyfin.playlistItems(existing.id).map { it.id }.toSet()
+                                                    val fresh = ids.filter { it !in have }
+                                                    if (fresh.isNotEmpty()) deps.jellyfin.addToPlaylist(existing.id, fresh)
+                                                    existing.id
+                                                }.getOrNull() else runCatching { deps.jellyfin.createPlaylist(playlist.title, ids) }.getOrNull()
                                                 val queued = created != null && online.isNotEmpty() && runCatching { deps.sync.addPending(created, online) }.isSuccess
                                                 ItemMenu.message = when {
                                                     created == null -> "Import terminé, playlist non créée"
+                                                    queued && existing != null -> "« ${playlist.title} » mise à jour : ${online.size} titres en ligne suivis"
                                                     queued -> "« ${playlist.title} » ajoutée : ${ids.size + online.size}/${result.total} morceaux · ${online.size} en ligne, ajout au serveur en cours"
                                                     else -> "« ${playlist.title} » ajoutée : ${ids.size}/${result.total} morceaux"
                                                 }

@@ -375,11 +375,12 @@ fun PlaylistScreen(id: String) {
     val scope = rememberCoroutineScope()
     val playlist = rememberLoad("playlist", id, initial = deps.jellyfin.cachedItem(id)) { deps.jellyfin.item(id, it) }.value
     var pendingRevision by remember { mutableStateOf(0) }
-    val items = rememberLoad("playlist-items", id, org.jellyfin.mobile.nflix.ui.ItemMenu.revision, pendingRevision) { deps.jellyfin.playlistItems(id) }.value
     val pending = rememberLoad("playlist-pending", id, org.jellyfin.mobile.nflix.ui.ItemMenu.revision, pendingRevision) { runCatching { deps.sync.pending(id) }.getOrDefault(emptyList()) }.value.orEmpty()
+    // Reload the library part only when a pending track has moved into it.
+    val items = rememberLoad("playlist-items", id, org.jellyfin.mobile.nflix.ui.ItemMenu.revision, pending.size) { deps.jellyfin.playlistItems(id) }.value
     // Pending tracks move into the playlist once the server has them: re-check now and then.
     LaunchedEffect(id, pending.isNotEmpty()) {
-        while (pending.isNotEmpty()) { kotlinx.coroutines.delay(90_000); pendingRevision++ }
+        while (pending.isNotEmpty()) { kotlinx.coroutines.delay(if (pending.any { it.progress in 0..99 }) 8_000 else 30_000); pendingRevision++ }
     }
     Box(Modifier.fillMaxSize()) {
         LazyColumn(contentPadding = PaddingValues(bottom = ContentBottomPadding)) {
@@ -421,12 +422,8 @@ fun PlaylistScreen(id: String) {
                                 pendingRevision++
                             }
                         },
-                        status = when (track.state) {
-                            "requested" -> "Ajout en cours"
-                            "notfound" -> "En ligne"
-                            "disabled" -> "En ligne"
-                            else -> "En attente"
-                        },
+                        status = track.status.ifBlank { "En préparation" },
+                        progress = track.progress,
                     )
                 }
             }
@@ -484,7 +481,18 @@ fun NowPlayingScreen() {
                     when (p) {
                         1 -> LyricsPanel(lyrics, position) { deps.music.seekTo(it) }
                         2 -> QueuePanel()
-                        else -> AnimatedArtwork(track.artwork, state.isPlaying, vinyl, Modifier.sharedPoster("now-playing-art"))
+                        else -> AnimatedContent(
+                            track.id,
+                            transitionSpec = {
+                                (androidx.compose.animation.slideInHorizontally(spring(dampingRatio = 0.8f, stiffness = 300f)) { it / 3 } + androidx.compose.animation.scaleIn(tween(350), initialScale = 0.85f) + fadeIn(tween(300))) togetherWith
+                                    (androidx.compose.animation.slideOutHorizontally(tween(250)) { -it / 3 } + androidx.compose.animation.scaleOut(tween(250), targetScale = 0.85f) + fadeOut(tween(200)))
+                            },
+                            label = "np-art",
+                        ) { _ ->
+                            // Breathes slightly larger while playing, settles back on pause.
+                            val artScale by animateFloatAsState(if (state.isPlaying) 1f else 0.9f, spring(dampingRatio = 0.6f, stiffness = 200f), label = "np-art-scale")
+                            AnimatedArtwork(track.artwork, state.isPlaying, vinyl, Modifier.sharedPoster("now-playing-art").graphicsLayer { scaleX = artScale; scaleY = artScale })
+                        }
                     }
                 }
             }
@@ -500,30 +508,21 @@ fun NowPlayingScreen() {
             }
             Spacer(Modifier.height(8.dp))
             val fraction = if (duration > 0) position.toFloat() / duration else 0f
-            Slider(
-                value = if (dragging) dragValue else fraction.coerceIn(0f, 1f),
-                onValueChange = { dragging = true; dragValue = it },
-                onValueChangeFinished = { deps.music.seekTo((dragValue * duration).toLong()); dragging = false },
-                colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = Nflix.Red, inactiveTrackColor = Color.White.copy(alpha = 0.2f)),
-            )
+            AnimatedSeekBar(fraction, state.isPlaying, onSeek = { f -> position = (f * duration).toLong(); deps.music.seekTo((f * duration).toLong()) })
             Row {
                 Text(formatTicks(position * 10_000), style = MaterialTheme.typography.labelSmall, color = Nflix.Muted)
                 Spacer(Modifier.weight(1f))
                 Text(formatTicks(duration * 10_000), style = MaterialTheme.typography.labelSmall, color = Nflix.Muted)
             }
             Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = { deps.music.toggleShuffle() }) { Icon(Icons.Rounded.Shuffle, "Aléatoire", tint = if (state.shuffle) Nflix.Red else Nflix.Text) }
-                IconButton(onClick = { deps.music.previous() }, modifier = Modifier.size(56.dp)) { Icon(Icons.Rounded.SkipPrevious, "Précédent", modifier = Modifier.size(36.dp)) }
-                Box(Modifier.size(76.dp).clip(CircleShape).background(Color.White).pressable({ deps.music.toggle() }), contentAlignment = Alignment.Center) {
-                    AnimatedContent(state.isPlaying, label = "np-play") { playing ->
-                        Icon(if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, "Lecture", tint = Color.Black, modifier = Modifier.size(40.dp))
-                    }
-                }
-                IconButton(onClick = { deps.music.next() }, modifier = Modifier.size(56.dp)) { Icon(Icons.Rounded.SkipNext, "Suivant", modifier = Modifier.size(36.dp)) }
-                IconButton(onClick = { deps.music.cycleRepeat() }) {
-                    Icon(if (state.repeatMode == Player.REPEAT_MODE_ONE) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat, "Répéter",
-                        tint = if (state.repeatMode != Player.REPEAT_MODE_OFF) Nflix.Red else Nflix.Text)
-                }
+                BouncyIconButton(Icons.Rounded.Shuffle, "Aléatoire", { deps.music.toggleShuffle() }, tint = if (state.shuffle) Nflix.Red else Nflix.Text, spinOnChange = state.shuffle)
+                BouncyIconButton(Icons.Rounded.SkipPrevious, "Précédent", { deps.music.previous() }, size = 56.dp, iconSize = 36.dp, nudge = -18f)
+                AnimatedPlayButton(state.isPlaying) { deps.music.toggle() }
+                BouncyIconButton(Icons.Rounded.SkipNext, "Suivant", { deps.music.next() }, size = 56.dp, iconSize = 36.dp, nudge = 18f)
+                BouncyIconButton(
+                    if (state.repeatMode == Player.REPEAT_MODE_ONE) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat, "Répéter", { deps.music.cycleRepeat() },
+                    tint = if (state.repeatMode != Player.REPEAT_MODE_OFF) Nflix.Red else Nflix.Text, spinOnChange = state.repeatMode,
+                )
             }
             Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
                 IconButton(onClick = { vinyl = !vinyl; visualPrefs.edit().putBoolean("vinyl", vinyl).apply(); panel = 0 }) {
