@@ -225,7 +225,7 @@ fun SyncAccountsScreen() {
                         scope.launch {
                             runCatching { deps.sync.googleStart() }
                                 .onSuccess { googleCode = it }
-                                .onFailure { ItemMenu.message = if ((it as? org.jellyfin.mobile.nflix.data.NflixHttpException)?.code == 412) "Compte Google non configuré sur le serveur" else "Google injoignable" }
+                                .onFailure { ItemMenu.message = if ((it as? org.jellyfin.mobile.nflix.data.NflixHttpException)?.code == 412) "Compte musique non configuré sur le serveur" else (serverMessage(it) ?: "Service de musique injoignable") }
                         }
                     },
                     enabled = config?.youtubeConfigured == true && !busy && accounts.none { it.service == "youtube" },
@@ -345,4 +345,13 @@ private fun serviceLabel(service: String): String = when (service) {
     "deezer" -> "Deezer"
     "spotify" -> "Spotify"
     else -> service.replaceFirstChar { it.uppercase() }
+}
+
+/** French message returned by the server for a failed linking request, when there is one. */
+private fun serverMessage(error: Throwable): String? {
+    val body = (error as? org.jellyfin.mobile.nflix.data.NflixHttpException)?.body ?: return null
+    return runCatching {
+        val element = kotlinx.serialization.json.Json.parseToJsonElement(body)
+        ((element as? kotlinx.serialization.json.JsonObject)?.get("message") as? kotlinx.serialization.json.JsonPrimitive)?.content
+    }.getOrNull()?.takeIf { it.isNotBlank() }
 }

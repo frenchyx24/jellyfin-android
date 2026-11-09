@@ -9,11 +9,13 @@ import java.util.Locale
  * ("Tyler， The Creator") are ignored when comparing.
  */
 object ArtistNames {
-    private val featuring = Regex("""\s+(feat\.?|ft\.?|featuring|with|x|avec)\s+""", RegexOption.IGNORE_CASE)
+    private val featuring = Regex("""\s+(feat\.?|ft\.?|featuring|with|x|avec|&)\s+""", RegexOption.IGNORE_CASE)
     private val marks = Regex("\\p{Mn}+")
     private val commaNames = listOf(
         "tyler, the creator", "earth, wind & fire", "crosby, stills, nash & young", "crosby, stills & nash",
         "emerson, lake & palmer", "peter, paul and mary", "blood, sweat & tears", "now, now", "black country, new road",
+        "simon & garfunkel", "hall & oates", "echo & the bunnymen", "the mamas & the papas", "sam & dave",
+        "ike & tina turner", "mumford & sons", "florence & the machine", "peter & gordon", "chad & jeremy",
     )
 
     fun primary(credit: String?): String {
