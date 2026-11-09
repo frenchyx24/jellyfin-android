@@ -272,7 +272,7 @@ private suspend fun loadHome(deps: AppDeps, force: Boolean): HomeData = coroutin
     val distributorRows = async {
         runCatching {
             deps.admin.distributors(force = force).filter { it.enabled }
-                .map { d -> async { d to runCatching { deps.admin.titles(d, limit = 20, force = force).items }.getOrDefault(emptyList()) } }
+                .map { d -> async { d to runCatching { deps.admin.titles(d, limit = 1, force = force).items }.getOrDefault(emptyList()) } }
                 .map { it.await() }.filter { it.second.isNotEmpty() }
         }.getOrDefault(emptyList())
     }
@@ -318,40 +318,13 @@ private suspend fun loadHome(deps: AppDeps, force: Boolean): HomeData = coroutin
     HomeData(heroItems, rows.filter { it.items.isNotEmpty() }.distinctBy { it.key }, requests.await(), upcoming.await(), trending.await(), distributorRows.await())
 }
 
-/** "Plateformes" logo strip, then one row per distributor with its logo as the title. */
+/** "Plateformes" logo strip; each logo opens that platform's full catalogue. */
 private fun androidx.compose.foundation.lazy.LazyListScope.distributorSection(rows: List<Pair<org.jellyfin.mobile.nflix.data.Distributor, List<Item>>>) {
     if (rows.isEmpty()) return
     item(key = "platforms") {
         Column {
             org.jellyfin.mobile.nflix.ui.SectionHeader("Plateformes")
             DistributorStrip(rows.map { it.first })
-        }
-    }
-    rows.forEach { (distributor, titles) ->
-        item(key = "distributor-${distributor.id}") {
-            val deps = LocalDeps.current
-            val navigator = LocalNavigator.current
-            Column {
-                Row(
-                    Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 22.dp, bottom = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    DistributorLogo(distributor, Modifier.width(110.dp), height = 36.dp)
-                    Spacer(Modifier.width(10.dp))
-                    Text("Les titres ${distributor.name}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                    Text(
-                        "Tout voir", style = MaterialTheme.typography.labelMedium, color = Nflix.Red,
-                        modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { navigator.open(Route.Distributor(distributor.id)) }.padding(8.dp),
-                    )
-                }
-                LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    items(titles.size, key = { titles[it].id }) { index ->
-                        val item = titles[index]
-                        val origin = "distributor-${distributor.id}/${item.id}"
-                        PosterCard(item, deps.jellyfin.primary(item, 300), origin, { navigator.open(Route.Item(item.id, origin)) }, subtitle = posterSubtitle(item))
-                    }
-                }
-            }
         }
     }
 }
