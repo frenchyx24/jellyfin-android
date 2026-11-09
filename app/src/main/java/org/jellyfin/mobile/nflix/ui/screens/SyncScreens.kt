@@ -158,7 +158,7 @@ fun SyncAccountsScreen() {
         while (System.currentTimeMillis() < deadline) {
             kotlinx.coroutines.delay(wait)
             when (runCatching { deps.sync.googlePoll() }.getOrDefault("pending")) {
-                "linked" -> { ItemMenu.message = "Compte YouTube Music lié"; googleCode = null; refresh(); return@LaunchedEffect }
+                "linked" -> { ItemMenu.message = "Compte musique lié"; googleCode = null; refresh(); return@LaunchedEffect }
                 "denied" -> { ItemMenu.message = "Liaison refusée"; googleCode = null; return@LaunchedEffect }
                 "expired" -> { ItemMenu.message = "Code expiré, recommencez"; googleCode = null; return@LaunchedEffect }
                 "slow_down" -> wait += 5_000
@@ -170,7 +170,7 @@ fun SyncAccountsScreen() {
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { googleCode = null },
             containerColor = Nflix.SurfaceHigh,
-            title = { Text("Lier YouTube Music") },
+            title = { Text("Lier la musique en ligne") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("Ouvrez ${code.verificationUrl.removePrefix("https://")} et saisissez ce code :", style = MaterialTheme.typography.bodyMedium)
@@ -232,7 +232,7 @@ fun SyncAccountsScreen() {
                     border = androidx.compose.foundation.BorderStroke(1.dp, if (config?.youtubeConfigured == true) Nflix.Red else Nflix.Outline),
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = Nflix.Text),
                     modifier = Modifier.fillMaxWidth(),
-                ) { Icon(Icons.Rounded.Link, null, Modifier.size(18.dp)); Text("Lier YouTube Music", Modifier.padding(start = 6.dp)) }
+                ) { Icon(Icons.Rounded.Link, null, Modifier.size(18.dp)); Text("Lier la musique en ligne", Modifier.padding(start = 6.dp)) }
             }
             if (config != null && !config!!.deezerConfigured && !config!!.spotifyConfigured && !config!!.youtubeConfigured) {
                 Text(
@@ -335,13 +335,13 @@ fun SyncAccountsScreen() {
             }
         }
         if (accounts.isEmpty() && config != null) {
-            item { EmptyState(Icons.Rounded.SyncAlt, "Aucun compte lié", "Liez Deezer, Spotify ou YouTube Music pour importer vos playlists.") }
+            item { EmptyState(Icons.Rounded.SyncAlt, "Aucun compte lié", "Liez Deezer, Spotify ou votre compte musique pour importer vos playlists.") }
         }
     }
 }
 
 private fun serviceLabel(service: String): String = when (service) {
-    "youtube" -> "YouTube Music"
+    "youtube" -> "Musique en ligne"
     "deezer" -> "Deezer"
     "spotify" -> "Spotify"
     else -> service.replaceFirstChar { it.uppercase() }
