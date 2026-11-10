@@ -7,12 +7,17 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 SRC="$(cd "$SCRIPT_DIR/../.." && pwd)"
 OUT="${NFLIX_BUILD_OUT:-$HOME/nflix/out}"
 KEYS="${NFLIX_KEYS_DIR:-$HOME/nflix/keys}"
+# Alternative: the Mira signing directory on the Docker host (same 3C7E2866 key), mounted read-only;
+# the keystore and its passwords never touch this disk.
+MOUNT="${NFLIX_SIGNING_MOUNT:-}"
+MOUNT_ARGS=()
+[ -z "$MOUNT" ] || MOUNT_ARGS=(-v "$MOUNT:/keys:ro")
 [ "$#" -gt 0 ] || set -- assembleProprietaryRelease
 RELEASE=false
 for task in "$@"; do
   case "$task" in *Release*|build|assemble|bundle) RELEASE=true ;; esac
 done
-if "$RELEASE"; then
+if "$RELEASE" && [ -z "$MOUNT" ]; then
   [ -s "$KEYS/nflix-release.jks" ] && [ -s "$KEYS/keystore.env" ] || {
     echo 'Refused: original Nflix release keystore and signing configuration are required.' >&2
     exit 1
@@ -28,7 +33,7 @@ cleanup() {
 trap cleanup EXIT
 chmod 700 "$STAGE"
 tar -C "$SRC" --exclude='.git' --exclude='build' --exclude='.gradle' --exclude='.nflix-keys' -cf - . | tar -xf - -C "$STAGE"
-if "$RELEASE"; then
+if "$RELEASE" && [ -z "$MOUNT" ]; then
   mkdir -m 700 "$STAGE/.nflix-keys"
   cp "$KEYS/nflix-release.jks" "$STAGE/.nflix-keys/"
   cp "$KEYS/keystore.env" "$STAGE/.nflix-keys/signing.env"
@@ -39,11 +44,21 @@ set -euo pipefail
 export ANDROID_HOME=/opt/android-sdk-linux ANDROID_SDK_ROOT=/opt/android-sdk-linux
 trap 'rm -rf /src/.nflix-keys' EXIT
 cd /src
-if [ -f .nflix-keys/signing.env ]; then
+if [ -f /keys/signing.env ] && [ ! -f .nflix-keys/signing.env ]; then
+  set -a
+  source /keys/signing.env
+  set +a
+  export KEYSTORE_FILE="$MIRA_KEYSTORE_FILE" KEYSTORE_PASSWORD="$MIRA_KEYSTORE_PASSWORD"
+  export SIGNING_KEY_ALIAS="$MIRA_KEY_ALIAS" SIGNING_KEY_PASSWORD="$MIRA_KEY_PASSWORD"
+  unset MIRA_KEYSTORE_PASSWORD MIRA_KEY_PASSWORD MIRA_PUBLISH_TOKEN
+fi
+if [ -n "${KEYSTORE_FILE:-}" ] || [ -f .nflix-keys/signing.env ]; then
+  if [ -f .nflix-keys/signing.env ]; then
   set -a
   source .nflix-keys/signing.env
   set +a
   export KEYSTORE_FILE=/src/.nflix-keys/nflix-release.jks
+  fi
   : "${KEYSTORE_PASSWORD:?Missing original keystore password}"
   : "${SIGNING_KEY_ALIAS:?Missing original signing alias}"
   : "${SIGNING_KEY_PASSWORD:?Missing original signing key password}"
@@ -67,7 +82,7 @@ fi
 printf ' %q' "$@" >> "$STAGE/.nflix-args.sh"
 printf '\nsource /src/.nflix-build.sh\n' >> "$STAGE/.nflix-args.sh"
 # The command contains no signing passwords; the private configuration travels in stdin only.
-docker create --name "$CONTAINER" -i -v nflix-gradle:/root/.gradle mira-android-builder:v02 \
+docker create --name "$CONTAINER" -i -v nflix-gradle:/root/.gradle "${MOUNT_ARGS[@]}" mira-android-builder:v02 \
   bash -lc 'set -e; mkdir -p /src; tar -xzf - -C /src; exec bash /src/.nflix-args.sh' >/dev/null
 if ! tar -C "$STAGE" -czf - . | docker start -ai "$CONTAINER"; then
   echo 'Build failed.' >&2

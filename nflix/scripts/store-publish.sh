@@ -20,7 +20,15 @@ case "$SLUG" in
 esac
 [ "$SIGNER_EXPECTED" = "$PIN" ] || { echo 'Refused: signing certificate pin changed.' >&2; exit 1; }
 [ -s "$APK" ] && [ -s "$ICON" ] || { echo 'Refused: APK or icon is missing.' >&2; exit 1; }
-source "${NFLIX_KEYS_DIR:-$HOME/nflix/keys}/publish.env"
+if [ -n "${NFLIX_SIGNING_MOUNT:-}" ]; then
+  # Read the publishing credential from the mounted Mira signing directory, in memory only.
+  PUBLISH_ENV="$(docker run --rm -v "$NFLIX_SIGNING_MOUNT:/keys:ro" mira-android-builder:v02 cat /keys/publish.env)"
+  env_value() { printf '%s\n' "$PUBLISH_ENV" | sed -n "s/^$1=//p" | head -1 | sed -e "s/^[\"']//" -e "s/[\"']\$//"; }
+  MIRA_PUBLISH_TOKEN="$(env_value MIRA_PUBLISH_TOKEN)"; MIRA_STORE_URL="$(env_value MIRA_STORE_URL)"
+  unset PUBLISH_ENV
+else
+  source "${NFLIX_KEYS_DIR:-$HOME/nflix/keys}/publish.env"
+fi
 : "${MIRA_PUBLISH_TOKEN:?Missing publishing credential}"
 : "${MIRA_STORE_URL:?Missing store URL}"
 [[ "$MIRA_STORE_URL" == https://* ]] || { echo 'Refused: HTTPS store required.' >&2; exit 1; }

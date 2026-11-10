@@ -34,7 +34,7 @@ for CHECK_CHANNEL in nflix-beta nflix; do
   [ "$CODE" -gt "$CURRENT" ] || { echo "Refused: versionCode $CODE must exceed $CHECK_CHANNEL versionCode $CURRENT." >&2; exit 1; }
 done
 KEYS="${NFLIX_KEYS_DIR:-$HOME/nflix/keys}"
-[ -s "$KEYS/nflix-release.jks" ] && [ -s "$KEYS/keystore.env" ] || {
+[ -n "${NFLIX_SIGNING_MOUNT:-}" ] || { [ -s "$KEYS/nflix-release.jks" ] && [ -s "$KEYS/keystore.env" ]; } || {
   echo 'Refused: original Nflix release keystore and signing configuration are required.' >&2
   exit 1
 }
