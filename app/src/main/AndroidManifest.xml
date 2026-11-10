@@ -3,6 +3,8 @@
     android:installLocation="auto">
 
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <!-- Finds Nflix Android TVs waiting for sign-in on the local network (DNS-SD) -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission
         android:name="android.permission.BLUETOOTH"
@@ -61,6 +63,13 @@
             <intent-filter>
                 <action android:name="android.media.action.MEDIA_PLAY_FROM_SEARCH" />
                 <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <!-- QR code shown by Nflix Android TV: nflix://tv-link?code=123456 -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="nflix" android:host="tv-link" />
             </intent-filter>
         </activity>
 

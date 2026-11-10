@@ -184,6 +184,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleMiraIntent(intent: Intent?) {
+        org.jellyfin.mobile.nflix.tv.TvLink.fromUri(intent?.data)?.let { request ->
+            intent?.data = null
+            org.jellyfin.mobile.nflix.tv.TvLink.propose(request)
+        }
         intent?.getStringExtra(org.jellyfin.mobile.nflix.alerts.NflixAlerts.EXTRA_OPEN_ITEM)?.let { id ->
             intent.removeExtra(org.jellyfin.mobile.nflix.alerts.NflixAlerts.EXTRA_OPEN_ITEM)
             if (Regex("[0-9a-fA-F]{32}").matches(id)) mainViewModel.requestOpenItem(id)

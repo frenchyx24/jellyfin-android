@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Tv
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.rounded.CalendarMonth
@@ -188,6 +189,7 @@ fun ProfileScreen() {
         ProfileEntry("seasonal", Icons.Rounded.Celebration, "Thèmes saisonniers", seasonalSubtitle, Nflix.Red) { navigator.open(Route.SeasonalSettings) },
     )
     val appEntries = buildList {
+        add(ProfileEntry("tv", Icons.Rounded.Tv, "Connecter une TV", "Saisir le code affiché par Nflix sur Android TV", ProfileAccents.Releases) { org.jellyfin.mobile.nflix.tv.TvLink.openManual() })
         add(ProfileEntry("updates", Icons.Rounded.SystemUpdate, "Mises à jour", "Version ${BuildConfig.VERSION_NAME}", ProfileAccents.Updates) { scope.launch { deps.updater.check(force = true) } })
         if (miraInstalled) {
             add(

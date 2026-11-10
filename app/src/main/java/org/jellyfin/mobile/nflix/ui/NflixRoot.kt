@@ -207,6 +207,8 @@ fun NflixRoot(deps: AppDeps, navigator: Navigator, backEnabled: Boolean = true) 
             // Announcement popups wait until the tutorial is closed.
             if (!Tutorial.covering) NoticePopup()
             ItemMenuHost()
+            // Nflix Android TV sign-in: TV found on the Wi-Fi, scanned QR code or typed code
+            org.jellyfin.mobile.nflix.tv.TvLinkHost()
             ToastHost()
             if (castRemoteOpen.value) CastRemoteSheet(deps.cast) { castRemoteOpen.value = false }
             TrailerHost()

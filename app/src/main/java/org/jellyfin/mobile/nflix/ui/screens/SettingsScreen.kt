@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Tv
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Brightness6
 import androidx.compose.material.icons.rounded.Celebration
@@ -251,6 +252,17 @@ fun SettingsScreen() {
                             Text(seasonalSubtitle, fontSize = 12.sp, color = Nflix.Muted, lineHeight = 17.sp)
                         }
                         Icon(Icons.Rounded.ChevronRight, null, tint = Nflix.Muted)
+                    }
+                }
+            }
+
+            item { SectionLabel("Appareils", Modifier.settleIn(2)) }
+            item {
+                GlassCard(Modifier.fillMaxWidth().settleIn(2)) {
+                    Column(Modifier.padding(horizontal = 18.dp, vertical = 10.dp)) {
+                        SettingLink(Icons.Rounded.Tv, SettingTints.Coral, "Connecter une TV", "Saisissez le code affiché par Nflix sur votre Android TV.") {
+                            org.jellyfin.mobile.nflix.tv.TvLink.openManual()
+                        }
                     }
                 }
             }
