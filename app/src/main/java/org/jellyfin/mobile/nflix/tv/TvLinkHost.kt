@@ -24,7 +24,6 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -35,7 +34,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -43,8 +41,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
 import kotlinx.coroutines.launch
 import org.jellyfin.mobile.nflix.ui.LocalDeps
 import org.jellyfin.mobile.nflix.ui.Nflix
@@ -52,32 +48,16 @@ import org.jellyfin.mobile.nflix.ui.ToastKind
 import org.jellyfin.mobile.nflix.ui.Toasts
 
 /**
- * Proposes to connect a Nflix TV waiting on the same Wi-Fi (or scanned from its QR code), and
- * hosts the manual "Connecter une TV" code entry. Discovery only runs while the app is visible.
+ * Hosts the "Connecter une TV" screen (live DNS-SD discovery) and the confirmation dialogs for a
+ * TV found on the network, scanned from its QR code, or typed in.
  */
 @Composable
 fun TvLinkHost() {
-    val context = LocalContext.current
-    @Suppress("DEPRECATION") val lifecycle = androidx.compose.ui.platform.LocalLifecycleOwner.current.lifecycle
-    val discovery = remember { TvDiscovery(context) }
-    DisposableEffect(lifecycle) {
-        val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_START -> discovery.start()
-                Lifecycle.Event.ON_STOP -> discovery.stop()
-                else -> Unit
-            }
-        }
-        lifecycle.addObserver(observer)
-        if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) discovery.start()
-        onDispose {
-            lifecycle.removeObserver(observer)
-            discovery.stop()
-        }
-    }
     val request by TvLink.request.collectAsState()
     val manual by TvLink.manualOpen.collectAsState()
+    val discovery by TvLink.discoveryOpen.collectAsState()
     request?.let { ConfirmTvDialog(it) }
+    if (discovery && request == null) TvDiscoverySheet()
     if (manual && request == null) ManualCodeDialog()
 }
 
@@ -133,6 +113,7 @@ private fun ConfirmTvDialog(request: TvRequest) {
                             .onSuccess {
                                 TvLink.dismiss(request.code)
                                 TvLink.closeManual()
+                                TvLink.closeDiscovery()
                                 Toasts.show("« ${request.name} » est connectée à Nflix", ToastKind.Success)
                             }
                             .onFailure { error = it.message }

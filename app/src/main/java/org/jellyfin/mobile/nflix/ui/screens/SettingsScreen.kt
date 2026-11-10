@@ -260,8 +260,8 @@ fun SettingsScreen() {
             item {
                 GlassCard(Modifier.fillMaxWidth().settleIn(2)) {
                     Column(Modifier.padding(horizontal = 18.dp, vertical = 10.dp)) {
-                        SettingLink(Icons.Rounded.Tv, SettingTints.Coral, "Connecter une TV", "Saisissez le code affiché par Nflix sur votre Android TV.") {
-                            org.jellyfin.mobile.nflix.tv.TvLink.openManual()
+                        SettingLink(Icons.Rounded.Tv, SettingTints.Coral, "Connecter une TV", "Recherchez les TV Nflix sur votre Wi-Fi, ou saisissez leur code.") {
+                            org.jellyfin.mobile.nflix.tv.TvLink.openDiscovery()
                         }
                     }
                 }

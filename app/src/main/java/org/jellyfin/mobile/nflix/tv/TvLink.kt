@@ -1,12 +1,6 @@
 package org.jellyfin.mobile.nflix.tv
 
-import android.content.Context
 import android.net.Uri
-import android.net.nsd.NsdManager
-import android.net.nsd.NsdServiceInfo
-import android.net.wifi.WifiManager
-import android.os.Build
-import androidx.core.content.ContextCompat
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -39,8 +33,21 @@ object TvLink {
     /** True while the "Connecter une TV" code entry dialog is shown. */
     val manualOpen: StateFlow<Boolean> = _manualOpen.asStateFlow()
 
+    private val _discoveryOpen = MutableStateFlow(false)
+
+    /** True while the "Connecter une TV" discovery screen is open. */
+    val discoveryOpen: StateFlow<Boolean> = _discoveryOpen.asStateFlow()
+
     /** Codes the user already answered (connected or ignored) in this process. */
     private val handled = ConcurrentHashMap.newKeySet<String>()
+
+    fun openDiscovery() {
+        _discoveryOpen.value = true
+    }
+
+    fun closeDiscovery() {
+        _discoveryOpen.value = false
+    }
 
     fun openManual() {
         _manualOpen.value = true
@@ -50,9 +57,10 @@ object TvLink {
         _manualOpen.value = false
     }
 
-    fun propose(request: TvRequest) {
+    /** [explicit] = the user picked this TV or typed its code, so an earlier dismissal does not block it. */
+    fun propose(request: TvRequest, explicit: Boolean = false) {
         if (!isValidCode(request.code)) return
-        if (request.source == TvRequest.Source.Network && request.code in handled) return
+        if (request.source == TvRequest.Source.Network && !explicit && request.code in handled) return
         val current = _request.value
         // A scanned or typed code always wins over a TV found on the network
         if (current != null && current.source != TvRequest.Source.Network && request.source == TvRequest.Source.Network) return
@@ -117,97 +125,4 @@ object TvLink {
 
     private suspend fun quickConnectEnabled(api: NflixApi): Boolean? =
         runCatching { api.getJson("QuickConnect/Enabled").toString().trim() == "true" }.getOrNull()
-}
-
-/**
- * Watches the local network for Nflix TVs showing a sign-in code. Start it while the app is in
- * the foreground; it costs nothing when no TV is waiting.
- */
-class TvDiscovery(context: Context) {
-    private val appContext = context.applicationContext
-    private val nsd = appContext.getSystemService(Context.NSD_SERVICE) as? NsdManager
-    private val wifi = appContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
-    private var lock: WifiManager.MulticastLock? = null
-    private var listener: NsdManager.DiscoveryListener? = null
-    private val resolving = ConcurrentHashMap.newKeySet<String>()
-
-    fun start() {
-        val manager = nsd ?: return
-        if (listener != null) return
-        lock = runCatching { wifi?.createMulticastLock("nflix-tv-discovery")?.apply { setReferenceCounted(false); acquire() } }.getOrNull()
-        val discovery = object : NsdManager.DiscoveryListener {
-            override fun onDiscoveryStarted(serviceType: String) = Unit
-            override fun onDiscoveryStopped(serviceType: String) = Unit
-            override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
-                Timber.d("TV discovery failed to start: %d", errorCode)
-                releaseLock()
-                listener = null
-            }
-            override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) = Unit
-            override fun onServiceLost(service: NsdServiceInfo) = Unit
-            override fun onServiceFound(service: NsdServiceInfo) {
-                if (!service.serviceType.contains(SERVICE_TYPE)) return
-                resolve(manager, service)
-            }
-        }
-        listener = discovery
-        runCatching { manager.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, discovery) }
-            .onFailure { listener = null; releaseLock(); Timber.d("TV discovery unavailable: %s", it.javaClass.simpleName) }
-    }
-
-    fun stop() {
-        val manager = nsd
-        listener?.let { l -> runCatching { manager?.stopServiceDiscovery(l) } }
-        listener = null
-        releaseLock()
-        resolving.clear()
-    }
-
-    private fun releaseLock() {
-        runCatching { if (lock?.isHeld == true) lock?.release() }
-        lock = null
-    }
-
-    @Suppress("DEPRECATION")
-    private fun resolve(manager: NsdManager, service: NsdServiceInfo) {
-        val key = service.serviceName
-        if (!resolving.add(key)) return
-        if (Build.VERSION.SDK_INT >= 34) {
-            val callback = object : NsdManager.ServiceInfoCallback {
-                override fun onServiceInfoCallbackRegistrationFailed(errorCode: Int) { resolving.remove(key) }
-                override fun onServiceUpdated(info: NsdServiceInfo) {
-                    handle(info)
-                    runCatching { manager.unregisterServiceInfoCallback(this) }
-                }
-                override fun onServiceLost() = Unit
-                override fun onServiceInfoCallbackUnregistered() { resolving.remove(key) }
-            }
-            runCatching { manager.registerServiceInfoCallback(service, ContextCompat.getMainExecutor(appContext), callback) }
-                .onFailure { resolving.remove(key) }
-        } else {
-            runCatching {
-                manager.resolveService(service, object : NsdManager.ResolveListener {
-                    override fun onResolveFailed(info: NsdServiceInfo, errorCode: Int) { resolving.remove(key) }
-                    override fun onServiceResolved(info: NsdServiceInfo) {
-                        resolving.remove(key)
-                        handle(info)
-                    }
-                })
-            }.onFailure { resolving.remove(key) }
-        }
-    }
-
-    private fun handle(info: NsdServiceInfo) {
-        val attributes = info.attributes
-        val code = attributes["code"]?.toString(Charsets.UTF_8)?.filter(Char::isDigit) ?: return
-        val name = attributes["name"]?.toString(Charsets.UTF_8)?.take(60)?.ifBlank { null }
-            ?: info.serviceName.removePrefix("Nflix TV ").ifBlank { "TV Nflix" }
-        ContextCompat.getMainExecutor(appContext).execute {
-            TvLink.propose(TvRequest(code, name, TvRequest.Source.Network))
-        }
-    }
-
-    private companion object {
-        const val SERVICE_TYPE = "_nflixtv._tcp"
-    }
 }
