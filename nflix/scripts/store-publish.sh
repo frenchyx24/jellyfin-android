@@ -9,6 +9,10 @@ case "$SLUG" in
   nflix|nflix-beta)
     PACKAGE_EXPECTED=fr.miracloud.nflix
     PIN=3c7e2866a82adea668857ee07b46995975c0096ea1642d590689a9ec1b320a64 ;;
+  nflix-tv|nflix-tv-beta)
+    # Nflix Android TV: same release key as the phone app
+    PACKAGE_EXPECTED=fr.miracloud.nflix.tv
+    PIN=3c7e2866a82adea668857ee07b46995975c0096ea1642d590689a9ec1b320a64 ;;
   mira-connect|mira-connect-beta)
     PACKAGE_EXPECTED=fr.miracloud.connect
     PIN=9d6174bb6c20ec8ee349062dca5b812ac261088578820bcaf14014e6259959fb ;;
