@@ -160,8 +160,6 @@ fun ProfileScreen() {
     val miraInstalled = remember { runCatching { context.packageManager.getPackageInfo("fr.miracloud.connect", 0); true }.getOrDefault(false) }
     val plan = remember(deps.session.miraGroups) { MiraPlan.fromGroups(deps.session.miraGroups) }
     val serverHost = remember { BuildConfig.NFLIX_SERVER_URL.substringAfter("://").substringBefore('/').ifBlank { "Nflix" } }
-    var seasonalSheet by remember { mutableStateOf(false) }
-    if (seasonalSheet) org.jellyfin.mobile.nflix.ui.SeasonalThemesSheet(onDismiss = { seasonalSheet = false })
     val entrance = rememberProfileEntrance()
 
     val spaceEntries = buildList {
@@ -184,8 +182,8 @@ fun ProfileScreen() {
         else -> "Noël, Halloween, 14 Juillet, Nouvel An…"
     }
     val lookEntries = listOf(
-        ProfileEntry("seasonal", Icons.Rounded.Celebration, "Thèmes saisonniers", seasonalSubtitle, Nflix.Red) { seasonalSheet = true },
-        ProfileEntry("playback", Icons.Rounded.Settings, "Lecture et lecteur", "Qualité, sous-titres, lecteur vidéo", ProfileAccents.Playback) { deps.openSettings() },
+        ProfileEntry("settings", Icons.Rounded.Settings, "Réglages", "Lecteur, musique, téléchargements, application", ProfileAccents.Playback) { navigator.open(Route.Settings) },
+        ProfileEntry("seasonal", Icons.Rounded.Celebration, "Thèmes saisonniers", seasonalSubtitle, Nflix.Red) { navigator.open(Route.SeasonalSettings) },
     )
     val appEntries = buildList {
         add(ProfileEntry("updates", Icons.Rounded.SystemUpdate, "Mises à jour", "Version ${BuildConfig.VERSION_NAME}", ProfileAccents.Updates) { scope.launch { deps.updater.check(force = true) } })

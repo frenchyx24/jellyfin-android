@@ -44,6 +44,8 @@ sealed class Route(val key: String) {
     data object AdminActivity : Route("admin/activity")
     data object AdminButler : Route("admin/butler")
     data object SyncAccounts : Route("sync-accounts")
+    data object Settings : Route("settings")
+    data object SeasonalSettings : Route("seasonal-settings")
     /** YouTube Music artist page (search by artist name). */
     data class YtArtist(val name: String) : Route("ytartist/${java.net.URLEncoder.encode(name, "UTF-8")}")
     /** YouTube Music album page (MPREb browse id). */

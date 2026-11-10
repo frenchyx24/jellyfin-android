@@ -1,33 +1,27 @@
 package org.jellyfin.mobile.nflix.ui
 
 import android.content.Context
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -36,19 +30,36 @@ import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.changedToDownIgnoreConsumed
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.edit
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.MonthDay
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -74,6 +85,20 @@ enum class SeasonalEvent(
     Halloween("Halloween", "🎃", "Joyeux Halloween… si vous osez", Color(0xFFFF7A1A), Color(0xFF4B1A6B), Particle.Bats, "24 – 31 oct."),
     Armistice("Armistice", "🌼", "11 novembre : mémoire", Color(0xFF4A7BFF), Color(0xFF1A2C6B), Particle.Petals, "9 – 11 nov."),
     Christmas("Noël", "🎄", "Joyeux Noël !", Color(0xFFE31B3B), Color(0xFF0F6B3A), Particle.Snow, "1er – 26 déc.");
+
+    /** Three colours the effects draw with. */
+    val palette: List<Color>
+        get() = when (this) {
+            NewYear -> listOf(Color(0xFFFFC94A), Color(0xFFFFF1C2), Color(0xFFFF9EC7))
+            Valentine -> listOf(Color(0xFFFF4F8B), Color(0xFFFF9EC0), Color(0xFFFFD1E1))
+            Easter -> listOf(Color(0xFFFFD6E8), Color(0xFFCFF5D1), Color(0xFFD7E6FF))
+            LabourDay -> listOf(Color(0xFFFFFFFF), Color(0xFFE8FFEF), Color(0xFF5FD38D))
+            Victory, Bastille -> listOf(Color(0xFF2E5BFF), Color.White, Color(0xFFE5243B))
+            MusicDay -> listOf(Color(0xFFB46CFF), Color(0xFF52E5FF), Color(0xFFFF6BD6))
+            Halloween -> listOf(Color(0xFFFF7A1A), Color(0xFF9B5CFF), Color(0xFF7CFF6B))
+            Armistice -> listOf(Color(0xFF4A7BFF), Color(0xFF8FB0FF), Color.White)
+            Christmas -> listOf(Color.White, Color(0xFFDDEBFF), Color(0xFFFFE6A8))
+        }
 
     fun isActive(date: LocalDate): Boolean {
         val day = MonthDay.from(date)
@@ -117,7 +142,7 @@ enum class SeasonalEvent(
     }
 }
 
-/** User choice (on/off, per event, preview) and the theme currently applied. */
+/** User choices and the theme currently applied. */
 object SeasonalThemes {
     private const val PREFS = "nflix_appearance"
     private var context: Context? = null
@@ -128,18 +153,39 @@ object SeasonalThemes {
         private set
     var preview by mutableStateOf<SeasonalEvent?>(null)
         private set
+
+    /** Home hero scene. */
     var particles by mutableStateOf(true)
+        private set
+
+    /** Light effects drawn over every screen. */
+    var everywhere by mutableStateOf(true)
+        private set
+
+    /** Decoration sitting on the navigation bar ("the roof"). */
+    var roof by mutableStateOf(true)
+        private set
+
+    /** Bursts where the screen is touched. */
+    var touch by mutableStateOf(true)
+        private set
+
+    /** 0 discreet, 1 normal, 2 festive. */
+    var intensity by mutableStateOf(1)
+        private set
+
+    /** Event whose intro plays now (once a day). */
+    var intro by mutableStateOf<SeasonalEvent?>(null)
         private set
 
     private var today by mutableStateOf(LocalDate.now())
 
-    /** Read on every accent lookup: cheap, the calendar is only checked when [refreshDate] runs. */
     val active: SeasonalEvent?
         get() = preview ?: if (enabled) SeasonalEvent.activeOn(today, disabled) else null
 
-    /** Called when the app returns to the foreground, so a theme starts or ends on the right day. */
     fun refreshDate() {
         LocalDate.now().takeIf { it != today }?.let { today = it }
+        maybeIntro()
     }
 
     fun init(context: Context) {
@@ -149,363 +195,641 @@ object SeasonalThemes {
         val prefs = prefs() ?: return
         enabled = prefs.getBoolean("seasonal", true)
         particles = prefs.getBoolean("particles", true)
+        everywhere = prefs.getBoolean("everywhere", true)
+        roof = prefs.getBoolean("roof", true)
+        touch = prefs.getBoolean("touch", true)
+        intensity = prefs.getInt("intensity", 1).coerceIn(0, 2)
         disabled = prefs.getStringSet("disabled", emptySet()).orEmpty().toSet()
+        maybeIntro()
     }
 
     private fun prefs() = context?.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
-    fun updateEnabled(value: Boolean) {
-        enabled = value
-        prefs()?.edit { putBoolean("seasonal", value) }
+    private fun maybeIntro() {
+        val event = active ?: return
+        val prefs = prefs() ?: return
+        val key = "intro_" + event.name
+        if (prefs.getString(key, "") == today.toString()) return
+        prefs.edit { putString(key, today.toString()) }
+        intro = event
     }
 
-    fun updateParticles(value: Boolean) {
-        particles = value
-        prefs()?.edit { putBoolean("particles", value) }
-    }
+    fun dismissIntro() { intro = null }
+
+    fun updateEnabled(value: Boolean) { enabled = value; prefs()?.edit { putBoolean("seasonal", value) } }
+    fun updateParticles(value: Boolean) { particles = value; prefs()?.edit { putBoolean("particles", value) } }
+    fun updateEverywhere(value: Boolean) { everywhere = value; prefs()?.edit { putBoolean("everywhere", value) } }
+    fun updateRoof(value: Boolean) { roof = value; prefs()?.edit { putBoolean("roof", value) } }
+    fun updateTouch(value: Boolean) { touch = value; prefs()?.edit { putBoolean("touch", value) } }
+    fun updateIntensity(value: Int) { intensity = value.coerceIn(0, 2); prefs()?.edit { putInt("intensity", intensity) } }
 
     fun setEventEnabled(event: SeasonalEvent, value: Boolean) {
         disabled = if (value) disabled - event.name else disabled + event.name
         prefs()?.edit { putStringSet("disabled", disabled) }
     }
 
-    /** Preview is session-only: the app returns to the calendar on next launch. */
+    /** Session-only preview; plays the intro so the whole theme can be seen. */
     fun preview(event: SeasonalEvent?) {
         preview = event
+        intro = event
     }
 }
 
+// ---- Shared clock and touches ---------------------------------------------------------------
+
+@Composable
+private fun rememberSceneTime(key: Any?): Float {
+    val time by produceState(0f, key) {
+        val start = withFrameMillis { it }
+        while (true) value = withFrameMillis { (it - start) / 1000f }
+    }
+    return time
+}
+
+internal class Tap(val at: Offset, val start: Long, val seed: Int)
+
+/** Taps anywhere (seen before the app handles them, never consumed). */
+object SeasonalTaps {
+    internal val taps = mutableStateListOf<Tap>()
+    private var counter = 0
+
+    internal fun add(at: Offset) {
+        if (taps.size >= 6) taps.removeAt(0)
+        taps.add(Tap(at, System.nanoTime(), counter++))
+    }
+}
+
+/** Put on the root: records taps for the touch bursts without stealing them. */
+fun Modifier.seasonalTouches(): Modifier = pointerInput(Unit) {
+    awaitPointerEventScope {
+        while (true) {
+            val event = awaitPointerEvent(PointerEventPass.Initial)
+            if (SeasonalThemes.active == null || !SeasonalThemes.touch) continue
+            event.changes.firstOrNull { it.changedToDownIgnoreConsumed() }?.let { SeasonalTaps.add(it.position) }
+        }
+    }
+}
+
+// ---- Seeds ----------------------------------------------------------------------------------
+
+private class Seed(index: Int, salt: Int) {
+    private val r = java.util.Random(index * 7919L + salt * 104729L)
+    val x = r.nextFloat()
+    val phase = r.nextFloat()
+    val depth = listOf(0.45f, 0.8f, 1.3f)[index % 3]
+    val speed = (0.035f + r.nextFloat() * 0.06f) * depth
+    val size = (0.6f + r.nextFloat() * 0.8f) * depth
+    val alpha = 0.3f + 0.7f * ((depth - 0.45f) / 0.85f)
+    val sway = r.nextFloat() * 2f * PI.toFloat()
+    val spin = (r.nextFloat() - 0.5f) * 540f
+    val color = r.nextInt(3)
+    val angle = r.nextFloat() * 2f * PI.toFloat()
+    val power = 0.5f + r.nextFloat()
+}
+
+// ---- Scenes ---------------------------------------------------------------------------------
+
 /**
- * Festive scene: three depth layers of particles plus an ambient effect per event
- * (Christmas lights, Halloween fog and lightning, fireworks, equalizer…) and a one-shot burst when it appears.
- * Draws only; never consumes touches. [intensity] scales density (1 = home hero).
+ * Rich festive scene (home hero, previews): depth-layered particles, an ambient backdrop and a
+ * foreground effect per event. Draws only; never takes touches.
  */
 @Composable
 fun SeasonalParticles(modifier: Modifier = Modifier, intensity: Float = 1f) {
     val event = SeasonalThemes.active ?: return
     if (!SeasonalThemes.particles) return
-    val count = (54 * intensity).toInt().coerceAtLeast(8)
-    val seeds = remember(event, count) { List(count) { i -> ParticleSeed(i, event) } }
-    val burst = remember(event) { List(40) { i -> ParticleSeed(1000 + i, event) } }
-    val time by produceState(0f, event) {
-        val start = withFrameMillis { it }
-        while (true) value = withFrameMillis { (it - start) / 1000f }
-    }
+    SeasonalScene(event, modifier, intensity * (0.6f + 0.4f * SeasonalThemes.intensity))
+}
+
+@Composable
+fun SeasonalScene(event: SeasonalEvent, modifier: Modifier = Modifier, intensity: Float = 1f, ambient: Boolean = true) {
+    val count = (46 * intensity).toInt().coerceIn(6, 90)
+    val seeds = remember(event, count) { List(count) { Seed(it, event.ordinal) } }
+    val burst = remember(event) { List(36) { Seed(1000 + it, event.ordinal) } }
+    val time = rememberSceneTime(event)
     val paint = remember { android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { textAlign = android.graphics.Paint.Align.CENTER } }
     Canvas(modifier) {
-        drawAmbientBack(event, time)
-        seeds.forEach { seed -> drawParticle(event.particle, seed, time, event, paint) }
-        if (event.particle == Particle.Fireworks || event == SeasonalEvent.NewYear) {
-            // Extra fireworks layer on top of confetti for New Year.
-            if (event == SeasonalEvent.NewYear) seeds.take(8).forEach { drawFirework(it, time, event) }
-        }
-        drawAmbientFront(event, time)
-        if (time < 2.4f) drawBurst(burst, time, event)
+        if (ambient) drawBackdrop(event, time)
+        seeds.forEach { drawParticle(event, it, time, paint) }
+        if (event == SeasonalEvent.NewYear || event == SeasonalEvent.Bastille) seeds.take(if (event == SeasonalEvent.Bastille) 10 else 6).forEach { drawFirework(event, it, time) }
+        if (ambient) drawForeground(event, time)
+        if (time < 2.4f) drawOpeningBurst(event, burst, time)
     }
 }
 
-private class ParticleSeed(index: Int, event: SeasonalEvent) {
-    private val random = java.util.Random(index * 7919L + event.ordinal)
-    val x = random.nextFloat()
-    val phase = random.nextFloat()
-
-    /** 0.45 = far (small, slow, faint) … 1.35 = near (big, fast, bright). */
-    val depth = listOf(0.45f, 0.8f, 1.35f)[index % 3]
-    val speed = (0.04f + random.nextFloat() * 0.07f) * depth
-    val size = (0.6f + random.nextFloat() * 0.8f) * depth
-    val alpha = 0.35f + 0.65f * ((depth - 0.45f) / 0.9f)
-    val sway = random.nextFloat() * 2f * PI.toFloat()
-    val spin = (random.nextFloat() - 0.5f) * 540f
-    val palette = random.nextInt(3)
-    val angle = random.nextFloat() * 2f * PI.toFloat()
-    val power = 0.5f + random.nextFloat()
+/** Light layer over every screen: aurora at the top, a few particles, and the touch bursts. */
+@Composable
+fun SeasonalOverlay(modifier: Modifier = Modifier) {
+    val event = SeasonalThemes.active ?: return
+    if (!SeasonalThemes.everywhere && !SeasonalThemes.touch) return
+    val count = listOf(8, 16, 28)[SeasonalThemes.intensity]
+    val seeds = remember(event, count) { List(count) { Seed(500 + it, event.ordinal) } }
+    val sparks = remember(event) { List(18) { Seed(2000 + it, event.ordinal) } }
+    val time = rememberSceneTime(event)
+    val paint = remember { android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { textAlign = android.graphics.Paint.Align.CENTER } }
+    Canvas(modifier) {
+        if (SeasonalThemes.everywhere) {
+            drawAurora(event, time)
+            seeds.forEach { drawParticle(event, it, time, paint, faint = true) }
+        }
+        val now = System.nanoTime()
+        SeasonalTaps.taps.forEach { tap ->
+            val age = (now - tap.start) / 1e9f
+            if (age < 1.3f) drawTapBurst(event, tap.at, age, sparks, tap.seed, paint)
+        }
+    }
 }
 
-private val confetti = listOf(Color(0xFFFFC94A), Color(0xFFFF4F8B), Color(0xFF6CB6FF))
-private val tricolore = listOf(Color(0xFF2E5BFF), Color.White, Color(0xFFE5243B))
-private val pastel = listOf(Color(0xFFFFD6E8), Color(0xFFCFF5D1), Color(0xFFD7E6FF))
-private val bulbs = listOf(Color(0xFFFF3B3B), Color(0xFFFFD54A), Color(0xFF38E07B), Color(0xFF4FA8FF))
+/** Top-of-screen glow that breathes in the event colours. */
+private fun DrawScope.drawAurora(event: SeasonalEvent, time: Float) {
+    val w = size.width
+    val h = 150.dp.toPx()
+    val shift = sin(time * 0.35f) * 0.25f
+    val a = 0.20f + 0.06f * sin(time * 0.9f)
+    drawRect(
+        Brush.radialGradient(
+            listOf(event.accent.copy(alpha = a), event.deep.copy(alpha = a * 0.5f), Color.Transparent),
+            center = Offset(w * (0.3f + shift), 0f), radius = w * 0.8f,
+        ),
+        size = Size(w, h),
+    )
+    drawRect(
+        Brush.radialGradient(
+            listOf(event.palette[1].copy(alpha = a * 0.6f), Color.Transparent),
+            center = Offset(w * (0.8f - shift), -h * 0.2f), radius = w * 0.55f,
+        ),
+        size = Size(w, h),
+    )
+}
 
-private fun DrawScope.drawParticle(type: Particle, seed: ParticleSeed, time: Float, event: SeasonalEvent, paint: android.graphics.Paint) {
+private fun DrawScope.drawParticle(event: SeasonalEvent, s: Seed, time: Float, paint: android.graphics.Paint, faint: Boolean = false) {
     val w = size.width
     val h = size.height
-    val progress = (seed.phase + time * seed.speed) % 1f
-    val sway = sin(time * 1.4f + seed.sway) * 22f * seed.depth
-    val x = seed.x * w + sway
-    val falling = Offset(x, -20f + progress * (h + 40f))
-    val rising = Offset(x, h + 20f - progress * (h + 40f))
-    val fade = (seed.alpha * (1f - progress * 0.6f)).coerceIn(0f, 1f)
-    val unit = 6.dp.toPx() * seed.size
-    when (type) {
+    val d = density
+    val fade = if (faint) 0.55f else 1f
+    val color = event.palette[s.color]
+    when (event.particle) {
         Particle.Snow -> {
-            drawCircle(Color.White.copy(alpha = fade * 0.25f), unit * 1.2f, falling)
-            drawCircle(Color.White.copy(alpha = fade), unit * 0.55f, falling)
-        }
-        Particle.Confetti, Particle.Tricolore -> {
-            val color = (if (type == Particle.Tricolore) tricolore else confetti)[seed.palette]
-            // Flip effect: width oscillates like paper turning in the air.
-            val flip = kotlin.math.abs(cos(time * 3f + seed.sway))
-            rotate(time * seed.spin + seed.sway * 57f, falling) {
-                drawRect(color.copy(alpha = fade), Offset(falling.x - unit / 2 * flip, falling.y - unit / 4), Size(unit * flip.coerceAtLeast(0.15f), unit / 2))
+            val y = ((s.phase + time * s.speed) % 1.15f - 0.08f) * h
+            val x = (s.x * w + sin(time * 0.8f + s.sway) * 18f * d * s.depth)
+            if (s.depth < 0.6f) {
+                // Far flakes: soft bokeh.
+                drawCircle(Brush.radialGradient(listOf(Color.White.copy(alpha = 0.55f * fade), Color.Transparent), Offset(x, y), 5f * d * s.size), 5f * d * s.size, Offset(x, y))
+            } else {
+                val r = 4.2f * d * s.size
+                rotate(time * s.spin * 0.3f, Offset(x, y)) {
+                    for (k in 0 until 6) {
+                        val ang = k * PI.toFloat() / 3f
+                        val end = Offset(x + cos(ang) * r, y + sin(ang) * r)
+                        drawLine(color.copy(alpha = s.alpha * fade), Offset(x, y), end, strokeWidth = 1.1f * d, cap = StrokeCap.Round)
+                        val mid = Offset(x + cos(ang) * r * 0.55f, y + sin(ang) * r * 0.55f)
+                        drawLine(color.copy(alpha = s.alpha * fade * 0.8f), mid, Offset(mid.x + cos(ang + 0.7f) * r * 0.3f, mid.y + sin(ang + 0.7f) * r * 0.3f), strokeWidth = 0.9f * d)
+                        drawLine(color.copy(alpha = s.alpha * fade * 0.8f), mid, Offset(mid.x + cos(ang - 0.7f) * r * 0.3f, mid.y + sin(ang - 0.7f) * r * 0.3f), strokeWidth = 0.9f * d)
+                    }
+                }
             }
         }
-        Particle.Petals -> {
-            val color = if (event == SeasonalEvent.Armistice) Color(0xFF6E95FF) else Color.White
-            rotate(sin(time + seed.sway) * 50f, falling) {
-                drawOval(color.copy(alpha = fade), Offset(falling.x - unit / 2, falling.y - unit / 3), Size(unit, unit * 0.66f))
-                drawOval(color.copy(alpha = fade * 0.6f), Offset(falling.x - unit / 3, falling.y), Size(unit * 0.66f, unit * 0.5f))
+        Particle.Confetti -> {
+            val y = ((s.phase + time * s.speed * 1.4f) % 1.15f - 0.08f) * h
+            val x = s.x * w + sin(time * 1.6f + s.sway) * 24f * d
+            val flip = cos(time * 5f * s.power + s.sway)
+            rotate(time * s.spin, Offset(x, y)) {
+                drawRect(color.copy(alpha = s.alpha * fade), Offset(x - 3.5f * d * s.size * abs(flip), y - 2f * d * s.size), Size(7f * d * s.size * abs(flip) + 0.5f, 4f * d * s.size))
             }
-        }
-        Particle.Eggs -> rotate(sin(time * 2f + seed.sway) * 25f, falling) {
-            val egg = pastel[seed.palette].copy(alpha = fade)
-            drawOval(egg, Offset(falling.x - unit / 2, falling.y - unit * 0.65f), Size(unit, unit * 1.3f))
-            drawRect(Color.White.copy(alpha = fade * 0.7f), Offset(falling.x - unit / 2, falling.y - unit * 0.08f), Size(unit, unit * 0.16f))
-        }
-        Particle.Hearts -> {
-            val beat = 1f + 0.12f * sin(time * 6f + seed.sway)
-            drawHeart(rising, unit * 1.1f * beat, event.accent.copy(alpha = fade))
         }
         Particle.Bats -> {
-            val flight = Offset((seed.x * w + time * 60f * seed.depth) % (w + 80f) - 40f, seed.phase * h * 0.75f + sin(time * 2f + seed.sway) * 18f)
-            drawBat(flight, unit * 1.7f, sin(time * 14f + seed.sway), if (seed.palette == 0) event.accent.copy(alpha = 0.75f * seed.alpha) else Color(0xFF12051C).copy(alpha = 0.9f * seed.alpha))
+            val lane = s.phase * h * 0.75f + h * 0.05f
+            val x = ((s.x + time * s.speed * 0.9f) % 1.3f - 0.15f) * w
+            val y = lane + sin(time * 2.2f + s.sway) * 20f * d
+            drawBat(Offset(x, y), 12f * d * s.size, (sin(time * 12f * s.power + s.sway) + 1f) / 2f, Color(0xFF14081F).copy(alpha = 0.85f * fade))
+            if (s.depth > 1f) drawCircle(event.accent.copy(alpha = 0.10f * fade), 18f * d * s.size, Offset(x, y))
+        }
+        Particle.Hearts -> {
+            val y = (1.1f - (s.phase + time * s.speed) % 1.2f) * h
+            val x = s.x * w + sin(time * 1.2f + s.sway) * 22f * d
+            val pulse = 1f + 0.12f * sin(time * 6f + s.sway)
+            drawHeart(Offset(x, y), 9f * d * s.size * pulse, color.copy(alpha = s.alpha * fade))
+        }
+        Particle.Fireworks -> {
+            // Glitter falling between the rockets.
+            val y = ((s.phase + time * s.speed * 0.6f) % 1.1f) * h
+            val x = s.x * w + sin(time + s.sway) * 10f * d
+            val tw = 0.5f + 0.5f * sin(time * 8f + s.sway)
+            drawCircle(color.copy(alpha = s.alpha * tw * fade * 0.8f), 1.6f * d * s.size, Offset(x, y))
+        }
+        Particle.Petals -> {
+            val y = ((s.phase + time * s.speed) % 1.15f - 0.08f) * h
+            val x = s.x * w + sin(time * 0.9f + s.sway) * 34f * d
+            rotate(time * s.spin * 0.5f + sin(time + s.sway) * 40f, Offset(x, y)) {
+                drawOval(color.copy(alpha = s.alpha * fade), Offset(x - 4f * d * s.size, y - 2.4f * d * s.size), Size(8f * d * s.size, 4.8f * d * s.size))
+            }
         }
         Particle.Notes -> {
-            paint.color = android.graphics.Color.argb((255 * fade).toInt(), 214, 176, 255)
-            paint.textSize = unit * 3.2f
-            rotate(sin(time * 2f + seed.sway) * 20f, rising) {
-                drawContext.canvas.nativeCanvas.drawText(if (seed.palette == 0) "♪" else "♫", rising.x, rising.y, paint)
+            val y = (1.1f - (s.phase + time * s.speed) % 1.2f) * h
+            val x = s.x * w + sin(time * 1.8f + s.sway) * 18f * d
+            paint.color = android.graphics.Color.argb((255 * s.alpha * fade).toInt(), (color.red * 255).toInt(), (color.green * 255).toInt(), (color.blue * 255).toInt())
+            paint.textSize = 16f * d * s.size
+            rotate(sin(time * 2f + s.sway) * 18f, Offset(x, y)) { drawContext.canvas.nativeCanvas.drawText(if (s.color == 0) "♪" else "♫", x, y, paint) }
+        }
+        Particle.Eggs -> {
+            val y = ((s.phase + time * s.speed * 0.8f) % 1.15f - 0.08f) * h
+            val x = s.x * w + sin(time * 0.9f + s.sway) * 16f * d
+            val ew = 7f * d * s.size
+            rotate(sin(time * 2f + s.sway) * 25f, Offset(x, y)) {
+                drawOval(color.copy(alpha = s.alpha * fade), Offset(x - ew, y - ew * 1.3f), Size(ew * 2, ew * 2.6f))
+                drawLine(event.palette[(s.color + 1) % 3].copy(alpha = s.alpha * fade), Offset(x - ew * 0.9f, y), Offset(x + ew * 0.9f, y), strokeWidth = 2f * d)
             }
         }
-        Particle.Fireworks -> drawFirework(seed, time, event)
+        Particle.Tricolore -> {
+            val y = ((s.phase + time * s.speed) % 1.15f - 0.08f) * h
+            val x = s.x * w + sin(time * 1.1f + s.sway) * 26f * d
+            val ribbon = Path()
+            val len = 18f * d * s.size
+            ribbon.moveTo(x, y)
+            for (k in 1..6) {
+                val t = k / 6f
+                ribbon.lineTo(x + sin(time * 4f + t * 5f + s.sway) * 4f * d, y + t * len)
+            }
+            drawPath(ribbon, color.copy(alpha = s.alpha * fade), style = Stroke(width = 3f * d * s.size, cap = StrokeCap.Round))
+        }
     }
 }
 
-/** A rocket climbs, then bursts into a ring of sparks that fall and fade. */
-private fun DrawScope.drawFirework(seed: ParticleSeed, time: Float, event: SeasonalEvent) {
+private fun DrawScope.drawFirework(event: SeasonalEvent, s: Seed, time: Float) {
     val w = size.width
     val h = size.height
-    val cycle = (time * 0.32f + seed.phase) % 1f
-    val target = Offset(seed.x * w, h * (0.12f + seed.sway / (2f * PI.toFloat()) * 0.45f))
-    val colors = if (event == SeasonalEvent.NewYear) confetti else tricolore
-    val color = colors[seed.palette]
-    val unit = 6.dp.toPx()
-    if (cycle < 0.25f) {
-        val climb = cycle / 0.25f
-        val pos = Offset(target.x, h - (h - target.y) * climb)
-        drawCircle(Color.White.copy(alpha = 0.9f), unit * 0.35f, pos)
-        drawLine(color.copy(alpha = 0.5f), pos, Offset(pos.x, pos.y + unit * 5f), strokeWidth = unit * 0.25f)
-    } else {
-        val t = (cycle - 0.25f) / 0.75f
-        val radius = unit * 9f * seed.power * kotlin.math.sqrt(t)
-        val gravity = unit * 4f * t * t
-        repeat(14) { ray ->
-            val angle = ray / 14f * 2f * PI.toFloat() + seed.angle
-            val p = Offset(target.x + cos(angle) * radius, target.y + sin(angle) * radius + gravity)
-            val tail = Offset(target.x + cos(angle) * radius * 0.82f, target.y + sin(angle) * radius * 0.82f + gravity * 0.8f)
-            drawLine(color.copy(alpha = (1f - t) * 0.6f), tail, p, strokeWidth = unit * 0.22f)
-            drawCircle(color.copy(alpha = (1f - t)), unit * 0.3f, p)
-        }
-        if (t < 0.15f) drawCircle(Color.White.copy(alpha = (0.15f - t) * 3f), unit * 4f, target)
+    val period = 3.2f + s.power
+    val t = (time + s.phase * period) % period
+    val origin = Offset(s.x * w, h * (0.18f + s.phase * 0.35f))
+    val color = event.palette[s.color]
+    if (t < 0.7f) {
+        // Rocket climbing with its trail.
+        val p = t / 0.7f
+        val y = h + (origin.y - h) * FastOutSlowInEasing.transform(p)
+        drawLine(Brush.verticalGradient(listOf(color, Color.Transparent), y, y + 60f * density), Offset(origin.x, y), Offset(origin.x, y + 60f * density), strokeWidth = 2f * density, cap = StrokeCap.Round)
+        return
+    }
+    val p = ((t - 0.7f) / 1.8f).coerceAtMost(1f)
+    if (p >= 1f) return
+    val radius = 70f * density * s.power * FastOutSlowInEasing.transform(p)
+    val alpha = (1f - p)
+    drawCircle(color.copy(alpha = 0.18f * alpha), radius * 0.6f, origin, blendMode = BlendMode.Plus)
+    for (k in 0 until 22) {
+        val ang = k * 2f * PI.toFloat() / 22f + s.angle
+        val gravity = p * p * 40f * density
+        val end = Offset(origin.x + cos(ang) * radius, origin.y + sin(ang) * radius + gravity)
+        val start = Offset(origin.x + cos(ang) * radius * 0.7f, origin.y + sin(ang) * radius * 0.7f + gravity * 0.7f)
+        drawLine(color.copy(alpha = alpha), start, end, strokeWidth = 2f * density, cap = StrokeCap.Round)
+        drawCircle(Color.White.copy(alpha = alpha * 0.9f), 1.4f * density, end)
     }
 }
 
-/** Effects drawn behind particles. */
-private fun DrawScope.drawAmbientBack(event: SeasonalEvent, time: Float) {
+private fun DrawScope.drawBackdrop(event: SeasonalEvent, time: Float) {
     val w = size.width
     val h = size.height
     when (event) {
-        SeasonalEvent.Halloween -> {
-            // Rolling purple fog along the bottom.
-            repeat(3) { layer ->
-                val y = h * (0.72f + 0.08f * layer) + sin(time * 0.6f + layer) * 12f
-                drawOval(
-                    androidx.compose.ui.graphics.Brush.radialGradient(listOf(Color(0xFF6A2A9C).copy(alpha = 0.32f), Color.Transparent)),
-                    Offset(((time * 30f * (layer + 1)) % (w * 1.6f)) - w * 0.6f, y - h * 0.15f),
-                    Size(w * 1.2f, h * 0.3f),
-                )
-            }
-        }
-        SeasonalEvent.Valentine -> {
-            val pulse = 0.18f + 0.1f * sin(time * 2.4f)
-            drawRect(androidx.compose.ui.graphics.Brush.radialGradient(listOf(event.accent.copy(alpha = pulse), Color.Transparent), center = Offset(w / 2, h * 0.35f), radius = w * 0.9f))
-        }
         SeasonalEvent.Christmas -> {
-            // Warm glow from the top, as if lit by the garland.
-            drawRect(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color(0xFFFFB347).copy(alpha = 0.10f + 0.04f * sin(time * 1.5f)), Color.Transparent), endY = h * 0.4f))
-        }
-        else -> Unit
-    }
-}
-
-/** Effects drawn over particles. */
-private fun DrawScope.drawAmbientFront(event: SeasonalEvent, time: Float) {
-    val w = size.width
-    val h = size.height
-    val unit = 6.dp.toPx()
-    when (event) {
-        SeasonalEvent.Christmas, SeasonalEvent.NewYear -> {
-            // Garland of blinking bulbs hanging under the top bar.
-            val top = 64.dp.toPx() + 28.dp.toPx()
-            val count = 13
-            val path = Path()
-            for (i in 0..count) {
-                val x = w * i / count
-                val y = top + sin(i / count.toFloat() * PI.toFloat() * 3f) * 10f + 14f
-                if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
-            }
-            drawPath(path, Color(0xFF1E3A22).copy(alpha = 0.9f), style = androidx.compose.ui.graphics.drawscope.Stroke(width = unit * 0.35f))
-            for (i in 0 until count) {
-                val x = w * (i + 0.5f) / count
-                val y = top + sin((i + 0.5f) / count * PI.toFloat() * 3f) * 10f + 14f + unit * 0.9f
-                val color = if (event == SeasonalEvent.NewYear) confetti[i % 3] else bulbs[i % 4]
-                val on = 0.45f + 0.55f * ((sin(time * 3f + i * 1.7f) + 1f) / 2f)
-                drawCircle(color.copy(alpha = 0.25f * on), unit * 1.6f, Offset(x, y))
-                drawOval(color.copy(alpha = on), Offset(x - unit * 0.45f, y - unit * 0.6f), Size(unit * 0.9f, unit * 1.2f))
+            // Soft bokeh lights in the distance.
+            for (k in 0 until 9) {
+                val x = (k * 0.137f + 0.05f) % 1f * w
+                val y = h * (0.15f + (k * 0.21f) % 0.6f)
+                val c = listOf(Color(0xFFFF3B3B), Color(0xFFFFD54A), Color(0xFF38E07B), Color(0xFF4FA8FF))[k % 4]
+                val a = 0.10f + 0.08f * sin(time * 1.3f + k)
+                drawCircle(Brush.radialGradient(listOf(c.copy(alpha = a), Color.Transparent), Offset(x, y), 46f * density), 46f * density, Offset(x, y))
             }
         }
         SeasonalEvent.Halloween -> {
-            // Lightning: two quick flashes roughly every nine seconds.
-            val t = time % 9f
-            val flash = when {
-                t in 6.0f..6.08f -> 0.35f
-                t in 6.18f..6.24f -> 0.22f
-                else -> 0f
+            // Moon and drifting fog.
+            val moon = Offset(w * 0.82f, h * 0.16f)
+            drawCircle(Brush.radialGradient(listOf(Color(0xFFFFE9B0).copy(alpha = 0.35f), Color.Transparent), moon, 90f * density), 90f * density, moon)
+            drawCircle(Color(0xFFFFF3D1).copy(alpha = 0.55f), 22f * density, moon)
+            for (k in 0 until 3) {
+                val y = h * (0.62f + k * 0.12f)
+                val x = ((time * (0.02f + k * 0.01f) + k * 0.3f) % 1f) * w
+                drawOval(Brush.radialGradient(listOf(Color(0xFF9B5CFF).copy(alpha = 0.10f), Color.Transparent), Offset(x, y), w * 0.5f), Offset(x - w * 0.6f, y - 40f * density), Size(w * 1.2f, 80f * density))
             }
-            if (flash > 0f) drawRect(Color(0xFFE9D9FF).copy(alpha = flash))
         }
         SeasonalEvent.MusicDay -> {
-            // Equalizer at the bottom of the hero.
-            val bars = 28
-            val barWidth = w / bars
-            repeat(bars) { i ->
-                val level = (sin(time * (4f + i % 5) + i * 0.9f) + 1f) / 2f * 0.6f + 0.1f
-                val height = h * 0.12f * level
-                drawRect(event.accent.copy(alpha = 0.35f), Offset(i * barWidth + barWidth * 0.2f, h - height), Size(barWidth * 0.6f, height))
+            // Stage beams sweeping.
+            for (k in 0 until 3) {
+                val base = Offset(w * (0.2f + k * 0.3f), h)
+                val ang = -PI.toFloat() / 2 + sin(time * 0.8f + k * 2f) * 0.5f
+                val tip = Offset(base.x + cos(ang) * h, base.y + sin(ang) * h)
+                val beam = Path().apply {
+                    moveTo(base.x, base.y)
+                    lineTo(tip.x - 60f * density, tip.y)
+                    lineTo(tip.x + 60f * density, tip.y)
+                    close()
+                }
+                drawPath(beam, Brush.verticalGradient(listOf(Color.Transparent, event.palette[k].copy(alpha = 0.14f))))
             }
         }
-        SeasonalEvent.Bastille, SeasonalEvent.Victory, SeasonalEvent.Armistice -> {
-            // Tricolour light sweep crossing the top.
-            val x = ((time * 0.12f) % 1.6f - 0.3f) * w
-            val stripe = w * 0.08f
-            tricolore.forEachIndexed { i, color ->
-                drawRect(color.copy(alpha = 0.10f), Offset(x + i * stripe, 0f), Size(stripe, h * 0.5f))
-            }
-        }
-        else -> Unit
+        else -> drawAurora(event, time)
     }
 }
 
-/** Celebration burst from the logo when a theme appears. */
-private fun DrawScope.drawBurst(seeds: List<ParticleSeed>, time: Float, event: SeasonalEvent) {
+private fun DrawScope.drawForeground(event: SeasonalEvent, time: Float) {
+    val w = size.width
+    val h = size.height
+    when (event) {
+        SeasonalEvent.Christmas -> drawGarland(0f, w, 10f * density, time, sag = 26f * density)
+        SeasonalEvent.Halloween -> {
+            // Rare lightning flash.
+            val cycle = time % 7f
+            if (cycle in 5.0f..5.25f) {
+                val a = (1f - abs(cycle - 5.1f) * 6f).coerceIn(0f, 1f)
+                drawRect(Color.White.copy(alpha = 0.07f * a))
+                val bolt = Path().apply {
+                    moveTo(w * 0.7f, 0f); lineTo(w * 0.64f, h * 0.12f); lineTo(w * 0.69f, h * 0.13f); lineTo(w * 0.6f, h * 0.3f)
+                }
+                drawPath(bolt, Color.White.copy(alpha = 0.6f * a), style = Stroke(2.2f * density))
+            }
+            drawCobweb(Offset(0f, 0f), 70f * density, Color.White.copy(alpha = 0.18f))
+            drawSpider(Offset(w * 0.86f, 0f), (60f + 40f * sin(time * 0.7f)) * density, sin(time * 1.4f) * 8f)
+        }
+        SeasonalEvent.Valentine -> drawRect(Brush.radialGradient(listOf(Color.Transparent, event.accent.copy(alpha = 0.10f)), Offset(w / 2, h / 2), maxOf(w, h) * 0.8f))
+        else -> {}
+    }
+}
+
+private fun DrawScope.drawOpeningBurst(event: SeasonalEvent, seeds: List<Seed>, time: Float) {
     val origin = Offset(96.dp.toPx(), 70.dp.toPx())
-    val t = time / 2.4f
-    val unit = 6.dp.toPx()
-    val colors = when (event.particle) {
-        Particle.Tricolore, Particle.Fireworks -> tricolore
-        Particle.Hearts -> listOf(event.accent, Color(0xFFFF9CC0), Color.White)
-        Particle.Bats -> listOf(event.accent, Color(0xFF9C5BD6), Color(0xFF3A1452))
-        else -> listOf(event.accent, Color.White, event.deep)
+    val p = (time / 2.4f).coerceIn(0f, 1f)
+    seeds.forEach { s ->
+        val dist = 160f * density * s.power * FastOutSlowInEasing.transform(p)
+        val pos = Offset(origin.x + cos(s.angle) * dist, origin.y + sin(s.angle) * dist + p * p * 60f * density)
+        drawCircle(event.palette[s.color].copy(alpha = (1f - p) * 0.9f), 2.6f * density * s.size, pos)
     }
-    seeds.forEach { seed ->
-        val distance = unit * 40f * seed.power * (1f - (1f - t) * (1f - t))
-        val gravity = unit * 18f * t * t
-        val p = Offset(origin.x + cos(seed.angle) * distance, origin.y + sin(seed.angle) * distance * 0.7f + gravity)
-        rotate(seed.spin * t, p) {
-            drawRect(colors[seed.palette].copy(alpha = (1f - t).coerceIn(0f, 1f)), Offset(p.x - unit * 0.4f, p.y - unit * 0.2f), Size(unit * 0.8f, unit * 0.4f))
+}
+
+private fun DrawScope.drawTapBurst(event: SeasonalEvent, at: Offset, age: Float, sparks: List<Seed>, salt: Int, paint: android.graphics.Paint) {
+    val p = (age / 1.3f).coerceIn(0f, 1f)
+    val e = FastOutSlowInEasing.transform(p)
+    // Shock ring.
+    drawCircle(event.accent.copy(alpha = 0.45f * (1f - p)), 10f * density + 50f * density * e, at, style = Stroke(2f * density * (1f - p) + 0.5f))
+    sparks.forEachIndexed { i, s ->
+        val ang = s.angle + salt
+        val dist = 64f * density * s.power * e
+        val pos = Offset(at.x + cos(ang) * dist, at.y + sin(ang) * dist + p * p * 30f * density)
+        val c = event.palette[(s.color + i) % 3].copy(alpha = 1f - p)
+        val sz = 5f * density * s.size * (1f - p * 0.5f)
+        when (event.particle) {
+            Particle.Hearts -> drawHeart(pos, sz * 1.3f, c)
+            Particle.Bats -> drawBat(pos, sz * 1.6f, (sin(age * 30f + i) + 1f) / 2f, Color(0xFF14081F).copy(alpha = 1f - p))
+            Particle.Snow -> drawCircle(c, sz * 0.5f, pos)
+            Particle.Notes -> {
+                paint.color = android.graphics.Color.argb((255 * (1f - p)).toInt(), (c.red * 255).toInt(), (c.green * 255).toInt(), (c.blue * 255).toInt())
+                paint.textSize = sz * 3f
+                drawContext.canvas.nativeCanvas.drawText("♪", pos.x, pos.y, paint)
+            }
+            else -> rotate(age * 400f + i * 30f, pos) { drawRect(c, Offset(pos.x - sz / 2, pos.y - sz / 4), Size(sz, sz / 2)) }
         }
     }
 }
 
-/** Profile sheet: master switch, particles, one switch per event, and a live preview. */
-@OptIn(ExperimentalMaterial3Api::class)
+// ---- The roof: decoration sitting on the navigation bar ------------------------------------
+
+/**
+ * Zero-height strip placed right above the navigation bar: draws upward (and a little downward,
+ * icicles and drips) without taking any space or touch.
+ */
 @Composable
-fun SeasonalThemesSheet(onDismiss: () -> Unit) {
-    val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val today = remember { LocalDate.now() }
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet, containerColor = Nflix.SurfaceHigh) {
-        LazyColumn(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 16.dp)) {
-            item {
-                Column(Modifier.padding(horizontal = 20.dp, vertical = 4.dp)) {
-                    Text("Thèmes saisonniers", style = MaterialTheme.typography.headlineSmall)
-                    Text("Couleurs et animations aux fêtes françaises.", style = MaterialTheme.typography.bodySmall, color = Nflix.Muted)
+fun SeasonalRoof(modifier: Modifier = Modifier) {
+    val event = SeasonalThemes.active
+    if (event == null || !SeasonalThemes.roof) return
+    val time = rememberSceneTime(event)
+    Box(modifier.height(0.dp).drawBehind { drawRoof(event, time) })
+}
+
+private fun DrawScope.drawRoof(event: SeasonalEvent, time: Float) {
+    val w = size.width
+    val d = density
+    when (event) {
+        SeasonalEvent.Christmas -> {
+            // Snow cap with lumps, a blue shade and icicles.
+            val cap = Path().apply {
+                moveTo(0f, 4f * d)
+                var x = 0f
+                while (x <= w) {
+                    val bump = 7f * d + 4f * d * sin(x / (37f * d)) + 3f * d * sin(x / (13f * d) + 1.3f)
+                    lineTo(x, -bump)
+                    x += 6f * d
+                }
+                lineTo(w, 4f * d)
+                close()
+            }
+            drawPath(cap, Brush.verticalGradient(listOf(Color.White, Color(0xFFDCE8FF)), -14f * d, 4f * d))
+            for (k in 0 until (w / (42f * d)).toInt()) {
+                val x = k * 42f * d + 18f * d
+                val len = (6f + (k * 7 % 5) * 2.5f) * d * (0.85f + 0.15f * sin(time * 0.5f + k))
+                val ice = Path().apply { moveTo(x - 3f * d, 3f * d); lineTo(x + 3f * d, 3f * d); lineTo(x, 3f * d + len); close() }
+                drawPath(ice, Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.95f), Color(0xFFBFE3FF).copy(alpha = 0.4f)), 3f * d, 3f * d + len))
+            }
+            drawGarland(0f, w, -16f * d, time, sag = 10f * d, bulbSize = 3.2f)
+        }
+        SeasonalEvent.Halloween -> {
+            for (k in 0 until 3) {
+                val x = w * (0.12f + k * 0.38f)
+                val flicker = 0.75f + 0.25f * sin(time * 9f + k * 2f) * sin(time * 3.3f + k)
+                drawCircle(Brush.radialGradient(listOf(Color(0xFFFF9A2E).copy(alpha = 0.35f * flicker), Color.Transparent), Offset(x, -8f * d), 28f * d), 28f * d, Offset(x, -8f * d))
+                drawOval(Color(0xFFE8650E), Offset(x - 11f * d, -18f * d), Size(22f * d, 17f * d))
+                drawOval(Color(0xFFFF8A2B), Offset(x - 6f * d, -18f * d), Size(12f * d, 17f * d))
+                drawRect(Color(0xFF3B6B1E), Offset(x - 1.5f * d, -22f * d), Size(3f * d, 5f * d))
+                val face = Color(0xFFFFE27A).copy(alpha = flicker)
+                drawCircle(face, 2f * d, Offset(x - 4f * d, -12f * d)); drawCircle(face, 2f * d, Offset(x + 4f * d, -12f * d))
+                drawRect(face, Offset(x - 4.5f * d, -7.5f * d), Size(9f * d, 2f * d))
+            }
+            drawCobweb(Offset(w, 0f), 34f * d, Color.White.copy(alpha = 0.25f), flip = true, up = true)
+        }
+        SeasonalEvent.NewYear -> {
+            val tinsel = Path().apply {
+                moveTo(0f, -4f * d)
+                var x = 0f
+                while (x <= w) { lineTo(x, -4f * d - 3f * d * sin(x / (11f * d) + time * 3f)); x += 4f * d }
+            }
+            drawPath(tinsel, Brush.horizontalGradient(listOf(Color(0xFFFFC94A), Color(0xFFFFF1C2), Color(0xFFFFC94A))), style = Stroke(3f * d))
+            for (k in 0 until 14) {
+                val x = (k * 0.0731f + (time * 0.05f)) % 1f * w
+                val tw = (sin(time * 6f + k * 1.7f) + 1f) / 2f
+                drawCircle(Color.White.copy(alpha = tw), 1.6f * d, Offset(x, -10f * d - (k % 3) * 4f * d))
+            }
+        }
+        SeasonalEvent.Valentine -> drawBunting(w, time, d) { i, c, center, s -> drawHeart(center, s, listOf(Color(0xFFFF4F8B), Color(0xFFFF9EC0))[i % 2]) }
+        SeasonalEvent.Easter, SeasonalEvent.LabourDay -> {
+            for (k in 0 until (w / (5f * d)).toInt()) {
+                val x = k * 5f * d
+                val hgt = (6f + (k * 13 % 7)) * d
+                val bend = sin(time * 1.6f + k * 0.4f) * 3f * d
+                drawLine(Color(0xFF5FB847), Offset(x, 2f * d), Offset(x + bend, 2f * d - hgt), strokeWidth = 1.6f * d, cap = StrokeCap.Round)
+            }
+            for (k in 0 until 5) {
+                val x = w * (0.1f + k * 0.2f)
+                if (event == SeasonalEvent.Easter) {
+                    drawOval(event.palette[k % 3], Offset(x - 5f * d, -13f * d), Size(10f * d, 13f * d))
+                } else {
+                    for (b in 0 until 3) drawCircle(Color.White, 2.6f * d, Offset(x + b * 4f * d, -12f * d + b * 2f * d + sin(time * 2f + k) * d))
                 }
             }
-            item { SwitchRow("Activer les thèmes", "Suit le calendrier automatiquement", SeasonalThemes.enabled, SeasonalThemes::updateEnabled) }
-            item { SwitchRow("Animations décoratives", "Neige, confettis, chauves-souris…", SeasonalThemes.particles, SeasonalThemes::updateParticles) }
-            item {
-                Text(
-                    "Fêtes",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = Nflix.Muted,
-                    modifier = Modifier.padding(start = 20.dp, top = 16.dp, bottom = 4.dp),
-                )
+        }
+        SeasonalEvent.MusicDay -> {
+            val bars = (w / (9f * d)).toInt()
+            for (k in 0 until bars) {
+                val v = (sin(time * 7f + k * 0.7f) * sin(time * 2.3f + k * 0.21f) + 1f) / 2f
+                val hgt = (4f + 18f * v) * d
+                drawRoundRect(Brush.verticalGradient(listOf(event.palette[k % 3], event.accent.copy(alpha = 0.3f)), -hgt, 0f), Offset(k * 9f * d + 1f * d, -hgt), Size(6f * d, hgt), CornerRadius(2f * d))
             }
-            items(SeasonalEvent.entries, key = { it.name }) { event ->
-                val previewing = SeasonalThemes.preview == event
-                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp).clip(RoundedCornerShape(14.dp)).background(if (previewing) event.accent.copy(alpha = 0.16f) else Nflix.Surface).padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(38.dp).clip(CircleShape).background(event.accent.copy(alpha = 0.22f)), contentAlignment = Alignment.Center) { Text(event.emoji) }
-                    Column(Modifier.weight(1f).padding(start = 12.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(event.label, style = MaterialTheme.typography.titleSmall)
-                            if (event.isActive(today)) {
-                                Spacer(Modifier.width(6.dp))
-                                Text("EN COURS", style = MaterialTheme.typography.labelSmall, color = event.accent, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                        Text(event.period, style = MaterialTheme.typography.bodySmall, color = Nflix.Muted)
-                    }
-                    Text(
-                        if (previewing) "Arrêter" else "Aperçu",
-                        color = event.accent,
-                        style = MaterialTheme.typography.labelLarge,
-                        modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { SeasonalThemes.preview(if (previewing) null else event) }.padding(horizontal = 10.dp, vertical = 8.dp),
-                    )
-                    Switch(
-                        checked = event.name !in SeasonalThemes.disabled,
-                        onCheckedChange = { SeasonalThemes.setEventEnabled(event, it) },
-                        enabled = SeasonalThemes.enabled,
-                        colors = SwitchDefaults.colors(checkedTrackColor = event.accent),
-                    )
-                }
-            }
-            item { Spacer(Modifier.height(8.dp)) }
+        }
+        SeasonalEvent.Victory, SeasonalEvent.Bastille, SeasonalEvent.Armistice -> drawBunting(w, time, d) { i, _, center, s ->
+            val c = listOf(Color(0xFF2E5BFF), Color.White, Color(0xFFE5243B))[i % 3]
+            val flag = Path().apply { moveTo(center.x - s, center.y - s); lineTo(center.x + s, center.y - s); lineTo(center.x, center.y + s * 1.2f); close() }
+            drawPath(flag, c)
         }
     }
 }
 
-@Composable
-private fun SwitchRow(title: String, subtitle: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable { onChange(!checked) }.padding(horizontal = 20.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-        Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.titleSmall)
-            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = Nflix.Muted)
+/** Rope along the roof with little pennants swaying. */
+private fun DrawScope.drawBunting(w: Float, time: Float, d: Float, item: DrawScope.(Int, Color, Offset, Float) -> Unit) {
+    val step = 30f * d
+    val count = (w / step).toInt() + 1
+    val rope = Path().apply { moveTo(0f, -16f * d) }
+    for (k in 0..count) {
+        val x = k * step
+        rope.quadraticTo(x - step / 2, -16f * d + 7f * d, x, -16f * d)
+    }
+    drawPath(rope, Color.White.copy(alpha = 0.5f), style = Stroke(1f * d))
+    for (k in 0 until count) {
+        val x = k * step + step / 2
+        val swing = sin(time * 2f + k * 0.8f) * 8f
+        rotate(swing, Offset(x, -12f * d)) { item(k, Color.White, Offset(x, -5f * d), 6f * d) }
+    }
+}
+
+private fun DrawScope.drawGarland(from: Float, to: Float, y: Float, time: Float, sag: Float, bulbSize: Float = 4f) {
+    val colors = listOf(Color(0xFFFF3B3B), Color(0xFFFFD54A), Color(0xFF38E07B), Color(0xFF4FA8FF))
+    val span = 120f * density
+    var x = from
+    var index = 0
+    while (x < to) {
+        val wire = Path().apply { moveTo(x, y); quadraticTo(x + span / 2, y + sag * 2f, x + span, y) }
+        drawPath(wire, Color(0xFF1E3B22), style = Stroke(1.4f * density))
+        for (k in 1..5) {
+            val t = k / 6f
+            val bx = x + span * t
+            val by = y + sag * 2f * 2f * t * (1f - t)
+            val c = colors[(index + k) % 4]
+            val on = 0.55f + 0.45f * sin(time * 3f + (index + k) * 1.9f)
+            drawCircle(Brush.radialGradient(listOf(c.copy(alpha = 0.45f * on), Color.Transparent), Offset(bx, by + 3f * density), 12f * density), 12f * density, Offset(bx, by + 3f * density))
+            drawOval(c.copy(alpha = 0.6f + 0.4f * on), Offset(bx - bulbSize * density * 0.7f, by), Size(bulbSize * density * 1.4f, bulbSize * density * 2f))
         }
-        Switch(checked = checked, onCheckedChange = onChange, colors = SwitchDefaults.colors(checkedTrackColor = Nflix.Red))
+        x += span
+        index += 5
+    }
+}
+
+private fun DrawScope.drawCobweb(corner: Offset, r: Float, color: Color, flip: Boolean = false, up: Boolean = false) {
+    val sx = if (flip) -1f else 1f
+    val sy = if (up) -1f else 1f
+    for (k in 0..4) {
+        val ang = k * (PI.toFloat() / 2f) / 4f
+        drawLine(color, corner, Offset(corner.x + sx * cos(ang) * r, corner.y + sy * sin(ang) * r), strokeWidth = 0.8f * density)
+    }
+    for (ring in 1..3) {
+        val rr = r * ring / 3.5f
+        val web = Path()
+        for (k in 0..4) {
+            val ang = k * (PI.toFloat() / 2f) / 4f
+            val p = Offset(corner.x + sx * cos(ang) * rr, corner.y + sy * sin(ang) * rr)
+            if (k == 0) web.moveTo(p.x, p.y) else web.quadraticTo(corner.x + sx * cos(ang - 0.2f) * rr * 0.8f, corner.y + sy * sin(ang - 0.2f) * rr * 0.8f, p.x, p.y)
+        }
+        drawPath(web, color, style = Stroke(0.8f * density))
+    }
+}
+
+private fun DrawScope.drawSpider(anchor: Offset, drop: Float, swing: Float) {
+    rotate(swing, anchor) {
+        val body = Offset(anchor.x, anchor.y + drop)
+        drawLine(Color.White.copy(alpha = 0.35f), anchor, body, strokeWidth = 0.8f * density)
+        for (k in 0 until 4) {
+            val a = 0.5f + k * 0.35f
+            drawLine(Color(0xFF14081F), body, Offset(body.x - cos(a) * 9f * density, body.y + sin(a) * 6f * density - 3f * density), strokeWidth = 1.3f * density)
+            drawLine(Color(0xFF14081F), body, Offset(body.x + cos(a) * 9f * density, body.y + sin(a) * 6f * density - 3f * density), strokeWidth = 1.3f * density)
+        }
+        drawCircle(Color(0xFF14081F), 4.5f * density, body)
+        drawCircle(Color(0xFFFF4040), 0.9f * density, Offset(body.x - 1.5f * density, body.y + 1.5f * density))
+        drawCircle(Color(0xFFFF4040), 0.9f * density, Offset(body.x + 1.5f * density, body.y + 1.5f * density))
     }
 }
 
 private fun DrawScope.drawHeart(center: Offset, size: Float, color: Color) {
     val path = Path().apply {
         moveTo(center.x, center.y + size * 0.35f)
-        cubicTo(center.x - size, center.y - size * 0.3f, center.x - size * 0.4f, center.y - size, center.x, center.y - size * 0.4f)
-        cubicTo(center.x + size * 0.4f, center.y - size, center.x + size, center.y - size * 0.3f, center.x, center.y + size * 0.35f)
+        cubicTo(center.x - size, center.y - size * 0.4f, center.x - size * 0.4f, center.y - size, center.x, center.y - size * 0.35f)
+        cubicTo(center.x + size * 0.4f, center.y - size, center.x + size, center.y - size * 0.4f, center.x, center.y + size * 0.35f)
         close()
     }
     drawPath(path, color)
 }
 
 private fun DrawScope.drawBat(center: Offset, size: Float, flap: Float, color: Color) {
-    val wing = size * (0.35f + 0.25f * flap)
+    val wing = size * (0.35f + 0.45f * flap)
     val path = Path().apply {
         moveTo(center.x, center.y)
-        quadraticTo(center.x - size * 0.5f, center.y - wing, center.x - size, center.y - wing * 0.2f)
-        quadraticTo(center.x - size * 0.55f, center.y + size * 0.05f, center.x, center.y + size * 0.2f)
-        quadraticTo(center.x + size * 0.55f, center.y + size * 0.05f, center.x + size, center.y - wing * 0.2f)
+        quadraticTo(center.x - size * 0.5f, center.y - wing, center.x - size, center.y - wing * 0.3f)
+        quadraticTo(center.x - size * 0.7f, center.y + size * 0.05f, center.x - size * 0.45f, center.y + size * 0.1f)
+        quadraticTo(center.x - size * 0.2f, center.y, center.x, center.y + size * 0.2f)
+        quadraticTo(center.x + size * 0.2f, center.y, center.x + size * 0.45f, center.y + size * 0.1f)
+        quadraticTo(center.x + size * 0.7f, center.y + size * 0.05f, center.x + size, center.y - wing * 0.3f)
         quadraticTo(center.x + size * 0.5f, center.y - wing, center.x, center.y)
         close()
     }
     drawPath(path, color)
-    // Glowing eyes.
-    drawCircle(Color(0xFFFFD54A).copy(alpha = color.alpha), size * 0.05f, Offset(center.x - size * 0.06f, center.y + size * 0.05f))
-    drawCircle(Color(0xFFFFD54A).copy(alpha = color.alpha), size * 0.05f, Offset(center.x + size * 0.06f, center.y + size * 0.05f))
+}
+
+// ---- Intro ---------------------------------------------------------------------------------
+
+/** Full-screen welcome, once a day per event (and on preview): emoji pop, shock rings, greeting. */
+@Composable
+fun SeasonalIntro() {
+    val event = SeasonalThemes.intro ?: return
+    val progress = remember(event) { Animatable(0f) }
+    val pop = remember(event) { Animatable(0f) }
+    LaunchedEffect(event) {
+        launch { pop.animateTo(1f, spring(dampingRatio = 0.42f, stiffness = 180f)) }
+        progress.animateTo(1f, tween(2800))
+        SeasonalThemes.dismissIntro()
+    }
+    val p = progress.value
+    val fadeOut = if (p > 0.82f) (1f - (p - 0.82f) / 0.18f) else 1f
+    Box(
+        Modifier.fillMaxSize()
+            .graphicsLayer { alpha = fadeOut.coerceIn(0f, 1f) }
+            .background(Brush.radialGradient(listOf(event.deep.copy(alpha = 0.75f), Color.Black.copy(alpha = 0.82f))))
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { SeasonalThemes.dismissIntro() },
+        contentAlignment = Alignment.Center,
+    ) {
+        SeasonalScene(event, Modifier.fillMaxSize(), intensity = 1.2f, ambient = false)
+        Canvas(Modifier.fillMaxSize()) {
+            val c = Offset(size.width / 2, size.height / 2 - 40.dp.toPx())
+            for (k in 0 until 3) {
+                val rp = ((p * 1.6f) - k * 0.18f).coerceIn(0f, 1f)
+                if (rp > 0f) drawCircle(event.accent.copy(alpha = 0.6f * (1f - rp)), 40.dp.toPx() + rp * size.width * 0.6f, c, style = Stroke((6f * (1f - rp) + 1f) * density))
+            }
+        }
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(event.emoji, fontSize = 96.sp, modifier = Modifier.graphicsLayer {
+                val s = pop.value
+                scaleX = s; scaleY = s
+                rotationZ = (1f - s) * -40f + sin(p * 12f) * 4f
+            })
+            Spacer(Modifier.height(18.dp))
+            val letters = event.greeting
+            val shown = (letters.length * (p / 0.45f)).toInt().coerceIn(0, letters.length)
+            Text(
+                letters.substring(0, shown),
+                color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 32.dp),
+            )
+            Spacer(Modifier.height(10.dp))
+            Box(Modifier.size(width = (160f * (p / 0.5f).coerceAtMost(1f)).dp, height = 3.dp).clip(CircleShape).background(Brush.horizontalGradient(event.palette)))
+        }
+    }
 }

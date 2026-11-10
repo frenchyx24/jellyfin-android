@@ -151,7 +151,7 @@ fun NflixRoot(deps: AppDeps, navigator: Navigator, backEnabled: Boolean = true) 
 
     CompositionLocalProvider(LocalDeps provides deps, LocalNavigator provides navigator) {
         BackHandler(enabled = backEnabled && (navigator.stack.size > 1 || navigator.current != Route.Home)) { navigator.back() }
-        Box(Modifier.fillMaxSize().background(Nflix.Night)) {
+        Box(Modifier.fillMaxSize().background(Nflix.Night).seasonalTouches()) {
             // While the tutorial covers the app, screen readers only see the tutorial.
             val hiddenUnderTutorial = if (Tutorial.covering) Modifier.clearAndSetSemantics { } else Modifier
             SharedTransitionLayout(Modifier.fillMaxSize().then(hiddenUnderTutorial)) {
@@ -184,7 +184,10 @@ fun NflixRoot(deps: AppDeps, navigator: Navigator, backEnabled: Boolean = true) 
             }
 
             val showChrome = navigator.current != Route.NowPlaying && navigator.current !is Route.Reader
+            // Festive light layer over every screen (draws only, never takes touches).
+            if (navigator.current !is Route.Reader) SeasonalOverlay(Modifier.fillMaxSize())
             Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().then(hiddenUnderTutorial)) {
+                if (showChrome) SeasonalRoof(Modifier.fillMaxWidth())
                 CastRemoteBar(deps.cast, onExpand = { castRemoteOpen.value = true })
                 AnimatedVisibility(
                     visible = showChrome && music.current != null,
@@ -208,6 +211,7 @@ fun NflixRoot(deps: AppDeps, navigator: Navigator, backEnabled: Boolean = true) 
             if (castRemoteOpen.value) CastRemoteSheet(deps.cast) { castRemoteOpen.value = false }
             TrailerHost()
             TutorialHost(backEnabled = backEnabled)
+            if (!Tutorial.covering) SeasonalIntro()
         }
     }
 }
@@ -246,6 +250,8 @@ private fun Screen(route: Route) {
         Route.AdminActivity -> org.jellyfin.mobile.nflix.ui.screens.AdminActivityScreen()
         Route.AdminButler -> org.jellyfin.mobile.nflix.ui.screens.ButlerScreen()
         Route.SyncAccounts -> org.jellyfin.mobile.nflix.ui.screens.SyncAccountsScreen()
+        Route.Settings -> org.jellyfin.mobile.nflix.ui.screens.SettingsScreen()
+        Route.SeasonalSettings -> org.jellyfin.mobile.nflix.ui.screens.SeasonalSettingsScreen()
         is Route.YtArtist -> org.jellyfin.mobile.nflix.ui.screens.OnlineArtistScreen(null, route.name)
         is Route.OnlineArtist -> org.jellyfin.mobile.nflix.ui.screens.OnlineArtistScreen(route.id, route.name)
         is Route.OnlineAlbum -> org.jellyfin.mobile.nflix.ui.screens.OnlineAlbumScreen(route.id)
