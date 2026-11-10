@@ -164,12 +164,14 @@ fun ProfileScreen() {
 
     val spaceEntries = buildList {
         if (isAdmin) add(ProfileEntry("admin", Icons.Rounded.AdminPanelSettings, "Administration", "Distributeurs, demandes à valider, activité, bibliothèques", ProfileAccents.Admin) { navigator.open(Route.Admin) })
-        add(ProfileEntry("badges", Icons.Rounded.EmojiEvents, "Mes succès", "Badges, rang, progression et vitrine", ProfileAccents.Badges) { navigator.open(Route.Badges) })
-        add(ProfileEntry("downloads", Icons.Rounded.Download, "Téléchargements", "Vos films et épisodes hors ligne", ProfileAccents.Downloads) { deps.openDownloads() })
-        add(ProfileEntry("horus", Icons.Rounded.Inbox, "Mes demandes Horus", "Suivi de vos demandes", ProfileAccents.Horus) { navigator.open(Route.HorusRequests) })
-        add(ProfileEntry("sync", Icons.Rounded.SyncAlt, "Comptes liés", "Deezer et Spotify : playlists importées et envoyées", ProfileAccents.Mira) { navigator.open(Route.SyncAccounts) })
+        add(ProfileEntry("sync", Icons.Rounded.SyncAlt, "Comptes et playlists", "Importer vos playlists musicales", ProfileAccents.Mira) { navigator.open(Route.SyncAccounts) })
         add(ProfileEntry("releases", Icons.Rounded.CalendarMonth, "Prochaines sorties", "Calendrier des épisodes et films à venir", ProfileAccents.Releases) { navigator.open(Route.Releases) })
     }
+    val shortcuts = listOf(
+        ProfileEntry("badges", Icons.Rounded.EmojiEvents, "Succès", null, ProfileAccents.Badges) { navigator.open(Route.Badges) },
+        ProfileEntry("downloads", Icons.Rounded.Download, "Hors ligne", null, ProfileAccents.Downloads) { deps.openDownloads() },
+        ProfileEntry("horus", Icons.Rounded.Inbox, "Demandes", null, ProfileAccents.Horus) { navigator.open(Route.HorusRequests) },
+    )
     val newsEntries = listOf(
         ProfileEntry("alerts", Icons.Rounded.NotificationsActive, "Notifications", "Demandes Horus, séries suivies, succès", ProfileAccents.Alerts) { navigator.open(Route.AlertSettings) },
         ProfileEntry("notices", Icons.Rounded.Campaign, "Annonces", "Les nouvelles de Nflix", ProfileAccents.Notices) { navigator.open(Route.Notices) },
@@ -212,6 +214,7 @@ fun ProfileScreen() {
                     modifier = Modifier.staggerIn(entrance, 0),
                 )
             }
+            item(key = "shortcuts") { ProfileShortcuts(shortcuts, Modifier.staggerIn(entrance, 1)) }
             item(key = "section-space") { ProfileSection("Mon espace", spaceEntries, Modifier.staggerIn(entrance, 1)) }
             item(key = "section-news") { ProfileSection("Notifications et actualités", newsEntries, Modifier.staggerIn(entrance, 2)) }
             item(key = "section-look") { ProfileSection("Apparence et lecture", lookEntries, Modifier.staggerIn(entrance, 3)) }
@@ -221,7 +224,7 @@ fun ProfileScreen() {
             }
             item(key = "footer") {
                 Text(
-                    "Nflix ${BuildConfig.VERSION_NAME}",
+                    "Nflix ${BuildConfig.VERSION_NAME} · $serverHost · ${if (deps.session.lastMethod == "mira") "Mira Connect" else "identifiants"}",
                     style = MaterialTheme.typography.labelSmall,
                     color = Nflix.Muted.copy(alpha = 0.6f),
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,

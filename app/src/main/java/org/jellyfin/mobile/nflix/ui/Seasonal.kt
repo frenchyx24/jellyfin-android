@@ -96,7 +96,7 @@ enum class SeasonalEvent(
             Victory, Bastille -> listOf(Color(0xFF2E5BFF), Color.White, Color(0xFFE5243B))
             MusicDay -> listOf(Color(0xFFB46CFF), Color(0xFF52E5FF), Color(0xFFFF6BD6))
             Halloween -> listOf(Color(0xFFFF7A1A), Color(0xFF9B5CFF), Color(0xFF7CFF6B))
-            Armistice -> listOf(Color(0xFF4A7BFF), Color(0xFF8FB0FF), Color.White)
+            Armistice -> listOf(Color(0xFF3D6BFF), Color(0xFF6F95FF), Color(0xFF2747C9))
             Christmas -> listOf(Color.White, Color(0xFFDDEBFF), Color(0xFFFFE6A8))
         }
 
@@ -419,8 +419,17 @@ private fun DrawScope.drawParticle(event: SeasonalEvent, s: Seed, time: Float, p
         Particle.Petals -> {
             val y = ((s.phase + time * s.speed) % 1.15f - 0.08f) * h
             val x = s.x * w + sin(time * 0.9f + s.sway) * 34f * d
+            // Teardrop petal with a light vein: cornflower blue for the 11th, lily white on May Day.
+            val len = 7f * d * s.size
             rotate(time * s.spin * 0.5f + sin(time + s.sway) * 40f, Offset(x, y)) {
-                drawOval(color.copy(alpha = s.alpha * fade), Offset(x - 4f * d * s.size, y - 2.4f * d * s.size), Size(8f * d * s.size, 4.8f * d * s.size))
+                val petal = Path().apply {
+                    moveTo(x, y - len)
+                    cubicTo(x + len * 0.75f, y - len * 0.4f, x + len * 0.45f, y + len * 0.6f, x, y + len * 0.7f)
+                    cubicTo(x - len * 0.45f, y + len * 0.6f, x - len * 0.75f, y - len * 0.4f, x, y - len)
+                    close()
+                }
+                drawPath(petal, Brush.verticalGradient(listOf(color.copy(alpha = s.alpha * fade), color.copy(alpha = s.alpha * fade * 0.55f)), y - len, y + len))
+                drawLine(Color.White.copy(alpha = 0.35f * s.alpha * fade), Offset(x, y - len * 0.7f), Offset(x, y + len * 0.4f), strokeWidth = 0.8f * d)
             }
         }
         Particle.Notes -> {
