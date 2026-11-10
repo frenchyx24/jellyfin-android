@@ -89,6 +89,7 @@ data class PendingTrack(
 @Immutable
 @Serializable
 data class ImportResult(
+    @SerialName("name") val name: String = "",
     @SerialName("total") val total: Int = 0,
     @SerialName("matched") val matched: List<SyncMatch> = emptyList(),
     @SerialName("missing") val missing: List<SyncMissing> = emptyList(),
@@ -188,6 +189,15 @@ class SyncRepository(private val api: NflixApi) {
     /** Online stream of a pending track (audio proxy, no download). */
     fun pendingStreamUrl(videoId: String): String =
         api.url("Plugins/NflixButler/yt/stream", mapOf("videoId" to videoId, "ApiKey" to api.token.orEmpty())).toString()
+
+    /** Public playlist or album from a Deezer, Spotify or YouTube Music share link (no account needed). */
+    suspend fun importUrl(url: String): ImportResult {
+        val payload = api.sendLong("POST", "Plugins/NflixButler/sync/import-url", body = buildJsonObject {
+            put("userId", JsonPrimitive(api.userId))
+            put("url", JsonPrimitive(url.trim()))
+        }, minutes = 3) ?: error("Réponse vide")
+        return api.json.decodeFromJsonElement(ImportResult.serializer(), payload)
+    }
 
     suspend fun deezerSearch(q: String): List<DeezerTrack> =
         api.get("Plugins/NflixButler/sync/deezer-search", SearchResponse.serializer(), mapOf("q" to q)).tracks

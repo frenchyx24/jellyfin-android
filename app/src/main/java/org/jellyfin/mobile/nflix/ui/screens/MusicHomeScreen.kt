@@ -251,7 +251,7 @@ private fun MusicHome(viewId: String, playlistsId: String?) {
                     }
                 }
                 if (data.latest.isNotEmpty()) item(key = "latest") {
-                    SectionHeader("Nouveautés", action = "Tout voir", onAction = { navigator.open(Route.Browse(viewId, "Albums", "MusicAlbum")) })
+                    SectionHeader("Ajouts récents", action = "Tout voir", onAction = { navigator.open(Route.Browse(viewId, "Albums", "MusicAlbum")) })
                     LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         items(data.latest, key = { "l-${it.id}" }) { AlbumTile(it, "music-latest") }
                     }

@@ -88,6 +88,36 @@ fun SyncAccountsScreen() {
     }
     LaunchedEffect(Unit) { refresh() }
 
+    /** Creates (or updates, same name) the local playlist: library tracks now, missing ones online until fetched. */
+    suspend fun applyImport(title: String, result: org.jellyfin.mobile.nflix.data.ImportResult) {
+        val ids = result.matched.sortedBy { it.position }.map { it.itemId }.distinct()
+        val online = result.missing
+        if (ids.isEmpty() && online.isEmpty()) {
+            ItemMenu.message = "Aucun morceau lisible sur ${result.total}"
+            return
+        }
+        // Re-importing updates the playlist of the same name instead of creating a twin.
+        val existing = runCatching { deps.jellyfin.audioPlaylists(force = true) }.getOrNull()
+            ?.firstOrNull { it.name.equals(title, ignoreCase = true) }
+        val created = if (existing != null) runCatching {
+            val have = deps.jellyfin.playlistItems(existing.id).map { it.id }.toSet()
+            val fresh = ids.filter { it !in have }
+            if (fresh.isNotEmpty()) deps.jellyfin.addToPlaylist(existing.id, fresh)
+            existing.id
+        }.getOrNull() else runCatching { deps.jellyfin.createPlaylist(title, ids) }.getOrNull()
+        val queued = created != null && online.isNotEmpty() && runCatching { deps.sync.addPending(created, online) }.isSuccess
+        ItemMenu.message = when {
+            created == null -> "Import terminé, playlist non créée"
+            queued && existing != null -> "« $title » mise à jour : ${online.size} titres en cours d'ajout"
+            queued -> "« $title » ajoutée : ${ids.size} sur le serveur, ${online.size} en cours d'ajout"
+            else -> "« $title » ajoutée : ${ids.size}/${result.total} morceaux"
+        }
+        localPlaylists = runCatching { deps.jellyfin.audioPlaylists(force = true) }.getOrNull()
+    }
+
+    var link by remember { mutableStateOf("") }
+    var linkBusy by remember { mutableStateOf(false) }
+
     // OAuth sheet: loads the provider's consent page, intercepts the redirect to grab the code.
     if (oauth != null && config != null && config!!.redirectUri.isNotBlank()) {
         val service = oauth!!
@@ -204,14 +234,44 @@ fun SyncAccountsScreen() {
             }
         }
         item {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).clip(RoundedCornerShape(14.dp)).background(Nflix.Surface).padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("Importer depuis un lien", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text("Collez le lien de partage d'une playlist ou d'un album Deezer, Spotify ou YouTube Music. Aucun compte nécessaire.", style = MaterialTheme.typography.bodySmall, color = Nflix.Muted)
+                androidx.compose.material3.OutlinedTextField(
+                    value = link, onValueChange = { link = it }, singleLine = true,
+                    placeholder = { Text("https://…") }, modifier = Modifier.fillMaxWidth(),
+                )
                 Button(
+                    onClick = {
+                        linkBusy = true
+                        scope.launch {
+                            runCatching { deps.sync.importUrl(link) }
+                                .onSuccess { result -> applyImport(result.name.ifBlank { "Playlist importée" }, result); link = "" }
+                                .onFailure { ItemMenu.message = serverMessage(it) ?: "Lien illisible" }
+                            linkBusy = false
+                        }
+                    },
+                    enabled = link.startsWith("https://") && !linkBusy,
+                    colors = ButtonDefaults.buttonColors(containerColor = Nflix.Red),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    if (linkBusy) CircularProgressIndicator(Modifier.size(18.dp), color = androidx.compose.ui.graphics.Color.White, strokeWidth = 2.dp)
+                    else { Icon(Icons.Rounded.PlaylistAdd, null, Modifier.size(18.dp)); Text("Importer", Modifier.padding(start = 6.dp)) }
+                }
+            }
+        }
+        item {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (config?.deezerConfigured == true) Button(
                     onClick = { oauth = "deezer" },
                     enabled = config?.deezerConfigured == true && config?.redirectUri?.isNotBlank() == true && !busy,
                     colors = ButtonDefaults.buttonColors(containerColor = Nflix.Red),
                     modifier = Modifier.weight(1f),
                 ) { Icon(Icons.Rounded.Link, null, Modifier.size(18.dp)); Text("Lier Deezer", Modifier.padding(start = 6.dp)) }
-                OutlinedButton(
+                if (config?.spotifyConfigured == true) OutlinedButton(
                     onClick = { oauth = "spotify" },
                     enabled = config?.spotifyConfigured == true && config?.redirectUri?.isNotBlank() == true && !busy,
                     border = androidx.compose.foundation.BorderStroke(1.dp, if (config?.spotifyConfigured == true) Nflix.Red else Nflix.Outline),
@@ -233,14 +293,6 @@ fun SyncAccountsScreen() {
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = Nflix.Text),
                     modifier = Modifier.fillMaxWidth(),
                 ) { Icon(Icons.Rounded.Link, null, Modifier.size(18.dp)); Text("Lier la musique en ligne", Modifier.padding(start = 6.dp)) }
-            }
-            if (config != null && !config!!.deezerConfigured && !config!!.spotifyConfigured && !config!!.youtubeConfigured) {
-                Text(
-                    "Aucun service configuré côté serveur : un administrateur doit renseigner les identifiants Deezer, Spotify ou Google dans les réglages de Nflix Butler.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Nflix.Warning,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-                )
             }
         }
         if (accounts.isNotEmpty()) {
@@ -273,31 +325,7 @@ fun SyncAccountsScreen() {
                                 importing = playlist.id
                                 scope.launch {
                                     runCatching { deps.sync.import(account.service, playlist.id) }
-                                        .onSuccess { result ->
-                                            val ids = result.matched.sortedBy { it.position }.map { it.itemId }.distinct()
-                                            val online = result.missing.filter { it.videoId.isNotBlank() }
-                                            if (ids.isEmpty() && online.isEmpty()) {
-                                                ItemMenu.message = "Aucun morceau lisible sur ${result.total}"
-                                            } else {
-                                                // Re-importing updates the playlist of the same name instead of creating a twin.
-                                                val existing = runCatching { deps.jellyfin.audioPlaylists(force = true) }.getOrNull()
-                                                    ?.firstOrNull { it.name.equals(playlist.title, ignoreCase = true) }
-                                                val created = if (existing != null) runCatching {
-                                                    val have = deps.jellyfin.playlistItems(existing.id).map { it.id }.toSet()
-                                                    val fresh = ids.filter { it !in have }
-                                                    if (fresh.isNotEmpty()) deps.jellyfin.addToPlaylist(existing.id, fresh)
-                                                    existing.id
-                                                }.getOrNull() else runCatching { deps.jellyfin.createPlaylist(playlist.title, ids) }.getOrNull()
-                                                val queued = created != null && online.isNotEmpty() && runCatching { deps.sync.addPending(created, online) }.isSuccess
-                                                ItemMenu.message = when {
-                                                    created == null -> "Import terminé, playlist non créée"
-                                                    queued && existing != null -> "« ${playlist.title} » mise à jour : ${online.size} titres en ligne suivis"
-                                                    queued -> "« ${playlist.title} » ajoutée : ${ids.size + online.size}/${result.total} morceaux · ${online.size} en ligne, ajout au serveur en cours"
-                                                    else -> "« ${playlist.title} » ajoutée : ${ids.size}/${result.total} morceaux"
-                                                }
-                                                localPlaylists = runCatching { deps.jellyfin.audioPlaylists(force = true) }.getOrNull()
-                                            }
-                                        }
+                                        .onSuccess { result -> applyImport(playlist.title, result) }
                                         .onFailure { ItemMenu.message = it.message ?: "Import impossible" }
                                     importing = null
                                 }
@@ -346,7 +374,7 @@ fun SyncAccountsScreen() {
             }
         }
         if (accounts.isEmpty() && config != null) {
-            item { EmptyState(Icons.Rounded.SyncAlt, "Aucun compte lié", "Liez Deezer, Spotify ou votre compte musique pour importer vos playlists.") }
+            item { EmptyState(Icons.Rounded.SyncAlt, "Aucun compte lié", "Liez votre compte musique ou collez un lien de playlist ci-dessus.") }
         }
     }
 }
