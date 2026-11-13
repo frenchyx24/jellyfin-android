@@ -14,6 +14,12 @@ public sealed class PluginConfiguration : BasePluginConfiguration
     /// <summary>Gets or sets the public OIDC client id used by the Nflix Android app.</summary>
     public string ClientId { get; set; } = "C20bjJuhP51n0vq4j4lsKsuIeWkJGA4hnchvz99V";
 
+    /// <summary>Gets or sets the OIDC issuer of the Mira Connect app, whose tokens Nflix receives through the account bridge.</summary>
+    public string MiraConnectIssuer { get; set; } = "https://auth.miracloud.fr/application/o/mira-connect-android/";
+
+    /// <summary>Gets or sets the public OIDC client id of the Mira Connect app.</summary>
+    public string MiraConnectClientId { get; set; } = "Y17SA3fNpxTeqXTUHRITcsYMaCqgbAVE3TxjNlf5";
+
     /// <summary>Gets or sets the group required in the token (mirrors the LDAP search filter). Empty disables the check.</summary>
     public string RequiredGroup { get; set; } = "plan_standard";
 

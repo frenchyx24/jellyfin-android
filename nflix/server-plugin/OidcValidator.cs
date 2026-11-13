@@ -13,9 +13,7 @@ public sealed class OidcValidator
 {
     private static readonly SemaphoreSlim JwksLock = new(1, 1);
     private static readonly ConcurrentDictionary<string, DateTimeOffset> UsedTokens = new();
-    private static Dictionary<string, RSAParameters> _keys = new();
-    private static DateTimeOffset _keysFetched = DateTimeOffset.MinValue;
-    private static string _keysIssuer = string.Empty;
+    private static readonly ConcurrentDictionary<string, (Dictionary<string, RSAParameters> Keys, DateTimeOffset Fetched)> KeysByIssuer = new();
 
     private readonly IHttpClientFactory _httpClientFactory;
 
@@ -32,7 +30,15 @@ public sealed class OidcValidator
         if (header.RootElement.GetProperty("alg").GetString() != "RS256") throw new UnauthorizedAccessException("Algorithme de signature refusé.");
         var kid = header.RootElement.TryGetProperty("kid", out var kidElement) ? kidElement.GetString() ?? string.Empty : string.Empty;
 
-        var key = await GetKeyAsync(config.Issuer, kid, cancellationToken).ConfigureAwait(false);
+        // Pick the trusted (issuer, client id) pair named by the unverified "iss" claim, then verify the
+        // signature against that issuer's JWKS only. Untrusted issuers are rejected before any network call.
+        using var payload = JsonDocument.Parse(Base64UrlDecode(parts[1]));
+        var claims = payload.RootElement;
+        var claimedIssuer = claims.TryGetProperty("iss", out var issElement) ? issElement.GetString() ?? string.Empty : string.Empty;
+        var trusted = TrustedIssuers(config).FirstOrDefault(t => string.Equals(t.Issuer, claimedIssuer, StringComparison.Ordinal));
+        if (trusted.Issuer is null) throw new UnauthorizedAccessException("Émetteur du jeton refusé.");
+
+        var key = await GetKeyAsync(trusted.Issuer, kid, cancellationToken).ConfigureAwait(false);
         using (var rsa = RSA.Create())
         {
             rsa.ImportParameters(key);
@@ -41,13 +47,10 @@ public sealed class OidcValidator
                 throw new UnauthorizedAccessException("Signature du jeton Mira invalide.");
         }
 
-        using var payload = JsonDocument.Parse(Base64UrlDecode(parts[1]));
-        var claims = payload.RootElement;
-        if (claims.GetProperty("iss").GetString() != config.Issuer) throw new UnauthorizedAccessException("Émetteur du jeton refusé.");
         var aud = claims.GetProperty("aud");
         var audienceOk = aud.ValueKind == JsonValueKind.Array
-            ? aud.EnumerateArray().Any(a => a.GetString() == config.ClientId)
-            : aud.GetString() == config.ClientId;
+            ? aud.EnumerateArray().Any(a => a.GetString() == trusted.ClientId)
+            : aud.GetString() == trusted.ClientId;
         if (!audienceOk) throw new UnauthorizedAccessException("Jeton destiné à une autre application.");
 
         var now = DateTimeOffset.UtcNow;
@@ -69,14 +72,25 @@ public sealed class OidcValidator
         return new MiraIdentity(username, groups);
     }
 
+    /// <summary>
+    /// Issuers whose ID tokens open a Nflix session: the Nflix app's own OIDC client (browser sign-in) and the
+    /// Mira Connect app (silent sign-in through its account bridge, used on a fresh install).
+    /// </summary>
+    private static IEnumerable<(string Issuer, string ClientId)> TrustedIssuers(PluginConfiguration config)
+    {
+        if (config.Issuer.Length > 0 && config.ClientId.Length > 0) yield return (config.Issuer, config.ClientId);
+        if (config.MiraConnectIssuer.Length > 0 && config.MiraConnectClientId.Length > 0) yield return (config.MiraConnectIssuer, config.MiraConnectClientId);
+    }
+
     private async Task<RSAParameters> GetKeyAsync(string issuer, string kid, CancellationToken cancellationToken)
     {
-        if (_keysIssuer == issuer && _keysFetched > DateTimeOffset.UtcNow.AddHours(-6) && TryGet(kid, out var cached)) return cached;
+        if (KeysByIssuer.TryGetValue(issuer, out var cached) && cached.Fetched > DateTimeOffset.UtcNow.AddHours(-6) && TryGet(cached.Keys, kid, out var hit)) return hit;
         await JwksLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            KeysByIssuer.TryGetValue(issuer, out var entry);
             // Refresh at most once per minute to absorb unknown kids without hammering the issuer.
-            if (_keysIssuer != issuer || _keysFetched < DateTimeOffset.UtcNow.AddMinutes(-1) || !TryGet(kid, out _))
+            if (entry.Keys is null || entry.Fetched < DateTimeOffset.UtcNow.AddMinutes(-1) || !TryGet(entry.Keys, kid, out _))
             {
                 if (!issuer.StartsWith("https://", StringComparison.Ordinal)) throw new UnauthorizedAccessException("Émetteur non HTTPS refusé.");
                 using var client = _httpClientFactory.CreateClient();
@@ -95,12 +109,11 @@ public sealed class OidcValidator
                     };
                 }
 
-                _keys = keys;
-                _keysIssuer = issuer;
-                _keysFetched = DateTimeOffset.UtcNow;
+                entry = (keys, DateTimeOffset.UtcNow);
+                KeysByIssuer[issuer] = entry;
             }
 
-            return TryGet(kid, out var key) ? key : throw new UnauthorizedAccessException("Clé de signature Mira inconnue.");
+            return TryGet(entry.Keys, kid, out var key) ? key : throw new UnauthorizedAccessException("Clé de signature Mira inconnue.");
         }
         finally
         {
@@ -108,10 +121,10 @@ public sealed class OidcValidator
         }
     }
 
-    private static bool TryGet(string kid, out RSAParameters key)
+    private static bool TryGet(Dictionary<string, RSAParameters> keys, string kid, out RSAParameters key)
     {
-        if (_keys.TryGetValue(kid, out key)) return true;
-        if (kid.Length == 0 && _keys.Count == 1) { key = _keys.Values.First(); return true; }
+        if (keys.TryGetValue(kid, out key)) return true;
+        if (kid.Length == 0 && keys.Count == 1) { key = keys.Values.First(); return true; }
         return false;
     }
 
