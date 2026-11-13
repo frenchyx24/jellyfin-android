@@ -34,7 +34,8 @@ android {
 
     defaultConfig {
         applicationId = "fr.miracloud.nflix"
-        minSdk = libs.versions.android.minSdk.get().toInt()
+        // Google Play needs minSdk 24 (Play auto protection); the Mira store APK keeps the catalog value.
+        minSdk = (findProperty("nflix.minSdk") as String?)?.toInt() ?: libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
         versionName = project.getVersionName()
         versionCode = getVersionCode(versionName!!)
