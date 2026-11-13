@@ -1,5 +1,7 @@
 package org.jellyfin.mobile.nflix.tv
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -20,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Keyboard
+import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Tv
 import androidx.compose.material.icons.rounded.WifiOff
@@ -32,9 +35,12 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -57,9 +63,20 @@ fun TvDiscoverySheet() {
     val context = LocalContext.current
     val discovery = remember { TvDiscovery(context) }
     val state by discovery.state.collectAsState()
+    // Android 17+ (targetSdk 37) blocks mDNS without the runtime local network permission
+    var granted by remember { mutableStateOf(TvDiscovery.hasLocalNetworkPermission(context)) }
+    var denied by remember { mutableStateOf(false) }
+    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        granted = ok
+        denied = !ok
+    }
 
-    DisposableEffect(discovery) {
-        discovery.start()
+    LaunchedEffect(Unit) {
+        if (!granted) runCatching { permission.launch(TvDiscovery.LOCAL_NETWORK_PERMISSION) }.onFailure { denied = true }
+    }
+
+    DisposableEffect(discovery, granted) {
+        if (granted) discovery.start()
         onDispose { discovery.stop() }
     }
 
@@ -85,7 +102,15 @@ fun TvDiscoverySheet() {
                 }
             }
             Spacer(Modifier.height(16.dp))
-            when (val current = state) {
+            if (!granted && denied) {
+                PermissionNeeded(
+                    onAllow = {
+                        denied = false
+                        runCatching { permission.launch(TvDiscovery.LOCAL_NETWORK_PERMISSION) }.onFailure { denied = true }
+                    },
+                    onManual = ::openManual,
+                )
+            } else when (val current = state) {
                 TvDiscoveryState.Idle, TvDiscoveryState.Searching -> Searching()
                 TvDiscoveryState.Empty -> EmptyState(onRetry = { discovery.retry() }, onManual = ::openManual)
                 TvDiscoveryState.NoWifi -> NoWifi(onRetry = { discovery.retry() })
@@ -139,6 +164,33 @@ private fun EmptyState(onRetry: () -> Unit, onManual: () -> Unit) {
                 colors = ButtonDefaults.buttonColors(containerColor = Nflix.Red, contentColor = Color.White),
                 shape = RoundedCornerShape(14.dp),
             ) { Text("Réessayer", fontWeight = FontWeight.SemiBold) }
+            Button(
+                onClick = onManual,
+                colors = ButtonDefaults.buttonColors(containerColor = Nflix.SurfaceHigh, contentColor = Nflix.Text),
+                shape = RoundedCornerShape(14.dp),
+            ) { Text("Saisir le code") }
+        }
+    }
+}
+
+@Composable
+private fun PermissionNeeded(onAllow: () -> Unit, onManual: () -> Unit) {
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+        Icon(Icons.Rounded.Lock, null, tint = Nflix.Warning, modifier = Modifier.size(40.dp))
+        Spacer(Modifier.height(10.dp))
+        Text("Autorisation requise", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = Nflix.Text)
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "Pour trouver les TV sur votre Wi-Fi, autorisez Nflix à accéder aux appareils à proximité (réseau local). Sinon, saisissez le code affiché sur la TV.",
+            fontSize = 13.sp, color = Nflix.Muted, textAlign = TextAlign.Center, lineHeight = 19.sp,
+        )
+        Spacer(Modifier.height(16.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Button(
+                onClick = onAllow,
+                colors = ButtonDefaults.buttonColors(containerColor = Nflix.Red, contentColor = Color.White),
+                shape = RoundedCornerShape(14.dp),
+            ) { Text("Autoriser", fontWeight = FontWeight.SemiBold) }
             Button(
                 onClick = onManual,
                 colors = ButtonDefaults.buttonColors(containerColor = Nflix.SurfaceHigh, contentColor = Nflix.Text),

@@ -1,5 +1,8 @@
 package org.jellyfin.mobile.webapp
 
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.net.Uri
 import android.net.http.SslError
 import android.webkit.SslErrorHandler
 import android.webkit.WebResourceRequest
@@ -85,6 +88,27 @@ abstract class JellyfinWebViewClient(
             }
             else -> null
         }
+    }
+
+    /**
+     * The native bridges (NativeInterface, NativePlayer...) are only meant for the Nflix server:
+     * top-level navigation to any other origin opens in the browser instead of this WebView.
+     */
+    override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+        if (!request.isForMainFrame || request.url.scheme == "about" || isServerOrigin(request.url)) return false
+        try {
+            view.context.startActivity(Intent(Intent.ACTION_VIEW, request.url).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (e: ActivityNotFoundException) {
+            Timber.w(e, "No activity to open external link")
+        }
+        return true
+    }
+
+    private fun isServerOrigin(url: Uri): Boolean {
+        val server = Uri.parse(server.hostname)
+        return url.scheme.equals(server.scheme, ignoreCase = true) &&
+            url.host.equals(server.host, ignoreCase = true) &&
+            url.port == server.port
     }
 
     override fun onReceivedHttpError(

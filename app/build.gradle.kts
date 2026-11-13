@@ -58,6 +58,10 @@ android {
                 storePassword = keystorePassword
                 keyAlias = signingKeyAlias
                 keyPassword = signingKeyPassword
+                // v1 stays for minSdk 23; v2 + v3 are what modern Android checks.
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
             }
         }
     }
@@ -67,6 +71,19 @@ android {
         includeInApk = false
     }
 
+    // Library metadata in META-INF is not covered by the v1 JAR signature (apksigner warns).
+    // None of it is read at runtime; META-INF/services stays for ServiceLoader.
+    packaging {
+        resources {
+            excludes += listOf(
+                "META-INF/*.version",
+                "META-INF/androidx/**",
+                "META-INF/version-control-info.textproto",
+                "META-INF/com/android/build/gradle/app-metadata.properties",
+            )
+        }
+    }
+
     buildTypes {
         getByName("release") {
             isMinifyEnabled = true
@@ -74,6 +91,7 @@ android {
 
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.findByName("release")
+            vcsInfo.include = false
         }
 
         getByName("debug") {
@@ -174,7 +192,7 @@ dependencies {
     implementation(libs.androidx.constraintlayout)
     implementation(libs.androidx.webkit)
     implementation("net.openid:appauth:0.11.1")
-    implementation("androidx.browser:browser:1.9.0")
+    implementation("androidx.browser:browser:1.10.0")
     implementation("androidx.compose.material3:material3:1.4.0")
     implementation(libs.modernandroidpreferences)
 
@@ -192,6 +210,8 @@ dependencies {
         }
     }
     implementation(libs.bundles.coil)
+    // Pin the transitive OkHttp (Coil, Media3, Jellyfin SDK) to the latest stable release
+    implementation(libs.okhttp)
 
     // Media
     implementation(libs.androidx.media)

@@ -1,6 +1,7 @@
 package org.jellyfin.mobile.nflix.tv
 
 import android.content.Context
+import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.nsd.NsdManager
@@ -279,10 +280,17 @@ class TvDiscovery(context: Context) {
         _state.value = if (tvs.isEmpty()) TvDiscoveryState.Searching else TvDiscoveryState.Found(tvs)
     }
 
-    private companion object {
-        const val SERVICE_TYPE = "_nflixtv._tcp"
-        const val EMPTY_AFTER_MS = 7_000L
-        const val RETRY_MS = 1_200L
-        const val MAX_ATTEMPTS = 4
+    companion object {
+        /** Runtime permission (NEARBY_DEVICES group) that gates mDNS for apps targeting Android 17+. */
+        const val LOCAL_NETWORK_PERMISSION = "android.permission.ACCESS_LOCAL_NETWORK"
+
+        fun hasLocalNetworkPermission(context: Context): Boolean =
+            Build.VERSION.SDK_INT < 37 ||
+                ContextCompat.checkSelfPermission(context, LOCAL_NETWORK_PERMISSION) == PackageManager.PERMISSION_GRANTED
+
+        private const val SERVICE_TYPE = "_nflixtv._tcp"
+        private const val EMPTY_AFTER_MS = 7_000L
+        private const val RETRY_MS = 1_200L
+        private const val MAX_ATTEMPTS = 4
     }
 }

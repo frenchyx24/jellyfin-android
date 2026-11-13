@@ -6,6 +6,8 @@
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <!-- Finds Nflix Android TVs waiting for sign-in on the local network (DNS-SD) -->
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <!-- Android 17+ (targetSdk 37): runtime permission for mDNS, requested only when "Connecter une TV" opens -->
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission
         android:name="android.permission.BLUETOOTH"
@@ -121,8 +123,9 @@
             android:grantUriPermissions="true"
             android:readPermission="android.permission.MEDIA_CONTENT_CONTROL" />
 
-        <receiver android:name="org.jellyfin.mobile.downloads.DownloadBroadcastReceiver" />
-        <receiver android:name="org.jellyfin.mobile.nflix.NflixUpdateReceiver" android:exported="false" />
+        <receiver
+            android:name="org.jellyfin.mobile.downloads.DownloadBroadcastReceiver"
+            android:exported="false" />
 
         <meta-data
             android:name="com.google.android.gms.version"
@@ -142,8 +145,5 @@
         <meta-data
             android:name="android.webkit.WebView.EnableSafeBrowsing"
             android:value="false" />
-
-        <!-- Temporarily opt-out of new Android 16 behavior to allow setRequestedOrientation() calls -->
-        <property android:name="android.window.PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY" android:value="true" />
     </application>
 </manifest>

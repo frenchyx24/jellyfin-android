@@ -2,18 +2,18 @@
 # Android
 android-compileSdk = "37"
 android-minSdk = "23"
-android-targetSdk = "36"
+android-targetSdk = "37"
 
 # Plugins
-android-plugin = "9.4.1"
-kotlin = "2.4.20"
-kotlin-ksp = "2.3.12"
+android-plugin = "9.5.1"
+kotlin = "2.4.21"
+kotlin-ksp = "2.3.13"
 detekt = "1.23.8"
-android-junit5 = "2.0.1"
+android-junit5 = "2.0.2"
 
 # KotlinX
 coroutines = "1.11.0"
-serialization-json = "1.11.0"
+serialization-json = "1.13.0"
 
 # Core
 koin = "4.2.2"
@@ -45,6 +45,7 @@ compose-material-icons = "1.7.8"
 # Network
 jellyfin-sdk = "1.8.12"
 coil = "3.6.3"
+okhttp = "5.5.1"
 
 # Media
 androidx-media = "1.8.0"
@@ -63,8 +64,8 @@ timber = "5.0.1"
 
 # Testing
 junit = "6.1.3"
-kotest = "6.2.5"
-mockk = "1.14.11"
+kotest = "6.2.7"
+mockk = "1.14.12"
 androidx-test-runner = "1.7.0"
 androidx-test-espresso = "3.7.0"
 
@@ -122,6 +123,7 @@ compose-material-icons-extended = { group = "androidx.compose.material", name = 
 
 # Network
 jellyfin-sdk = { group = "org.jellyfin.sdk", name = "jellyfin-core", version.ref = "jellyfin-sdk" }
+okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 coil = { group = "io.coil-kt.coil3", name = "coil", version.ref = "coil" }
 coil-network = { group = "io.coil-kt.coil3", name = "coil-network-okhttp", version.ref = "coil" }
 coil-compose = { group = "io.coil-kt.coil3", name = "coil-compose", version.ref = "coil" }
