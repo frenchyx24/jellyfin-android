@@ -433,7 +433,7 @@ fun SeasonalGreeting(visible: Boolean) {
 
 // ---- Ambient layer ----------------------------------------------------------------------------
 
-private class Mote(index: Int, salt: Int) {
+private class SeasonMote(index: Int, salt: Int) {
     private val r = java.util.Random(index * 7919L + salt * 104729L)
     val x = r.nextFloat()
     val phase = r.nextFloat()
@@ -485,7 +485,7 @@ fun SeasonAmbience(
     if (!theme.isSeasonal) return
     val motion = animated && NflixSeason.ambient && rememberAmbientMotionAllowed()
     val count = (theme.ambient.count() * strength).toInt().coerceAtLeast(if (theme.ambient == Ambient.None) 0 else 3)
-    val motes = remember(theme.key, count) { List(count) { Mote(it, theme.key.hashCode()) } }
+    val motes = remember(theme.key, count) { List(count) { SeasonMote(it, theme.key.hashCode()) } }
     val clock = remember { mutableFloatStateOf(14f) }
     LaunchedEffect(motion) {
         if (!motion) return@LaunchedEffect
@@ -529,7 +529,7 @@ private fun DrawScope.drawTopGlow(theme: NflixSeasonTheme, t: Float) {
     )
 }
 
-private fun DrawScope.drawFrost(theme: NflixSeasonTheme, motes: List<Mote>, t: Float) {
+private fun DrawScope.drawFrost(theme: NflixSeasonTheme, motes: List<SeasonMote>, t: Float) {
     val w = size.width
     val h = size.height
     val d = density
@@ -547,7 +547,7 @@ private fun DrawScope.drawFrost(theme: NflixSeasonTheme, motes: List<Mote>, t: F
     }
 }
 
-private fun DrawScope.drawPollen(theme: NflixSeasonTheme, motes: List<Mote>, t: Float) {
+private fun DrawScope.drawPollen(theme: NflixSeasonTheme, motes: List<SeasonMote>, t: Float) {
     val w = size.width
     val h = size.height
     val d = density
@@ -561,7 +561,7 @@ private fun DrawScope.drawPollen(theme: NflixSeasonTheme, motes: List<Mote>, t: 
     }
 }
 
-private fun DrawScope.drawGoldenHour(theme: NflixSeasonTheme, motes: List<Mote>, t: Float) {
+private fun DrawScope.drawGoldenHour(theme: NflixSeasonTheme, motes: List<SeasonMote>, t: Float) {
     val w = size.width
     val h = size.height
     val d = density
@@ -589,7 +589,7 @@ private fun DrawScope.drawGoldenHour(theme: NflixSeasonTheme, motes: List<Mote>,
     }
 }
 
-private fun DrawScope.drawLeaves(theme: NflixSeasonTheme, motes: List<Mote>, t: Float) {
+private fun DrawScope.drawLeaves(theme: NflixSeasonTheme, motes: List<SeasonMote>, t: Float) {
     val w = size.width
     val h = size.height
     val d = density
@@ -612,7 +612,7 @@ private fun DrawScope.drawLeaves(theme: NflixSeasonTheme, motes: List<Mote>, t: 
     }
 }
 
-private fun DrawScope.drawEmbers(theme: NflixSeasonTheme, motes: List<Mote>, t: Float) {
+private fun DrawScope.drawEmbers(theme: NflixSeasonTheme, motes: List<SeasonMote>, t: Float) {
     val w = size.width
     val h = size.height
     val d = density
@@ -637,7 +637,7 @@ private fun DrawScope.drawEmbers(theme: NflixSeasonTheme, motes: List<Mote>, t: 
     }
 }
 
-private fun DrawScope.drawSnowfall(theme: NflixSeasonTheme, motes: List<Mote>, t: Float) {
+private fun DrawScope.drawSnowfall(theme: NflixSeasonTheme, motes: List<SeasonMote>, t: Float) {
     val w = size.width
     val h = size.height
     val d = density
@@ -657,7 +657,7 @@ private fun DrawScope.drawSnowfall(theme: NflixSeasonTheme, motes: List<Mote>, t
     }
 }
 
-private fun DrawScope.drawChampagne(theme: NflixSeasonTheme, motes: List<Mote>, t: Float) {
+private fun DrawScope.drawChampagne(theme: NflixSeasonTheme, motes: List<SeasonMote>, t: Float) {
     val w = size.width
     val h = size.height
     val d = density

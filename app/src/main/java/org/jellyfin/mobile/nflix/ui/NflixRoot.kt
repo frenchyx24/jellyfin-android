@@ -118,12 +118,12 @@ fun NflixRoot(deps: AppDeps, navigator: Navigator, backEnabled: Boolean = true) 
     val holder = rememberSaveableStateHolder()
     val context = androidx.compose.ui.platform.LocalContext.current.applicationContext
     val music by deps.music.state.collectAsState()
-    remember { SeasonalThemes.init(context) }
+    remember { NflixSeason.init(context) }
     LaunchedEffect(Unit) {
         // Festive themes switch on and off with the date, even if the app stays open overnight.
         while (true) {
             delay(15 * 60_000L)
-            SeasonalThemes.refreshDate()
+            NflixSeason.refreshDate()
         }
     }
     LaunchedEffect(Unit) {
@@ -151,7 +151,7 @@ fun NflixRoot(deps: AppDeps, navigator: Navigator, backEnabled: Boolean = true) 
 
     CompositionLocalProvider(LocalDeps provides deps, LocalNavigator provides navigator) {
         BackHandler(enabled = backEnabled && (navigator.stack.size > 1 || navigator.current != Route.Home)) { navigator.back() }
-        Box(Modifier.fillMaxSize().background(Nflix.Night).seasonalTouches()) {
+        Box(Modifier.fillMaxSize().background(Nflix.Night).seasonBackdrop()) {
             // While the tutorial covers the app, screen readers only see the tutorial.
             val hiddenUnderTutorial = if (Tutorial.covering) Modifier.clearAndSetSemantics { } else Modifier
             SharedTransitionLayout(Modifier.fillMaxSize().then(hiddenUnderTutorial)) {
@@ -184,10 +184,9 @@ fun NflixRoot(deps: AppDeps, navigator: Navigator, backEnabled: Boolean = true) 
             }
 
             val showChrome = navigator.current != Route.NowPlaying && navigator.current !is Route.Reader
-            // Festive light layer over every screen (draws only, never takes touches).
-            if (navigator.current !is Route.Reader) SeasonalOverlay(Modifier.fillMaxSize())
+            // Season ambient layer over every screen (draws only, never takes touches).
+            if (navigator.current !is Route.Reader && navigator.current != Route.NowPlaying) SeasonAmbience(Modifier.fillMaxSize(), strength = 0.6f, topGlow = false)
             Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().then(hiddenUnderTutorial)) {
-                if (showChrome) SeasonalRoof(Modifier.fillMaxWidth())
                 CastRemoteBar(deps.cast, onExpand = { castRemoteOpen.value = true })
                 AnimatedVisibility(
                     visible = showChrome && music.current != null,
@@ -213,7 +212,6 @@ fun NflixRoot(deps: AppDeps, navigator: Navigator, backEnabled: Boolean = true) 
             if (castRemoteOpen.value) CastRemoteSheet(deps.cast) { castRemoteOpen.value = false }
             TrailerHost()
             TutorialHost(backEnabled = backEnabled)
-            if (!Tutorial.covering) SeasonalIntro()
         }
     }
 }

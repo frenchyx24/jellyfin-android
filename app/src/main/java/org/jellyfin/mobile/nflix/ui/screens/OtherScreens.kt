@@ -178,12 +178,7 @@ fun ProfileScreen() {
         ProfileEntry("notices", Icons.Rounded.Campaign, "Annonces", "Les nouvelles de Nflix", ProfileAccents.Notices) { navigator.open(Route.Notices) },
         ProfileEntry("support", Icons.Rounded.Report, "Mes signalements", "Problèmes et idées envoyés à Mira", ProfileAccents.Alerts) { navigator.open(Route.Support) },
     )
-    val event = org.jellyfin.mobile.nflix.ui.SeasonalThemes.active
-    val seasonalSubtitle = when {
-        !org.jellyfin.mobile.nflix.ui.SeasonalThemes.enabled && event == null -> "Désactivés"
-        event != null -> "${event.emoji} ${event.label} en ce moment"
-        else -> "Noël, Halloween, 14 Juillet, Nouvel An…"
-    }
+    val seasonalSubtitle = org.jellyfin.mobile.nflix.ui.NflixSeason.summary
     val lookEntries = listOf(
         ProfileEntry("settings", Icons.Rounded.Settings, "Réglages", "Lecteur, musique, téléchargements, application", ProfileAccents.Playback) { navigator.open(Route.Settings) },
         ProfileEntry("seasonal", Icons.Rounded.Celebration, "Thèmes saisonniers", seasonalSubtitle, Nflix.Red) { navigator.open(Route.SeasonalSettings) },

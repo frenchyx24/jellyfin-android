@@ -78,8 +78,7 @@ fun AnimatedNflixLogo(url: String?, compact: Boolean, modifier: Modifier = Modif
         ),
         label = "logo-sweep",
     )
-    val bob by loop.animateFloat(-3f, 3f, infiniteRepeatable(tween(1400, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "emoji-bob")
-    val event = SeasonalThemes.active
+    val theme = NflixSeason.theme
 
     Box(modifier.width(width + 18.dp).height(height + 14.dp), contentAlignment = Alignment.CenterStart) {
         Box(
@@ -99,7 +98,7 @@ fun AnimatedNflixLogo(url: String?, compact: Boolean, modifier: Modifier = Modif
                     val x = size.width * sweep
                     drawRect(
                         Brush.linearGradient(
-                            listOf(Color.Transparent, Color.White.copy(alpha = 0.8f), (event?.accent ?: Color.White).copy(alpha = 0.55f), Color.Transparent),
+                            listOf(Color.Transparent, theme.logoSheen.first().copy(alpha = 0.8f), theme.logoSheen.last().copy(alpha = 0.55f), Color.Transparent),
                             start = Offset(x - size.width * 0.25f, 0f),
                             end = Offset(x + size.width * 0.25f, size.height),
                         ),
@@ -119,32 +118,6 @@ fun AnimatedNflixLogo(url: String?, compact: Boolean, modifier: Modifier = Modif
                 alignment = Alignment.CenterStart,
                 modifier = Modifier.width(width).height(height),
             )
-        }
-        if (event != null) {
-            Text(
-                event.emoji,
-                fontSize = if (compact) 16.sp else 26.sp,
-                modifier = Modifier.align(Alignment.TopEnd).graphicsLayer { translationY = bob; rotationZ = bob * 3f; alpha = entrance.value.coerceIn(0f, 1f) },
-            )
-        }
-    }
-}
-
-/** Short festive message under the logo while a seasonal theme is active. */
-@Composable
-fun SeasonalGreeting(visible: Boolean) {
-    val event = SeasonalThemes.active
-    AnimatedVisibility(visible = visible && event != null, enter = fadeIn() + expandVertically(), exit = fadeOut() + shrinkVertically()) {
-        val current = event ?: return@AnimatedVisibility
-        Row(
-            Modifier.padding(start = 18.dp, top = 2.dp).clip(CircleShape)
-                .background(Brush.horizontalGradient(listOf(current.accent.copy(alpha = 0.32f), current.deep.copy(alpha = 0.25f))))
-                .padding(horizontal = 12.dp, vertical = 5.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(current.emoji)
-            Spacer(Modifier.width(6.dp))
-            Text(current.greeting, style = MaterialTheme.typography.labelLarge, color = Color.White, fontWeight = FontWeight.Bold)
         }
     }
 }

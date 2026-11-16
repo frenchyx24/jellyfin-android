@@ -1,12 +1,16 @@
 package org.jellyfin.mobile.nflix.ui
 
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
@@ -15,28 +19,31 @@ object Nflix {
     val BrandRed = Color(0xFFE50914)
     val BrandRedDeep = Color(0xFF8C0A1C)
 
-    /** Accent colour: brand red, or the active seasonal theme's colour. */
-    val Red: Color get() = SeasonalThemes.active?.accent ?: BrandRed
-    val RedDeep: Color get() = SeasonalThemes.active?.deep ?: BrandRedDeep
-    val Night = Color(0xFF000000)
-    val Surface = Color(0xFF121212)
-    val SurfaceHigh = Color(0xFF202020)
-    val Outline = Color(0x29FFFFFF)
+    /** The season theme every screen reads (brand look when seasons are off). */
+    val Season: NflixSeasonTheme get() = NflixSeason.theme
+
+    /** Accent colour: brand red, or the active season theme's accent. */
+    val Red: Color get() = Season.accent
+    val RedDeep: Color get() = Season.accentDeep
+    val Night: Color get() = Season.night
+    val Surface: Color get() = Season.surface
+    val SurfaceHigh: Color get() = Season.surfaceHigh
+    val Outline: Color get() = Season.outline
     val Text = Color(0xFFF5F5F7)
-    val Muted = Color(0xFFA6A6B4)
+    val Muted: Color get() = Season.muted
     val Success = Color(0xFF46D39A)
     val Warning = Color(0xFFFFC05C)
     val Info = Color(0xFF6CB6FF)
 }
 
-private fun nflixColors() = darkColorScheme(
+private fun nflixColors(season: NflixSeasonTheme) = darkColorScheme(
     primary = Nflix.Red,
     onPrimary = Color.White,
     primaryContainer = Nflix.RedDeep,
     onPrimaryContainer = Color.White,
-    secondary = Color(0xFFFF6B7A),
+    secondary = season.accentSoft,
     onSecondary = Color.White,
-    secondaryContainer = Color(0xFF2A1418),
+    secondaryContainer = season.accentDeep.copy(alpha = 0.45f).compositeOver(season.surface),
     onSecondaryContainer = Nflix.Text,
     background = Nflix.Night,
     onBackground = Nflix.Text,
@@ -46,10 +53,10 @@ private fun nflixColors() = darkColorScheme(
     onSurfaceVariant = Nflix.Muted,
     surfaceContainer = Nflix.Surface,
     surfaceContainerHigh = Nflix.SurfaceHigh,
-    surfaceContainerHighest = Color(0xFF22222C),
-    surfaceContainerLow = Color(0xFF0D0D12),
+    surfaceContainerHighest = season.skeletonHighlight,
+    surfaceContainerLow = season.barSurface,
     outline = Nflix.Outline,
-    outlineVariant = Color(0x1AFFFFFF),
+    outlineVariant = season.outline.copy(alpha = 0.1f),
     error = Color(0xFFFF6B7A),
 )
 
@@ -70,8 +77,16 @@ private val NflixType = Typography(
 
 @Composable
 fun NflixTheme(content: @Composable () -> Unit) {
-    val colors = nflixColors()
-    MaterialTheme(colorScheme = colors, typography = NflixType) {
+    val season = NflixSeason.theme
+    val colors = nflixColors(season)
+    val shapes = Shapes(
+        extraSmall = season.chipShape,
+        small = season.chipShape,
+        medium = season.cardShape,
+        large = RoundedCornerShape(season.cardRadius + 6.dp),
+        extraLarge = RoundedCornerShape(season.cardRadius + 14.dp),
+    )
+    MaterialTheme(colorScheme = colors, typography = NflixType, shapes = shapes) {
         // Text drawn outside a Surface otherwise inherits black content color and vanishes on the black background.
         CompositionLocalProvider(LocalContentColor provides Nflix.Text, content = content)
     }
