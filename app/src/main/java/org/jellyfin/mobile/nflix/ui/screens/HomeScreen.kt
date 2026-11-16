@@ -78,7 +78,16 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.content.Context
+import coil3.SingletonImageLoader
+import coil3.request.ImageRequest
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
+import kotlinx.coroutines.withTimeoutOrNull
+import org.jellyfin.mobile.nflix.data.CachedHome
+import org.jellyfin.mobile.nflix.data.CachedHomeRow
+import org.jellyfin.mobile.nflix.data.HomeCache
+import timber.log.Timber
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -148,10 +157,16 @@ fun HomeScreen() {
     val userData by deps.jellyfin.userDataChanges.collectAsState()
 
     // Reload after long-press actions (removed from "Reprendre", list changes) without flashing skeletons.
-    val data = rememberLoad(org.jellyfin.mobile.nflix.ui.ItemMenu.revision, reloader = reloader) { force -> loadHome(deps, force || org.jellyfin.mobile.nflix.ui.ItemMenu.revision > 0) }
-    var lastHome by remember { androidx.compose.runtime.mutableStateOf<HomeData?>(null) }
+    val appContext = LocalContext.current.applicationContext
+    // Last home shown: the disk snapshot first, then each progressive stage of the fresh load.
+    var lastHome by remember {
+        androidx.compose.runtime.mutableStateOf(HomeCache.peek(runCatching { deps.api.userId }.getOrNull())?.toHomeData())
+    }
+    val data = rememberLoad(org.jellyfin.mobile.nflix.ui.ItemMenu.revision, reloader = reloader) { force ->
+        loadHome(deps, appContext, force || org.jellyfin.mobile.nflix.ui.ItemMenu.revision > 0) { lastHome = it }
+    }
     data.value?.let { lastHome = it }
-    val home = data.value ?: lastHome
+    val home = lastHome
     val scrolled by remember { derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 260 } }
 
     PullToRefreshBox(
@@ -250,8 +265,41 @@ private fun posterSubtitle(item: Item): String? = listOfNotNull(
     item.year?.toString(),
 ).joinToString(" · ").ifBlank { null }
 
-private suspend fun loadHome(deps: AppDeps, force: Boolean): HomeData = coroutineScope {
+private const val CORE_TIMEOUT_MS = 6_000L
+private const val ROW_TIMEOUT_MS = 12_000L
+
+/** Awaits at most [ms]; on timeout the request is cancelled so it never holds the home load open. */
+private suspend fun <T> Deferred<T>.within(ms: Long): T? = withTimeoutOrNull(ms) { await() } ?: run { cancel(); null }
+
+private fun CachedHome.toHomeData(): HomeData = HomeData(
+    hero = hero,
+    rows = rows.map { row ->
+        HomeRow(row.key, row.title, row.items, runCatching { RowStyle.valueOf(row.style) }.getOrDefault(RowStyle.Poster), row.viewId, row.types)
+    },
+    requests = emptyList(),
+    upcoming = emptyList(),
+    trending = emptyList(),
+)
+
+private fun HomeData.toCache(userId: String): CachedHome = CachedHome(
+    userId = userId,
+    savedAt = System.currentTimeMillis(),
+    hero = hero,
+    rows = rows.map { CachedHomeRow(it.key, it.title, it.items, it.style.name, it.viewId, it.types) },
+)
+
+/**
+ * Loads the home progressively: the disk snapshot first, then the core rows (resume, next up, newest, hero),
+ * then everything else. A row that does not answer in time keeps its cached copy.
+ */
+private suspend fun loadHome(deps: AppDeps, context: Context, force: Boolean, emit: (HomeData) -> Unit): HomeData = coroutineScope {
+    val started = System.currentTimeMillis()
     val jellyfin = deps.jellyfin
+    val userId = runCatching { deps.api.userId }.getOrNull()
+    val cached = HomeCache.read(context, userId)?.toHomeData()
+    cached?.let(emit)
+    val cachedRows = cached?.rows.orEmpty().associateBy { it.key }
+
     val views = async { runCatching { jellyfin.views(force) }.getOrDefault(emptyList()) }
     val resume = async { runCatching { jellyfin.resume(force = force) }.getOrDefault(emptyList()) }
     val nextUp = async { runCatching { jellyfin.nextUp(force = force) }.getOrDefault(emptyList()) }
@@ -278,7 +326,7 @@ private suspend fun loadHome(deps: AppDeps, force: Boolean): HomeData = coroutin
     }
     // Plugin sections and per-library "latest" rows load in parallel with everything else.
     val sectionRows = async {
-        sections.await().map { section ->
+        runCatching { sections.await() }.getOrDefault(emptyList()).map { section ->
             async {
                 val items = runCatching { deps.plugins.homeSectionItems(section) }.getOrDefault(emptyList())
                 HomeRow("section-${section.section}-${section.additionalData}", section.displayText, items)
@@ -294,28 +342,72 @@ private suspend fun loadHome(deps: AppDeps, force: Boolean): HomeData = coroutin
         }.map { it.await() }
     }
 
-    val rows = mutableListOf<HomeRow>()
-    val resumeItems = resume.await()
-    val next = nextUp.await()
-    val freshItems = fresh.await()
-    if (deps.plugins.moonfin.mergeContinueWatchingNextUp) {
-        val merged = (resumeItems + next.filter { n -> resumeItems.none { it.seriesId != null && it.seriesId == n.seriesId } }).distinctBy { it.id }
-        rows += HomeRow("resume", "Reprendre la lecture", merged, RowStyle.Wide)
-    } else {
-        rows += HomeRow("resume", "Reprendre la lecture", resumeItems, RowStyle.Wide)
-        rows += HomeRow("nextup", "À suivre", next, RowStyle.Wide)
-    }
-    rows += HomeRow("fresh", "Nouveautés sur Nflix", freshItems, viewId = "all", types = "Movie,Series")
-    rows += HomeRow("episodes", "Nouveaux épisodes", episodes.await().distinctBy { it.seriesId ?: it.id }, RowStyle.Wide)
-    // Top 10: highest community rating among movies and series, unrated titles excluded.
-    rows += HomeRow("top", "Top 10 des mieux notés", topRated.await().filter { (it.communityRating ?: 0.0) > 0 }.take(10), RowStyle.Top10)
-    rows += HomeRow("favorites", "Ma liste", favorites.await(), viewId = "all", types = "Movie,Series")
-    rows += sectionRows.await()
-    rows += latestRows.await()
+    fun HomeRow.orCached(): HomeRow = if (items.isEmpty()) cachedRows[key] ?: this else this
+    fun cachedRow(key: String, title: String, style: RowStyle = RowStyle.Poster, viewId: String? = null, types: String? = null) =
+        cachedRows[key] ?: HomeRow(key, title, emptyList(), style, viewId, types)
 
+    // Stage 1: core rows, each bounded, so the top of the screen fills in fast.
+    val resumeItems = resume.within(CORE_TIMEOUT_MS)
+    val next = nextUp.within(CORE_TIMEOUT_MS)
+    val freshItems = fresh.within(CORE_TIMEOUT_MS)
+    val heroFetched = hero.within(CORE_TIMEOUT_MS)
+    val coreRows = mutableListOf<HomeRow>()
+    if (deps.plugins.moonfin.mergeContinueWatchingNextUp) {
+        val merged = if (resumeItems == null && next == null) null else {
+            val r = resumeItems.orEmpty()
+            (r + next.orEmpty().filter { n -> r.none { it.seriesId != null && it.seriesId == n.seriesId } }).distinctBy { it.id }
+        }
+        coreRows += merged?.let { HomeRow("resume", "Reprendre la lecture", it, RowStyle.Wide) } ?: cachedRow("resume", "Reprendre la lecture", RowStyle.Wide)
+    } else {
+        coreRows += resumeItems?.let { HomeRow("resume", "Reprendre la lecture", it, RowStyle.Wide) } ?: cachedRow("resume", "Reprendre la lecture", RowStyle.Wide)
+        coreRows += next?.let { HomeRow("nextup", "À suivre", it, RowStyle.Wide) } ?: cachedRow("nextup", "À suivre", RowStyle.Wide)
+    }
+    coreRows += freshItems?.let { HomeRow("fresh", "Nouveautés sur Nflix", it, viewId = "all", types = "Movie,Series") }
+        ?: cachedRow("fresh", "Nouveautés sur Nflix", viewId = "all", types = "Movie,Series")
     // Hero: curated items from the server plugin, otherwise the newest titles that have artwork.
-    val heroItems = hero.await().ifEmpty { freshItems.filter { it.backdropTags.isNotEmpty() || it.parentBackdropTags.isNotEmpty() }.take(8) }
-    HomeData(heroItems, rows.filter { it.items.isNotEmpty() }.distinctBy { it.key }, requests.await(), upcoming.await(), trending.await(), distributorRows.await())
+    val heroItems = heroFetched?.ifEmpty { null }
+        ?: freshItems?.filter { it.backdropTags.isNotEmpty() || it.parentBackdropTags.isNotEmpty() }?.take(8)?.ifEmpty { null }
+        ?: cached?.hero.orEmpty()
+    heroItems.firstOrNull()?.let { first ->
+        (jellyfin.backdrop(first, 1280) ?: jellyfin.primary(first, 900))?.let { url ->
+            SingletonImageLoader.get(context).enqueue(ImageRequest.Builder(context).data(url).build())
+        }
+    }
+    val coreKeys = coreRows.map { it.key }.toSet()
+    // Rows not loaded yet keep their cached copy meanwhile.
+    val pending = cached?.rows.orEmpty().filter { it.key !in coreKeys }
+    emit(
+        HomeData(
+            heroItems,
+            (coreRows + pending).filter { it.items.isNotEmpty() }.distinctBy { it.key },
+            cached?.requests.orEmpty(), cached?.upcoming.orEmpty(), cached?.trending.orEmpty(), cached?.distributors.orEmpty(),
+        ),
+    )
+    Timber.i("Startup: home core rows in %d ms", System.currentTimeMillis() - started)
+
+    // Stage 2: everything else; a row that times out keeps its cached copy.
+    val rows = coreRows.toMutableList()
+    rows += episodes.within(ROW_TIMEOUT_MS)?.let { HomeRow("episodes", "Nouveaux épisodes", it.distinctBy { e -> e.seriesId ?: e.id }, RowStyle.Wide) }
+        ?: cachedRow("episodes", "Nouveaux épisodes", RowStyle.Wide)
+    // Top 10: highest community rating among movies and series, unrated titles excluded.
+    rows += topRated.within(ROW_TIMEOUT_MS)?.let { HomeRow("top", "Top 10 des mieux notés", it.filter { t -> (t.communityRating ?: 0.0) > 0 }.take(10), RowStyle.Top10) }
+        ?: cachedRow("top", "Top 10 des mieux notés", RowStyle.Top10)
+    rows += favorites.within(ROW_TIMEOUT_MS)?.let { HomeRow("favorites", "Ma liste", it, viewId = "all", types = "Movie,Series") }
+        ?: cachedRow("favorites", "Ma liste", viewId = "all", types = "Movie,Series")
+    rows += sectionRows.within(ROW_TIMEOUT_MS)?.map { it.orCached() } ?: cached?.rows.orEmpty().filter { it.key.startsWith("section-") }
+    rows += latestRows.within(ROW_TIMEOUT_MS)?.map { it.orCached() } ?: cached?.rows.orEmpty().filter { it.key.startsWith("latest-") }
+
+    val result = HomeData(
+        heroItems,
+        rows.filter { it.items.isNotEmpty() }.distinctBy { it.key },
+        requests.within(ROW_TIMEOUT_MS).orEmpty(),
+        upcoming.within(ROW_TIMEOUT_MS).orEmpty(),
+        trending.within(ROW_TIMEOUT_MS).orEmpty(),
+        distributorRows.within(ROW_TIMEOUT_MS).orEmpty(),
+    )
+    if (userId != null) HomeCache.write(context, result.toCache(userId))
+    Timber.i("Startup: home complete in %d ms", System.currentTimeMillis() - started)
+    result
 }
 
 /** "Plateformes" logo strip; each logo opens that platform's full catalogue. */

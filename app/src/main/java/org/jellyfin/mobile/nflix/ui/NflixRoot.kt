@@ -129,6 +129,11 @@ fun NflixRoot(deps: AppDeps, navigator: Navigator, backEnabled: Boolean = true) 
     LaunchedEffect(Unit) {
         deps.music.connect()
         deps.plugins.refreshConfigs()
+    }
+    LaunchedEffect(Unit) {
+        // Secondary startup work waits for the first frame plus a beat, so it never competes with the home load.
+        androidx.compose.runtime.withFrameNanos { }
+        delay(1_500)
         deps.plugins.refreshNotices()
         // If the app crashed since the last start, send the stored trace to the server log.
         runCatching { org.jellyfin.mobile.nflix.CrashLog.upload(deps.api) }

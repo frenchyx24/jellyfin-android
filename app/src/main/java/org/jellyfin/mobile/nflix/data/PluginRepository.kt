@@ -2,6 +2,11 @@ package org.jellyfin.mobile.nflix.data
 
 import android.content.Context
 import androidx.core.content.edit
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -46,17 +51,38 @@ class PluginRepository(
     /** Logo served by the LogoSwap plugin (the same one the web client shows). */
     val serverLogoUrl: String get() = api.url("logoswap/image").toString()
 
+    /** Completed once the plugin configs were fetched (or failed) for the first time. */
+    private val configsLoaded = CompletableDeferred<Unit>()
+
+    /** The three configs load in parallel, each bounded so one slow plugin never delays the home. */
     suspend fun refreshConfigs() {
-        runCatching { enhanced = api.get("JellyfinEnhanced/public-config", EnhancedConfig.serializer()) }
-            .onFailure { Timber.d(it, "Jellyfin Enhanced config unavailable") }
-        runCatching { moonfin = api.get("Moonfin/Settings/Resolved/mobile", MoonfinSettings.serializer()) }
-            .onFailure { Timber.d(it, "Moonfin settings unavailable") }
-        runCatching { mediaBar = api.get("MediaBarEnhanced/Config", MediaBarConfig.serializer()) }
-            .onFailure { Timber.d(it, "Media Bar config unavailable") }
+        val started = System.currentTimeMillis()
+        coroutineScope {
+            launch {
+                runCatching { withTimeout(CONFIG_TIMEOUT_MS) { enhanced = api.get("JellyfinEnhanced/public-config", EnhancedConfig.serializer()) } }
+                    .onFailure { Timber.d(it, "Jellyfin Enhanced config unavailable") }
+            }
+            launch {
+                runCatching { withTimeout(CONFIG_TIMEOUT_MS) { moonfin = api.get("Moonfin/Settings/Resolved/mobile", MoonfinSettings.serializer()) } }
+                    .onFailure { Timber.d(it, "Moonfin settings unavailable") }
+            }
+            launch {
+                runCatching { withTimeout(CONFIG_TIMEOUT_MS) { mediaBar = api.get("MediaBarEnhanced/Config", MediaBarConfig.serializer()) } }
+                    .onFailure { Timber.d(it, "Media Bar config unavailable") }
+            }
+        }
+        configsLoaded.complete(Unit)
+        Timber.i("Startup: plugin configs ready in %d ms", System.currentTimeMillis() - started)
+    }
+
+    /** Waits (bounded) for the first config fetch, so the hero and row merge use the server's settings. */
+    suspend fun awaitConfigs(timeoutMs: Long = CONFIG_TIMEOUT_MS) {
+        withTimeoutOrNull(timeoutMs) { configsLoaded.await() }
     }
 
     /** Hero carousel built with the Media Bar Enhanced rules. */
     suspend fun heroItems(force: Boolean = false): List<Item> = heroCache.getOrLoad("hero", force) {
+        awaitConfigs()
         val config = mediaBar
         if (!config.enabled) return@getOrLoad emptyList()
         val customIds = config.customMediaIds.split(',', '\n', ' ').map { it.trim() }.filter { it.length >= 32 }
@@ -130,5 +156,6 @@ class PluginRepository(
     private companion object {
         const val KEY_DISMISSED = "dismissed_notices"
         const val KEY_SEEN = "seen_notices"
+        const val CONFIG_TIMEOUT_MS = 4_000L
     }
 }

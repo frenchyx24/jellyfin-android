@@ -73,6 +73,7 @@ class NflixAppFragment : Fragment() {
             downloadDao = downloadDao, storageManager = storageManager,
             onSignOut = {
                 alerts.clear()
+                org.jellyfin.mobile.nflix.data.HomeCache.clear(requireContext().applicationContext)
                 lifecycleScope.launch { cast.disconnect() }
                 lifecycleScope.launch {
                     runCatching { api.send("POST", "Sessions/Logout") }
