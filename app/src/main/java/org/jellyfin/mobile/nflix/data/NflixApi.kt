@@ -45,8 +45,9 @@ class NflixApi(cacheDir: File, private val session: NflixSession, private val ap
         .retryOnConnectionFailure(true)
         // Pull-to-refresh must hit the network: without this, OkHttp may answer GETs from its
         // disk cache (Jellyfin sends no Cache-Control on most plugin routes), so a swipe
-        // appeared to do nothing.
-        .addNetworkInterceptor { chain ->
+        // appeared to do nothing. This must be an application interceptor: a network
+        // interceptor runs after the cache lookup and never sees cache hits.
+        .addInterceptor { chain ->
             chain.proceed(chain.request().newBuilder().cacheControl(CacheControl.FORCE_NETWORK).build())
         }
         .build()

@@ -171,6 +171,9 @@ fun HomeScreen() {
     val home = lastHome
     val scrolled by remember { derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 260 } }
 
+    // Drop the spinner once the reload triggered by the swipe has really finished.
+    LaunchedEffect(data) { if (data !is org.jellyfin.mobile.nflix.ui.Load.Loading) refreshing = false }
+
     PullToRefreshBox(
         isRefreshing = refreshing,
         onRefresh = {
@@ -178,8 +181,8 @@ fun HomeScreen() {
             deps.jellyfin.invalidateAll()
             reloader.reload()
             scope.launch {
-                // Give the reload a beat to finish before dropping the spinner.
-                kotlinx.coroutines.delay(600)
+                // Safety net: never leave the spinner up if the load hangs.
+                kotlinx.coroutines.delay(15_000)
                 refreshing = false
             }
         },
