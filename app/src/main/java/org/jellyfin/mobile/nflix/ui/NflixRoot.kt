@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -89,6 +90,7 @@ import org.jellyfin.mobile.nflix.ui.screens.HorusRequestsScreen
 import org.jellyfin.mobile.nflix.ui.screens.HorusScreen
 import org.jellyfin.mobile.nflix.ui.screens.LibraryScreen
 import org.jellyfin.mobile.nflix.ui.screens.MusicScreen
+import org.jellyfin.mobile.nflix.ui.screens.NoticeDetailScreen
 import org.jellyfin.mobile.nflix.ui.screens.NoticesScreen
 import org.jellyfin.mobile.nflix.ui.screens.NowPlayingScreen
 import org.jellyfin.mobile.nflix.ui.screens.PersonScreen
@@ -240,6 +242,7 @@ private fun Screen(route: Route) {
         Route.Search -> SearchScreen()
         Route.NowPlaying -> NowPlayingScreen()
         Route.Notices -> NoticesScreen()
+        is Route.NoticeDetail -> NoticeDetailScreen(route.id)
         Route.Support -> org.jellyfin.mobile.nflix.ui.screens.SupportScreen()
         Route.Profile -> ProfileScreen()
         Route.HorusRequests -> HorusRequestsScreen()
@@ -273,6 +276,11 @@ val ContentBottomPadding = 150.dp
 @Composable
 private fun BottomBar(navigator: Navigator) {
     val selected = navigator.currentTab
+    val deps = LocalDeps.current
+    val notices by deps.plugins.notices.collectAsState()
+    val readIds by deps.plugins.read.collectAsState()
+    val dismissed by deps.plugins.dismissed.collectAsState()
+    val unread = org.jellyfin.mobile.nflix.data.NoticeFormat.unread(notices, readIds, dismissed)
     Box(
         Modifier
             .fillMaxWidth()
@@ -297,7 +305,12 @@ private fun BottomBar(navigator: Navigator) {
                             verticalArrangement = Arrangement.Center,
                         ) {
                             val iconScale by animateFloatAsState(if (active) 1.06f else 1f, spring(dampingRatio = 0.7f), label = "icon")
-                            Icon(spec.icon, spec.label, tint = if (active) Nflix.Red else Nflix.Muted, modifier = Modifier.size(21.dp).graphicsLayer { scaleX = iconScale; scaleY = iconScale })
+                            Box {
+                                Icon(spec.icon, spec.label, tint = if (active) Nflix.Red else Nflix.Muted, modifier = Modifier.size(21.dp).graphicsLayer { scaleX = iconScale; scaleY = iconScale })
+                                if (spec.tab == Route.Home && unread > 0) {
+                                    Box(Modifier.align(Alignment.TopEnd).offset(x = 3.dp, y = (-2).dp).size(7.dp).clip(CircleShape).background(Nflix.Red))
+                                }
+                            }
                             Text(
                                 spec.label,
                                 style = MaterialTheme.typography.labelSmall,

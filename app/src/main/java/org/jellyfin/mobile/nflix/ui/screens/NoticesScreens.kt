@@ -1,6 +1,7 @@
 package org.jellyfin.mobile.nflix.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -139,7 +140,7 @@ private fun NoticeCard(notice: Notice, unread: Boolean, modifier: Modifier = Mod
     Surface(
         color = Nflix.Surface,
         shape = RoundedCornerShape(18.dp),
-        modifier = modifier.clickable(onClick),
+        modifier = modifier.clickable { onClick() },
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {

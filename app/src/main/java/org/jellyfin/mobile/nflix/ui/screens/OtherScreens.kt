@@ -118,38 +118,6 @@ enum class MiraPlan(val label: String, val color: Color) {
 }
 
 @Composable
-fun NoticesScreen() {
-    val deps = LocalDeps.current
-    val notices by deps.plugins.notices.collectAsState()
-    LaunchedEffect(Unit) { deps.plugins.refreshNotices() }
-    LaunchedEffect(notices) { deps.plugins.markSeen(notices) }
-    Box(Modifier.fillMaxSize()) {
-        LazyColumn(contentPadding = PaddingValues(bottom = ContentBottomPadding)) {
-            item { Text("Annonces", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.statusBarsPadding().padding(start = 64.dp, top = 14.dp, bottom = 12.dp)) }
-            if (notices.isEmpty()) item { EmptyState(Icons.Rounded.Campaign, "Aucune annonce", null) }
-            items(notices, key = { it.id }) { notice ->
-                val color = when (notice.level) { "urgent" -> Nflix.Red; "warning" -> Nflix.Warning; else -> Nflix.Info }
-                Surface(color = Nflix.Surface, shape = RoundedCornerShape(18.dp), modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp).fillMaxWidth().appear()) {
-                    Column(Modifier.padding(16.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.size(10.dp).clip(CircleShape).background(color))
-                            Spacer(Modifier.width(8.dp))
-                            Text(notice.title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                            if (notice.version.isNotBlank()) Text(notice.version, style = MaterialTheme.typography.labelSmall, color = Nflix.Muted)
-                        }
-                        Text(notice.createdAt.take(10), style = MaterialTheme.typography.labelSmall, color = Nflix.Muted)
-                        Spacer(Modifier.height(8.dp))
-                        Text(notice.message, style = MaterialTheme.typography.bodyMedium, color = Nflix.Text.copy(alpha = 0.9f))
-                        if (notice.actionUrl.isNotBlank()) TextButton(onClick = { deps.openUrl(notice.actionUrl) }) { Text(notice.actionLabel.ifBlank { "Ouvrir" }, color = Nflix.Red) }
-                    }
-                }
-            }
-        }
-        BackButton()
-    }
-}
-
-@Composable
 fun ProfileScreen() {
     val deps = LocalDeps.current
     val navigator = LocalNavigator.current

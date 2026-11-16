@@ -633,8 +633,8 @@ private fun TopBar(scrolled: Boolean) {
     val navigator = LocalNavigator.current
     val notices by deps.plugins.notices.collectAsState()
     val dismissed by deps.plugins.dismissed.collectAsState()
-    val seen by deps.plugins.seen.collectAsState()
-    val unread = notices.count { it.id !in dismissed && it.id !in seen }
+    val read by deps.plugins.read.collectAsState()
+    val unread = notices.count { it.id !in dismissed && it.id !in read }
     val alpha by animateFloatAsState(if (scrolled) 0.96f else 0f, tween(250), label = "topbar")
     Column(Modifier.fillMaxWidth().background(Nflix.Night.copy(alpha = alpha))) {
         Row(Modifier.statusBarsPadding().fillMaxWidth().padding(start = 16.dp, end = 6.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically) {

@@ -31,6 +31,7 @@ sealed class Route(val key: String) {
     data object Search : Route("search")
     data object NowPlaying : Route("nowplaying")
     data object Notices : Route("notices")
+    data class NoticeDetail(val id: String) : Route("notices/$id")
     data object Support : Route("support")
     data object Profile : Route("profile")
     data object Badges : Route("badges")
