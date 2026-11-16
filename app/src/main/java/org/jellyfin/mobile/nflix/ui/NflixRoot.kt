@@ -219,6 +219,7 @@ fun NflixRoot(deps: AppDeps, navigator: Navigator, backEnabled: Boolean = true) 
             if (castRemoteOpen.value) CastRemoteSheet(deps.cast) { castRemoteOpen.value = false }
             TrailerHost()
             TutorialHost(backEnabled = backEnabled)
+            FamilyHost()
         }
     }
 }
@@ -259,6 +260,8 @@ private fun Screen(route: Route) {
         Route.AdminButler -> org.jellyfin.mobile.nflix.ui.screens.ButlerScreen()
         Route.SyncAccounts -> org.jellyfin.mobile.nflix.ui.screens.SyncAccountsScreen()
         Route.Settings -> org.jellyfin.mobile.nflix.ui.screens.SettingsScreen()
+        Route.Family -> org.jellyfin.mobile.nflix.ui.screens.FamilyScreen()
+        is Route.FamilyChat -> org.jellyfin.mobile.nflix.ui.screens.FamilyChatScreen(route.id, route.title)
         Route.SeasonalSettings -> org.jellyfin.mobile.nflix.ui.screens.SeasonalSettingsScreen()
         is Route.YtArtist -> org.jellyfin.mobile.nflix.ui.screens.OnlineArtistScreen(null, route.name)
         is Route.OnlineArtist -> org.jellyfin.mobile.nflix.ui.screens.OnlineArtistScreen(route.id, route.name)
@@ -397,3 +400,42 @@ private fun NoticePopup() {
 @Suppress("unused")
 @Composable
 private fun CloseButton(onClick: () -> Unit) = IconButton(onClick = onClick) { Icon(Icons.Rounded.Close, "Fermer") }
+
+/**
+ * Nflix Family at app level: refreshes the badges, and shows "Qui regarde ?" once per start to a
+ * family head using their own profile.
+ */
+@Composable
+private fun FamilyHost() {
+    val deps = LocalDeps.current
+    val store = deps.switcher.store
+    var picker by remember { mutableStateOf<org.jellyfin.mobile.nflix.family.FamilyMe?>(null) }
+    LaunchedEffect(Unit) {
+        val skip = store.skipPickerOnce
+        store.skipPickerOnce = false
+        var first = true
+        while (true) {
+            val me = runCatching { deps.family.me() }.getOrNull()
+            if (me != null && deps.switcher.state == null) store.lastKnownHead = me.isHead
+            if (first && me != null) {
+                first = false
+                val show = org.jellyfin.mobile.nflix.family.ProfileSwitchLogic.shouldShowPicker(
+                    isHead = me.isHead,
+                    state = deps.switcher.state,
+                    enabled = store.pickerEnabled,
+                    alreadyShown = FamilyPickerFlag.shown,
+                    skipOnce = skip,
+                )
+                FamilyPickerFlag.shown = true
+                if (show && (me.family?.members?.size ?: 0) > 1) picker = me
+            }
+            kotlinx.coroutines.delay(120_000)
+        }
+    }
+    picker?.let { me -> org.jellyfin.mobile.nflix.ui.screens.WhoIsWatchingScreen(me) { picker = null } }
+}
+
+/** "Qui regarde ?" shows at most once per process. */
+private object FamilyPickerFlag {
+    var shown = false
+}

@@ -38,6 +38,8 @@ import androidx.compose.material.icons.rounded.AdminPanelSettings
 import androidx.compose.material.icons.rounded.EmojiEvents
 import androidx.compose.material.icons.rounded.Inbox
 import androidx.compose.material.icons.rounded.SyncAlt
+import androidx.compose.material.icons.rounded.Groups
+import androidx.compose.material.icons.rounded.SwitchAccount
 import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Person
@@ -133,6 +135,21 @@ fun ProfileScreen() {
 
     val spaceEntries = buildList {
         if (isAdmin) add(ProfileEntry("admin", Icons.Rounded.AdminPanelSettings, "Administration", "Distributeurs, demandes à valider, activité, bibliothèques", ProfileAccents.Admin) { navigator.open(Route.Admin) })
+        val familyBadge = org.jellyfin.mobile.nflix.family.FamilyBadges.total
+        add(
+            ProfileEntry(
+                "family", Icons.Rounded.Groups,
+                if (familyBadge > 0) "Famille ($familyBadge)" else "Famille",
+                buildList {
+                    if (org.jellyfin.mobile.nflix.family.FamilyBadges.unread > 0) add("${org.jellyfin.mobile.nflix.family.FamilyBadges.unread} message(s) non lu(s)")
+                    if (org.jellyfin.mobile.nflix.family.FamilyBadges.pending > 0) add("${org.jellyfin.mobile.nflix.family.FamilyBadges.pending} demande(s) en attente")
+                }.joinToString(" · ").ifEmpty { "Profils, demandes, amis et messages" },
+                Nflix.Red,
+            ) { navigator.open(Route.Family) },
+        )
+        if (org.jellyfin.mobile.nflix.family.ProfileSwitchLogic.canSwitch(org.jellyfin.mobile.nflix.family.FamilyBadges.me?.isHead == true || deps.switcher.store.lastKnownHead, deps.switcher.state)) {
+            add(ProfileEntry("switch-profile", Icons.Rounded.SwitchAccount, "Changer de profil", "Ouvrir un autre profil de la famille", ProfileAccents.Mira) { navigator.open(Route.Family) })
+        }
         add(ProfileEntry("sync", Icons.Rounded.SyncAlt, "Comptes et playlists", "Importer vos playlists musicales", ProfileAccents.Mira) { navigator.open(Route.SyncAccounts) })
         add(ProfileEntry("releases", Icons.Rounded.CalendarMonth, "Prochaines sorties", "Calendrier des épisodes et films à venir", ProfileAccents.Releases) { navigator.open(Route.Releases) })
     }
@@ -179,6 +196,7 @@ fun ProfileScreen() {
                     modifier = Modifier.staggerIn(entrance, 0),
                 )
             }
+            if (deps.switcher.isSwitched) item(key = "switch-back") { SwitchBackBanner() }
             item(key = "shortcuts") { ProfileShortcuts(shortcuts, Modifier.staggerIn(entrance, 1)) }
             item(key = "section-space") { ProfileSection("Mon espace", spaceEntries, Modifier.staggerIn(entrance, 1)) }
             item(key = "section-news") { ProfileSection("Notifications et actualités", newsEntries, Modifier.staggerIn(entrance, 2)) }

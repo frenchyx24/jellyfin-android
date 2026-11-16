@@ -660,7 +660,10 @@ private fun TopBar(scrolled: Boolean) {
                 IconButton(onClick = { navigator.open(Route.Notices) }) { Icon(Icons.Rounded.Notifications, "Annonces", tint = Color.White) }
                 if (unread > 0) Box(Modifier.align(Alignment.TopEnd).padding(10.dp).size(9.dp).clip(CircleShape).background(Nflix.Red))
             }
-            IconButton(onClick = { navigator.open(Route.Profile) }) { Avatar() }
+            Box {
+                IconButton(onClick = { navigator.open(Route.Profile) }) { Avatar() }
+                if (org.jellyfin.mobile.nflix.family.FamilyBadges.total > 0) Box(Modifier.align(Alignment.TopEnd).padding(8.dp).size(9.dp).clip(CircleShape).background(Nflix.Red))
+            }
         }
         org.jellyfin.mobile.nflix.ui.SeasonalGreeting(visible = !scrolled)
         // Category shortcuts: always labelled, so the user knows where each one leads.

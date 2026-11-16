@@ -55,7 +55,10 @@ class NflixApi(cacheDir: File, private val session: NflixSession, private val ap
     val userId: String get() = session.userId ?: error("No Nflix session")
     val token: String? get() = session.accessToken
 
-    fun authorization(): String {
+    fun authorization(): String = authorization(session.accessToken)
+
+    /** Authorization header for an explicit token (profile switch uses the family head's token). */
+    fun authorization(token: String?): String {
         val device = apiClient.deviceInfo
         val clientInfo = apiClient.clientInfo
         return AuthorizationHeaderBuilder.buildHeader(
@@ -63,8 +66,23 @@ class NflixApi(cacheDir: File, private val session: NflixSession, private val ap
             clientVersion = clientInfo.version,
             deviceId = device.id,
             deviceName = device.name.ifBlank { "Android" },
-            accessToken = session.accessToken,
+            accessToken = token,
         )
+    }
+
+    /** Same as [raw] but authenticated with [token] instead of the current session token. */
+    suspend fun rawAs(method: String, url: HttpUrl, token: String, body: String? = null): String = withContext(Dispatchers.IO) {
+        val payload = body?.toByteArray(Charsets.UTF_8)?.toRequestBody("application/json".toMediaType())
+        val request = Request.Builder().url(url)
+            .header("Authorization", authorization(token))
+            .header("Accept", "application/json")
+            .apply { if (method == "GET") get() else method(method, payload ?: ByteArray(0).toRequestBody(null)) }
+            .build()
+        client.newCall(request).execute().use { response ->
+            val text = response.body?.string().orEmpty()
+            if (!response.isSuccessful) throw NflixHttpException(response.code, "HTTP ${response.code} ${url.encodedPath}", text.take(2048))
+            text
+        }
     }
 
     fun url(path: String, query: Map<String, Any?> = emptyMap()): HttpUrl {

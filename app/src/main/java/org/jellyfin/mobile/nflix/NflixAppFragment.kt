@@ -67,6 +67,21 @@ class NflixAppFragment : Fragment() {
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         horus.userName = session.userName
+        val appContext = requireContext().applicationContext
+        val switcher = org.jellyfin.mobile.nflix.family.FamilySwitcher(
+            api = api,
+            session = session,
+            repo = org.jellyfin.mobile.nflix.family.FamilyRepository(api),
+            store = org.jellyfin.mobile.nflix.family.ProfileSwitchStore(appContext),
+            apply = { login, method ->
+                alerts.clear()
+                runCatching { cast.disconnect() }
+                music.stop()
+                val serverId = mainViewModel.serverState.value.server?.id ?: error("No Nflix server")
+                mainViewModel.completeNflixLogin(serverId, login, method)
+            },
+            restart = { restartApp(appContext) },
+        )
         val deps = AppDeps(
             api = api, jellyfin = jellyfin, plugins = plugins, horus = horus, music = music,
             events = events, session = session, updater = updater, alerts = alerts, alertPrefs = alertPrefs, cast = cast,
@@ -76,12 +91,14 @@ class NflixAppFragment : Fragment() {
                 org.jellyfin.mobile.nflix.data.HomeCache.clear(requireContext().applicationContext)
                 lifecycleScope.launch { cast.disconnect() }
                 lifecycleScope.launch {
+                    runCatching { switcher.forget() }
                     runCatching { api.send("POST", "Sessions/Logout") }
                     music.stop()
                     mainViewModel.signOut()
                 }
             },
             onOpenWeb = { mainViewModel.setWebMode(true) },
+            switcher = switcher,
         )
         return ComposeView(requireContext()).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
@@ -115,6 +132,21 @@ class NflixAppFragment : Fragment() {
         // Signed in: the alerts worker runs every 15 min (Android minimum), like Mira Connect.
         org.jellyfin.mobile.nflix.alerts.NflixAlerts.createChannel(requireContext())
         org.jellyfin.mobile.nflix.alerts.NflixAlerts.schedule(requireContext())
+    }
+
+    /**
+     * Reloads the whole app in a fresh process after a profile switch, so no cache, player or
+     * identity of the previous profile survives.
+     */
+    private fun restartApp(context: android.content.Context) {
+        val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+            ?.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK)
+            ?: return
+        // SharedPreferences writes are asynchronous: give them a moment to reach the disk.
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            context.startActivity(intent)
+            Runtime.getRuntime().exit(0)
+        }, 700)
     }
 
     override fun onDestroyView() {

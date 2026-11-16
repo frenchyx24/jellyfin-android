@@ -41,7 +41,11 @@ class AppDeps(
     private val storageManager: StorageManager,
     val onSignOut: () -> Unit,
     val onOpenWeb: () -> Unit,
+    /** Nflix Family: families, friends, messages and the profile switch. */
+    val switcher: org.jellyfin.mobile.nflix.family.FamilySwitcher,
 ) {
+    val family: org.jellyfin.mobile.nflix.family.FamilyRepository get() = switcher.repo
+
     /** Administration tools; the server enforces rights, the app only hides what a member cannot use. */
     val admin: org.jellyfin.mobile.nflix.data.AdminRepository by lazy { org.jellyfin.mobile.nflix.data.AdminRepository(api, jellyfin, horus) }
 
