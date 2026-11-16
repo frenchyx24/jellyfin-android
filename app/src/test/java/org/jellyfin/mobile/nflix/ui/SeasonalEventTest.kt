@@ -21,10 +21,10 @@ class SeasonalEventTest : FunSpec({
     }
 
     test("theme resolution: forced key, event, season") {
-        NflixSeasonTheme.byKey("winter") shouldBe NflixSeasonTheme.Winter
-        NflixSeasonTheme.byKey("nope") shouldBe null
-        NflixSeasonTheme.resolve("auto", LocalDate.of(2026, 10, 31), events = true).key shouldBe "halloween"
-        NflixSeasonTheme.resolve("auto", LocalDate.of(2026, 10, 31), events = false).key shouldBe "autumn"
-        NflixSeasonTheme.resolve("auto", LocalDate.of(2026, 7, 14), events = true).key shouldBe "summer"
+        NflixSeasonTheme.byKey("Winter") shouldBe NflixSeasonTheme.Winter
+        NflixSeasonTheme.byKey("Nope") shouldBe null
+        NflixSeasonTheme.resolve("auto", LocalDate.of(2026, 10, 31), events = true).key shouldBe "Halloween"
+        NflixSeasonTheme.resolve("auto", LocalDate.of(2026, 10, 31), events = false).key shouldBe "Autumn"
+        NflixSeasonTheme.resolve("auto", LocalDate.of(2026, 7, 14), events = true).key shouldBe "Summer"
     }
 })
