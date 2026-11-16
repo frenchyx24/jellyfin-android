@@ -40,6 +40,11 @@ class PluginRepository(
     val dismissed: StateFlow<Set<String>> = _dismissed.asStateFlow()
     private val _seen = MutableStateFlow(prefs.getStringSet(KEY_SEEN, emptySet()).orEmpty())
     val seen: StateFlow<Set<String>> = _seen.asStateFlow()
+    /** Notices opened in the detail view, persisted; seeded from [KEY_SEEN] so past reads stay read. */
+    private val _read = MutableStateFlow(prefs.getStringSet(KEY_READ, prefs.getStringSet(KEY_SEEN, emptySet())).orEmpty())
+    val read: StateFlow<Set<String>> = _read.asStateFlow()
+    private val _noticesError = MutableStateFlow(false)
+    val noticesError: StateFlow<Boolean> = _noticesError.asStateFlow()
 
     var enhanced: EnhancedConfig = EnhancedConfig()
         private set
@@ -123,11 +128,12 @@ class PluginRepository(
     /** Announcements from NflixNotice and Internal Notifications. */
     suspend fun refreshNotices() {
         val notices = mutableListOf<Notice>()
+        var failures = 0
         runCatching { notices += api.get("Plugins/NflixNotice/Feed", ListSerializer(Notice.serializer())) }
-            .onFailure { Timber.d(it, "NflixNotice unavailable") }
+            .onFailure { failures++; Timber.d(it, "NflixNotice unavailable") }
         // Announcements pushed by Mira Connect to the NflixAuth plugin (server to server).
         runCatching { notices += MiraNotices.visible(api.get("NflixAuth/Announcements/Feed", ListSerializer(Notice.serializer())), miraGroups()) }
-            .onFailure { Timber.d(it, "Mira announcements unavailable") }
+            .onFailure { failures++; Timber.d(it, "Mira announcements unavailable") }
         runCatching {
             val config = api.getJson("InternalNotifications/config").obj()
             (config?.get("Messages") as? JsonArray)?.forEachIndexed { index, element ->
@@ -137,7 +143,8 @@ class PluginRepository(
                 val id = (message["Id"] as? JsonPrimitive)?.contentOrNull ?: "internal-$index-${text?.contentOrNull?.hashCode()}"
                 if (text?.contentOrNull != null) notices += Notice(id = id, title = title?.contentOrNull ?: "Message", message = text.content)
             }
-        }
+        }.onFailure { failures++; Timber.d(it, "Internal notifications unavailable") }
+        _noticesError.value = failures == 3
         _notices.value = notices.sortedWith(compareByDescending<Notice> { it.pinned }.thenByDescending { it.createdAt })
     }
 
@@ -145,6 +152,15 @@ class PluginRepository(
         val next = _seen.value + notices.map { it.id }
         _seen.value = next
         prefs.edit { putStringSet(KEY_SEEN, next) }
+    }
+
+    fun markRead(notice: Notice) = markRead(listOf(notice.id))
+
+    fun markRead(ids: Collection<String>) {
+        val next = _read.value + ids
+        if (next == _read.value) return
+        _read.value = next
+        prefs.edit { putStringSet(KEY_READ, next) }
     }
 
     fun dismiss(notice: Notice) {
@@ -156,6 +172,7 @@ class PluginRepository(
     private companion object {
         const val KEY_DISMISSED = "dismissed_notices"
         const val KEY_SEEN = "seen_notices"
+        const val KEY_READ = "read_notices"
         const val CONFIG_TIMEOUT_MS = 4_000L
     }
 }
