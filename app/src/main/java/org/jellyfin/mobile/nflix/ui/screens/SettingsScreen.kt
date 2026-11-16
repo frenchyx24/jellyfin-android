@@ -82,9 +82,9 @@ import org.jellyfin.mobile.nflix.ui.LocalDeps
 import org.jellyfin.mobile.nflix.ui.LocalNavigator
 import org.jellyfin.mobile.nflix.ui.Nflix
 import org.jellyfin.mobile.nflix.ui.Route
-import org.jellyfin.mobile.nflix.ui.SeasonalEvent
-import org.jellyfin.mobile.nflix.ui.SeasonalScene
-import org.jellyfin.mobile.nflix.ui.SeasonalThemes
+import org.jellyfin.mobile.nflix.ui.NflixSeason
+import org.jellyfin.mobile.nflix.ui.NflixSeasonTheme
+import org.jellyfin.mobile.nflix.ui.SeasonAmbience
 import org.jellyfin.mobile.utils.Constants
 
 // ---- Building blocks (same language as Mira Connect) ----------------------------------------
@@ -225,12 +225,7 @@ fun SettingsScreen() {
     var download by remember { mutableStateOf(prefs.getInt(Constants.PREF_DOWNLOAD_METHOD, 0).coerceIn(0, 2)) }
     fun put(key: String, value: Boolean) = prefs.edit { putBoolean(key, value) }
 
-    val event = SeasonalThemes.active
-    val seasonalSubtitle = when {
-        event != null -> "${event.emoji} ${event.label} en ce moment"
-        !SeasonalThemes.enabled -> "Désactivés"
-        else -> "Noël, Halloween, 14 Juillet, Nouvel An…"
-    }
+    val seasonalSubtitle = NflixSeason.summary
 
     Box(Modifier.fillMaxSize()) {
         LazyColumn(contentPadding = PaddingValues(start = 18.dp, end = 18.dp, bottom = 140.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -239,12 +234,9 @@ fun SettingsScreen() {
             item { SectionLabel("Apparence", Modifier.settleIn(1)) }
             item {
                 GlassCard(Modifier.fillMaxWidth().settleIn(1), onClick = { navigator.open(Route.SeasonalSettings) }) {
-                    // Live miniature of the current (or next) festive theme.
-                    val shown = event ?: SeasonalEvent.Christmas
-                    Box(Modifier.fillMaxWidth().aspectRatio(2.6f).background(Brush.verticalGradient(listOf(shown.deep.copy(alpha = 0.55f), Color(0xFF131317))))) {
-                        SeasonalScene(shown, Modifier.fillMaxSize(), intensity = 0.7f)
-                        Text(shown.emoji, fontSize = 40.sp, modifier = Modifier.align(Alignment.CenterEnd).padding(end = 22.dp))
-                    }
+                    // Live miniature of the active season theme (or the automatic one when off).
+                    val shown = NflixSeason.theme.takeIf { it.isSeasonal } ?: NflixSeason.automatic
+                    SeasonPreview(shown, Modifier.fillMaxWidth().aspectRatio(2.6f), animated = true)
                     Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                         IconTile(Icons.Rounded.Celebration, shown.accent)
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -341,43 +333,51 @@ fun SettingsScreen() {
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun SeasonalSettingsScreen() {
-    val today = remember { java.time.LocalDate.now() }
-    val shown = SeasonalThemes.active ?: SeasonalThemes.preview ?: SeasonalEvent.entries.firstOrNull { it.isActive(today) } ?: SeasonalEvent.Christmas
+    val theme = NflixSeason.theme
+    val shown = theme.takeIf { it.isSeasonal } ?: NflixSeason.automatic
+    val mode = NflixSeason.mode
     Box(Modifier.fillMaxSize()) {
         LazyColumn(contentPadding = PaddingValues(start = 18.dp, end = 18.dp, bottom = 140.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            item { SettingsHeader("Thèmes saisonniers", "Couleurs, décors et animations aux fêtes, sur toute l'application.", Modifier.settleIn(0)) }
+            item { SettingsHeader("Thèmes saisonniers", "Une palette, des formes et une lumière propres à chaque saison, sur toute l'application.", Modifier.settleIn(0)) }
             item {
-                // Big live stage of the current theme.
                 GlassCard(Modifier.fillMaxWidth().settleIn(1)) {
-                    Box(Modifier.fillMaxWidth().aspectRatio(1.5f).background(Brush.verticalGradient(listOf(shown.deep.copy(alpha = 0.7f), Color(0xFF0B0B0E))))) {
-                        SeasonalScene(shown, Modifier.fillMaxSize(), intensity = 1f)
+                    Box(Modifier.fillMaxWidth().aspectRatio(1.6f)) {
+                        SeasonPreview(shown, Modifier.fillMaxSize(), animated = true)
                         Column(Modifier.align(Alignment.BottomStart).padding(18.dp)) {
-                            Text(shown.emoji, fontSize = 44.sp)
-                            Text(shown.greeting, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Black)
-                            Text(if (SeasonalThemes.preview != null) "Aperçu en cours" else shown.period, color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp)
+                            Text(shown.label.uppercase(), color = shown.accentSoft, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+                            Text(shown.tagline, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Black)
+                            Text(
+                                when (mode) { NflixSeason.OFF -> "Désactivé · aperçu du thème automatique"; NflixSeason.AUTO -> "Automatique · ${shown.period}"; else -> "Forcé · ${shown.period}" },
+                                color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp,
+                            )
                         }
                     }
                 }
             }
-            item { SectionLabel("Effets", Modifier.settleIn(2)) }
+            item { SectionLabel("Mode", Modifier.settleIn(2)) }
             item {
                 GlassCard(Modifier.fillMaxWidth().settleIn(2)) {
-                    Column(Modifier.padding(horizontal = 18.dp, vertical = 10.dp)) {
-                        PrefSwitch(Icons.Rounded.Celebration, shown.accent, "Activer les thèmes", "Suit le calendrier des fêtes automatiquement.", SeasonalThemes.enabled, onChange = SeasonalThemes::updateEnabled)
-                        PrefSwitch(Icons.Rounded.Celebration, SettingTints.Sky, "Effets sur toute l'app", "Halo lumineux et particules légères sur chaque écran.", SeasonalThemes.everywhere, onChange = SeasonalThemes::updateEverywhere)
-                        PrefSwitch(Icons.Rounded.Celebration, SettingTints.Mint, "Décor sur la barre", "Neige, guirlandes, citrouilles ou fanions posés sur la barre du bas.", SeasonalThemes.roof, onChange = SeasonalThemes::updateRoof)
-                        PrefSwitch(Icons.Rounded.Celebration, SettingTints.Rose, "Réagir au toucher", "Une petite gerbe festive à chaque appui.", SeasonalThemes.touch, onChange = SeasonalThemes::updateTouch)
-                        PrefSwitch(Icons.Rounded.Celebration, SettingTints.Amber, "Grande scène d'accueil", "Animation complète en haut de l'accueil.", SeasonalThemes.particles, onChange = SeasonalThemes::updateParticles)
-                        SettingChoice(Icons.Rounded.Celebration, SettingTints.Violet, "Intensité", "Quantité de particules et d'effets.", listOf(0 to "Discrète", 1 to "Normale", 2 to "Festive"), SeasonalThemes.intensity, onSelect = SeasonalThemes::updateIntensity)
+                    Column(Modifier.padding(horizontal = 18.dp, vertical = 6.dp)) {
+                        SeasonModeRow("Automatique", "Suit la date : ${NflixSeason.automatic.label} aujourd'hui.", mode == NflixSeason.AUTO) { NflixSeason.updateMode(NflixSeason.AUTO) }
+                        SeasonModeRow("Désactivé", "Toujours l'apparence Nflix d'origine.", mode == NflixSeason.OFF) { NflixSeason.updateMode(NflixSeason.OFF) }
                     }
                 }
             }
-            item { SectionLabel("Fêtes", Modifier.settleIn(3)) }
-            SeasonalEvent.entries.chunked(2).forEachIndexed { row, pair ->
-                item(key = "row-$row") {
+            item { SectionLabel("Forcer une saison", Modifier.settleIn(3)) }
+            NflixSeasonTheme.selectable.chunked(2).forEachIndexed { row, pair ->
+                item(key = "season-$row") {
                     Row(Modifier.fillMaxWidth().settleIn(4 + row), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        pair.forEach { event -> SeasonEventCard(event, today, Modifier.weight(1f)) }
+                        pair.forEach { option -> SeasonThemeCard(option, mode == option.key, Modifier.weight(1f)) }
                         if (pair.size == 1) Spacer(Modifier.weight(1f))
+                    }
+                }
+            }
+            item { SectionLabel("Options", Modifier.settleIn(8)) }
+            item {
+                GlassCard(Modifier.fillMaxWidth().settleIn(8)) {
+                    Column(Modifier.padding(horizontal = 18.dp, vertical = 10.dp)) {
+                        PrefSwitch(Icons.Rounded.Celebration, shown.accent, "Fêtes", "Halloween, Noël et Nouvel An remplacent la saison en mode automatique.", NflixSeason.events, onChange = NflixSeason::updateEvents)
+                        PrefSwitch(Icons.Rounded.Celebration, SettingTints.Sky, "Ambiance animée", "Givre, pollen, lumière dorée ou feuilles. Coupée si les animations système ou l'économiseur de batterie sont actifs.", NflixSeason.ambient, onChange = NflixSeason::updateAmbient)
                     }
                 }
             }
@@ -386,33 +386,52 @@ fun SeasonalSettingsScreen() {
     }
 }
 
+/** Gradient, glow and ambient layer of [theme], for previews. */
 @Composable
-private fun SeasonEventCard(event: SeasonalEvent, today: java.time.LocalDate, modifier: Modifier) {
-    val previewing = SeasonalThemes.preview == event
-    val on = event.name !in SeasonalThemes.disabled
-    val border by animateColorAsState(if (previewing) event.accent else Color(0x18FFFFFF), label = "event-border")
-    Column(
-        modifier.clip(RoundedCornerShape(22.dp)).border(BorderStroke(if (previewing) 2.dp else 1.dp, border), RoundedCornerShape(22.dp))
-            .background(Color(0xFF15151A)).clickable { SeasonalThemes.preview(if (previewing) null else event) },
+private fun SeasonPreview(theme: NflixSeasonTheme, modifier: Modifier, animated: Boolean) {
+    Box(modifier.background(Brush.verticalGradient(listOf(theme.heroGrade, theme.night)))) {
+        SeasonAmbience(Modifier.fillMaxSize(), theme = theme, strength = if (animated) 0.8f else 0.4f, animated = animated)
+    }
+}
+
+@Composable
+private fun SeasonModeRow(title: String, subtitle: String, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(onClick = onClick).padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.fillMaxWidth().aspectRatio(1.25f).background(Brush.verticalGradient(listOf(event.deep.copy(alpha = 0.75f), Color(0xFF0B0B0E))))) {
-            SeasonalScene(event, Modifier.fillMaxSize(), intensity = 0.35f, ambient = false)
-            Text(event.emoji, fontSize = 34.sp, modifier = Modifier.align(Alignment.Center))
-            if (event.isActive(today)) Text(
-                "EN COURS", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp,
-                modifier = Modifier.align(Alignment.TopStart).padding(8.dp).clip(RoundedCornerShape(6.dp)).background(event.accent).padding(horizontal = 6.dp, vertical = 2.dp),
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(title, fontWeight = FontWeight.SemiBold)
+            Text(subtitle, fontSize = 12.sp, color = Nflix.Muted, lineHeight = 17.sp)
+        }
+        androidx.compose.material3.RadioButton(
+            selected = selected, onClick = onClick,
+            colors = androidx.compose.material3.RadioButtonDefaults.colors(selectedColor = Nflix.Red, unselectedColor = Nflix.Muted),
+        )
+    }
+}
+
+@Composable
+private fun SeasonThemeCard(theme: NflixSeasonTheme, selected: Boolean, modifier: Modifier) {
+    val border by animateColorAsState(if (selected) theme.accent else Color(0x18FFFFFF), label = "season-border")
+    val shape = RoundedCornerShape(theme.cardRadius + 8.dp)
+    Column(
+        modifier.clip(shape).border(BorderStroke(if (selected) 2.dp else 1.dp, border), shape)
+            .background(theme.surface).clickable { NflixSeason.updateMode(if (selected) NflixSeason.AUTO else theme.key) },
+    ) {
+        Box(Modifier.fillMaxWidth().aspectRatio(1.4f)) {
+            SeasonPreview(theme, Modifier.fillMaxSize(), animated = false)
+            Row(Modifier.align(Alignment.BottomStart).padding(10.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                listOf(theme.accent, theme.accentSoft, theme.glowAlt).forEach { Box(Modifier.size(10.dp).clip(RoundedCornerShape(3.dp)).background(it)) }
+            }
+            if (theme.key == NflixSeason.automatic.key) Text(
+                "AUJOURD'HUI", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp,
+                modifier = Modifier.align(Alignment.TopStart).padding(8.dp).clip(theme.chipShape).background(theme.accent).padding(horizontal = 6.dp, vertical = 2.dp),
             )
         }
-        Row(Modifier.padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(event.label, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1)
-                Text(if (previewing) "Aperçu · toucher pour arrêter" else event.period, fontSize = 11.sp, color = if (previewing) event.accent else Nflix.Muted, maxLines = 1)
-            }
-            Switch(
-                checked = on, onCheckedChange = { SeasonalThemes.setEventEnabled(event, it) }, enabled = SeasonalThemes.enabled,
-                colors = SwitchDefaults.colors(checkedTrackColor = event.accent, checkedThumbColor = Color.White, uncheckedTrackColor = Nflix.Night, uncheckedBorderColor = Nflix.Outline),
-                modifier = Modifier.graphicsLayer { scaleX = 0.8f; scaleY = 0.8f },
-            )
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Text(theme.label, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1)
+            Text(if (selected) "Forcé · toucher pour revenir en auto" else theme.tagline, fontSize = 11.sp, color = if (selected) theme.accentSoft else theme.muted, maxLines = 1)
         }
     }
 }
