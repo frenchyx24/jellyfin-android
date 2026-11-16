@@ -8,6 +8,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import okhttp3.Cache
+import okhttp3.CacheControl
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
@@ -42,6 +43,12 @@ class NflixApi(cacheDir: File, private val session: NflixSession, private val ap
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
+        // Pull-to-refresh must hit the network: without this, OkHttp may answer GETs from its
+        // disk cache (Jellyfin sends no Cache-Control on most plugin routes), so a swipe
+        // appeared to do nothing.
+        .addNetworkInterceptor { chain ->
+            chain.proceed(chain.request().newBuilder().cacheControl(CacheControl.FORCE_NETWORK).build())
+        }
         .build()
 
     val userId: String get() = session.userId ?: error("No Nflix session")

@@ -58,6 +58,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
@@ -152,6 +153,7 @@ fun HomeScreen() {
     val deps = LocalDeps.current
     val navigator = LocalNavigator.current
     val reloader = rememberReloader()
+    var refreshing by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val userData by deps.jellyfin.userDataChanges.collectAsState()
@@ -170,8 +172,17 @@ fun HomeScreen() {
     val scrolled by remember { derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 260 } }
 
     PullToRefreshBox(
-        isRefreshing = false,
-        onRefresh = { deps.jellyfin.invalidateAll(); reloader.reload() },
+        isRefreshing = refreshing,
+        onRefresh = {
+            refreshing = true
+            deps.jellyfin.invalidateAll()
+            reloader.reload()
+            scope.launch {
+                // Give the reload a beat to finish before dropping the spinner.
+                kotlinx.coroutines.delay(600)
+                refreshing = false
+            }
+        },
         modifier = Modifier.fillMaxSize(),
     ) {
         LazyColumn(state = listState, contentPadding = PaddingValues(bottom = ContentBottomPadding), modifier = Modifier.fillMaxSize()) {
