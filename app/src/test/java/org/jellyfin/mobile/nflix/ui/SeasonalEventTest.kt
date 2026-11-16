@@ -5,22 +5,26 @@ import io.kotest.matchers.shouldBe
 import java.time.LocalDate
 
 class SeasonalEventTest : FunSpec({
-    test("Easter dates") {
-        SeasonalEvent.easterSunday(2026) shouldBe LocalDate.of(2026, 4, 5)
-        SeasonalEvent.easterSunday(2027) shouldBe LocalDate.of(2027, 3, 28)
+    test("seasons follow the calendar") {
+        Season.on(LocalDate.of(2026, 1, 15)) shouldBe Season.Winter
+        Season.on(LocalDate.of(2026, 4, 6)) shouldBe Season.Spring
+        Season.on(LocalDate.of(2026, 7, 14)) shouldBe Season.Summer
+        Season.on(LocalDate.of(2026, 10, 31)) shouldBe Season.Autumn
+        Season.on(LocalDate.of(2026, 12, 24)) shouldBe Season.Winter
     }
 
-    test("French holidays resolve on their days") {
-        SeasonalEvent.activeOn(LocalDate.of(2026, 7, 14)) shouldBe SeasonalEvent.Bastille
-        SeasonalEvent.activeOn(LocalDate.of(2026, 10, 31)) shouldBe SeasonalEvent.Halloween
-        SeasonalEvent.activeOn(LocalDate.of(2026, 12, 24)) shouldBe SeasonalEvent.Christmas
-        SeasonalEvent.activeOn(LocalDate.of(2027, 1, 1)) shouldBe SeasonalEvent.NewYear
-        SeasonalEvent.activeOn(LocalDate.of(2026, 11, 11)) shouldBe SeasonalEvent.Armistice
-        SeasonalEvent.activeOn(LocalDate.of(2026, 4, 6)) shouldBe SeasonalEvent.Easter
-        SeasonalEvent.activeOn(LocalDate.of(2026, 11, 4)) shouldBe null
+    test("events tint their days") {
+        SeasonEvent.on(LocalDate.of(2026, 10, 31)) shouldBe SeasonEvent.Halloween
+        SeasonEvent.on(LocalDate.of(2026, 12, 24)) shouldBe SeasonEvent.Christmas
+        SeasonEvent.on(LocalDate.of(2027, 1, 1)) shouldBe SeasonEvent.NewYear
+        SeasonEvent.on(LocalDate.of(2026, 11, 4)) shouldBe null
     }
 
-    test("disabled events are skipped") {
-        SeasonalEvent.activeOn(LocalDate.of(2026, 12, 24), setOf("Christmas")) shouldBe null
+    test("theme resolution: forced key, event, season") {
+        NflixSeasonTheme.byKey("winter") shouldBe NflixSeasonTheme.Winter
+        NflixSeasonTheme.byKey("nope") shouldBe null
+        NflixSeasonTheme.resolve("auto", LocalDate.of(2026, 10, 31), events = true).key shouldBe "halloween"
+        NflixSeasonTheme.resolve("auto", LocalDate.of(2026, 10, 31), events = false).key shouldBe "autumn"
+        NflixSeasonTheme.resolve("auto", LocalDate.of(2026, 7, 14), events = true).key shouldBe "summer"
     }
 })
