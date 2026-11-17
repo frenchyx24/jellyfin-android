@@ -120,6 +120,8 @@ android {
             dimension = "variant"
             buildConfigField("boolean", "IS_PROPRIETARY", "true")
             buildConfigField("boolean", "STORE_UPDATES", "false")
+            // Play automatic protection requires API 24+.
+            minSdk = 24
         }
     }
 
