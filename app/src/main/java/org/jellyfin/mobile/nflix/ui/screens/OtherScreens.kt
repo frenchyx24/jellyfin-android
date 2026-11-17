@@ -170,7 +170,7 @@ fun ProfileScreen() {
     )
     val appEntries = buildList {
         add(ProfileEntry("tv", Icons.Rounded.Tv, "Connecter une TV", "Rechercher les TV Nflix sur votre Wi-Fi, ou saisir leur code", ProfileAccents.Releases) { org.jellyfin.mobile.nflix.tv.TvLink.openDiscovery() })
-        add(ProfileEntry("updates", Icons.Rounded.SystemUpdate, "Mises à jour", "Version ${BuildConfig.VERSION_NAME}", ProfileAccents.Updates) { scope.launch { deps.updater.check(force = true) } })
+        if (BuildConfig.STORE_UPDATES) add(ProfileEntry("updates", Icons.Rounded.SystemUpdate, "Mises à jour", "Version ${BuildConfig.VERSION_NAME}", ProfileAccents.Updates) { scope.launch { deps.updater.check(force = true) } })
         if (miraInstalled) {
             add(
                 ProfileEntry("mira", Icons.Rounded.Key, "Mira Connect", "Gérer votre compte Mira", ProfileAccents.Mira) {

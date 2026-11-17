@@ -315,7 +315,7 @@ fun SettingsScreen() {
                 GlassCard(Modifier.fillMaxWidth().settleIn(5)) {
                     Column(Modifier.padding(horizontal = 18.dp, vertical = 10.dp)) {
                         SettingLink(Icons.Rounded.NotificationsActive, SettingTints.Coral, "Notifications", "Demandes, séries suivies, succès") { navigator.open(Route.AlertSettings) }
-                        SettingLink(Icons.Rounded.SystemUpdate, SettingTints.Mint, "Rechercher une mise à jour", "Version ${BuildConfig.VERSION_NAME}") { scope.launch { deps.updater.check(force = true) } }
+                        if (BuildConfig.STORE_UPDATES) SettingLink(Icons.Rounded.SystemUpdate, SettingTints.Mint, "Rechercher une mise à jour", "Version ${BuildConfig.VERSION_NAME}") { scope.launch { deps.updater.check(force = true) } }
                         SettingLink(Icons.Rounded.School, SettingTints.Amber, "Didacticiel", "Revoir la présentation de Nflix") { org.jellyfin.mobile.nflix.ui.tutorial.Tutorial.open() }
                         SettingLink(Icons.AutoMirrored.Rounded.OpenInNew, SettingTints.Sky, "Réglages Android de l'app", "Autorisations, stockage, notifications", external = true) {
                             runCatching { context.startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))) }

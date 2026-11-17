@@ -106,11 +106,20 @@ android {
         register("libre") {
             dimension = "variant"
             buildConfigField("boolean", "IS_PROPRIETARY", "false")
+            buildConfigField("boolean", "STORE_UPDATES", "true")
         }
         register("proprietary") {
             dimension = "variant"
             buildConfigField("boolean", "IS_PROPRIETARY", "true")
+            buildConfigField("boolean", "STORE_UPDATES", "true")
             isDefault = true
+        }
+        // Google Play build: same features as proprietary, but updates come from Play only
+        // (no self-update prompt pointing to the Mira store).
+        register("play") {
+            dimension = "variant"
+            buildConfigField("boolean", "IS_PROPRIETARY", "true")
+            buildConfigField("boolean", "STORE_UPDATES", "false")
         }
     }
 
@@ -151,6 +160,8 @@ android {
     sourceSets {
         getByName("proprietary").res.srcDir(nflixBrandingDir)
         getByName("libre").res.srcDir(nflixBrandingDir)
+        getByName("play").res.srcDir(nflixBrandingDir)
+        getByName("play").java.srcDir("src/proprietary/java")
     }
 }
 
@@ -169,6 +180,7 @@ base.archivesName.set("nflix-android-v${project.getVersionName()}")
 
 dependencies {
     val proprietaryImplementation by configurations
+    val playImplementation by configurations
 
     // Kotlin
     implementation(libs.bundles.coroutines)
@@ -221,6 +233,8 @@ dependencies {
     implementation(libs.bundles.androidx.media3)
     proprietaryImplementation(libs.androidx.media3.cast)
     proprietaryImplementation(libs.bundles.playservices)
+    playImplementation(libs.androidx.media3.cast)
+    playImplementation(libs.bundles.playservices)
     implementation(libs.libass.media)
 
     // Room

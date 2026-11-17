@@ -47,6 +47,8 @@ class NflixUpdater(private val context: Context) {
 
     /** Looks for an update; reminders for a postponed version come back after a day. */
     suspend fun check(force: Boolean = false) {
+        // Play builds are updated by Google Play only.
+        if (!BuildConfig.STORE_UPDATES) return
         val release = withContext(Dispatchers.IO) {
             runCatching {
                 val connection = (URL(base + "manifest.json").openConnection() as HttpURLConnection).apply {
