@@ -1,8 +1,13 @@
 package org.jellyfin.mobile.nflix.ui.screens
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,6 +28,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -30,12 +36,20 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.automirrored.rounded.Backspace
+import androidx.compose.material.icons.rounded.Block
+import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.Forum
+import androidx.compose.material.icons.rounded.GroupAdd
+import androidx.compose.material.icons.rounded.MarkEmailRead
+import androidx.compose.material.icons.rounded.PersonSearch
+import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -45,6 +59,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -57,6 +72,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -104,21 +122,26 @@ private suspend fun attempt(block: suspend () -> Unit): Boolean = try {
 private enum class FamilyTab(val label: String) { Profiles("Profils"), Requests("Demandes"), Friends("Amis"), Messages("Messages") }
 
 /** "Famille": profiles, requests, friends and messages. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FamilyScreen() {
     val deps = LocalDeps.current
-    val switched = deps.switcher.isSwitched
     var tab by remember { mutableStateOf(FamilyTab.Profiles) }
     var me by remember { mutableStateOf<FamilyMe?>(FamilyBadges.me) }
+    // The server knows when this session comes from a profile switch, even if local state was lost.
+    val switched = deps.switcher.isSwitched || me?.isSwitched == true
     var error by remember { mutableStateOf<String?>(null) }
     var reload by remember { mutableIntStateOf(0) }
+    var refreshing by remember { mutableStateOf(false) }
     val refresh: () -> Unit = { reload++ }
     LaunchedEffect(reload) {
         try {
-            me = deps.family.me().also { if (!switched) deps.switcher.store.lastKnownHead = it.isHead }
+            me = deps.family.me().also { if (!deps.switcher.isSwitched && !it.isSwitched) deps.switcher.store.lastKnownHead = it.isHead }
             error = null
         } catch (e: FamilyException) {
             error = e.message
+        } finally {
+            refreshing = false
         }
     }
 
@@ -141,14 +164,16 @@ fun FamilyScreen() {
                 }
             }
             val current = me
-            when {
-                current == null && error != null -> ErrorBox(error!!, refresh)
-                current == null -> Box(Modifier.fillMaxWidth().padding(40.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Nflix.Red) }
-                else -> when (tab) {
-                    FamilyTab.Profiles -> ProfilesTab(current, switched, refresh)
-                    FamilyTab.Requests -> RequestsTab(current, switched, refresh)
-                    FamilyTab.Friends -> FriendsTab(refresh)
-                    FamilyTab.Messages -> MessagesTab()
+            PullToRefreshBox(isRefreshing = refreshing, onRefresh = { refreshing = true; reload++ }, modifier = Modifier.weight(1f).fillMaxWidth()) {
+                when {
+                    current == null && error != null -> ErrorBox(error!!, refresh)
+                    current == null -> ProfilesSkeleton()
+                    else -> when (tab) {
+                        FamilyTab.Profiles -> ProfilesTab(current, switched, refresh)
+                        FamilyTab.Requests -> RequestsTab(current, switched, refresh)
+                        FamilyTab.Friends -> FriendsTab(refresh, reload, canInvite = current.isHead && !switched)
+                        FamilyTab.Messages -> MessagesTab(reload)
+                    }
                 }
             }
         }
@@ -175,12 +200,84 @@ private fun TabChip(label: String, selected: Boolean, badge: String?, modifier: 
 
 @Composable
 private fun ErrorBox(message: String, retry: () -> Unit) {
-    Column(Modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(message, color = Nflix.Muted, textAlign = TextAlign.Center)
-        Spacer(Modifier.height(12.dp))
-        OutlinedButton(onClick = retry) { Text("Réessayer") }
+    LazyColumn(Modifier.fillMaxSize()) {
+        item {
+            EmptyState(Icons.Rounded.Refresh, "Impossible de charger la famille", message) {
+                OutlinedButton(onClick = retry) { Text("Réessayer") }
+            }
+        }
     }
 }
+
+/** Icon, title and hint shown when a list is empty. */
+@Composable
+private fun EmptyState(icon: ImageVector, title: String, text: String? = null, action: (@Composable () -> Unit)? = null) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 40.dp).appear(0), horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(Modifier.size(76.dp).clip(CircleShape).background(Nflix.SurfaceHigh), contentAlignment = Alignment.Center) {
+            Icon(icon, null, tint = Nflix.Muted, modifier = Modifier.size(36.dp))
+        }
+        Spacer(Modifier.height(14.dp))
+        Text(title, color = Nflix.Text, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, textAlign = TextAlign.Center)
+        if (text != null) Text(text, color = Nflix.Muted, fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 4.dp))
+        if (action != null) { Spacer(Modifier.height(14.dp)); action() }
+    }
+}
+
+/** Shimmer-free placeholder grid while the family loads. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ProfilesSkeleton() {
+    val pulse = remember { Animatable(0.35f) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            pulse.animateTo(0.7f, tween(700))
+            pulse.animateTo(0.35f, tween(700))
+        }
+    }
+    FlowRow(Modifier.fillMaxWidth().padding(20.dp), horizontalArrangement = Arrangement.spacedBy(18.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+        repeat(4) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(Modifier.size(96.dp).clip(RoundedCornerShape(22.dp)).background(Nflix.SurfaceHigh.copy(alpha = pulse.value)))
+                Spacer(Modifier.height(8.dp))
+                Box(Modifier.size(64.dp, 12.dp).clip(RoundedCornerShape(6.dp)).background(Nflix.SurfaceHigh.copy(alpha = pulse.value)))
+            }
+        }
+    }
+}
+
+/** Fade + rise when the item first appears, staggered by [index]. */
+@Composable
+private fun Modifier.appear(index: Int): Modifier {
+    val progress = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay((index * 45L).coerceAtMost(400L))
+        progress.animateTo(1f, spring(dampingRatio = 0.75f, stiffness = 260f))
+    }
+    return graphicsLayer {
+        alpha = progress.value.coerceIn(0f, 1f)
+        translationY = (1f - progress.value) * 36f
+        val sc = 0.94f + 0.06f * progress.value
+        scaleX = sc
+        scaleY = sc
+    }
+}
+
+/** Confirmation dialog for destructive or important actions. */
+@Composable
+private fun ConfirmDialog(title: String, text: String, confirmLabel: String, danger: Boolean, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = { Text(text, color = Nflix.Muted) },
+        confirmButton = {
+            Button(onClick = { onDismiss(); onConfirm() }, colors = ButtonDefaults.buttonColors(containerColor = if (danger) Nflix.Red else Nflix.SurfaceHigh)) { Text(confirmLabel) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Annuler") } },
+    )
+}
+
+/** A confirmation waiting for the user. */
+private data class Ask(val title: String, val text: String, val label: String, val danger: Boolean, val action: suspend () -> Unit)
 
 /** Visible while a head uses another profile. */
 @Composable
@@ -215,7 +312,8 @@ private fun ProfilesTab(me: FamilyMe, switched: Boolean, refresh: () -> Unit) {
     var editing by remember { mutableStateOf<FamilyMemberInfo?>(null) }
     var pinFor by remember { mutableStateOf<FamilyMemberInfo?>(null) }
     var inviteOpen by remember { mutableStateOf(false) }
-    var confirm by remember { mutableStateOf<Pair<String, suspend () -> Unit>?>(null) }
+    var ask by remember { mutableStateOf<Ask?>(null) }
+    var pinError by remember { mutableStateOf<String?>(null) }
     val canSwitch = ProfileSwitchLogic.canSwitch(me.isHead, deps.switcher.state) && !switched
 
     LazyColumn(contentPadding = PaddingValues(bottom = ContentBottomPadding)) {
@@ -232,16 +330,17 @@ private fun ProfilesTab(me: FamilyMe, switched: Boolean, refresh: () -> Unit) {
         }
         item {
             FlowRow(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                family.members.forEach { member ->
+                family.members.forEachIndexed { index, member ->
                     val isMe = ProfileSwitchLogic.sameUser(member.userId, me.userId)
                     ProfileTile(
                         member = member,
                         isMe = isMe,
+                        index = index,
                         onClick = {
                             when {
                                 isMe -> Unit
                                 !canSwitch -> Unit
-                                member.hasPin -> pinFor = member
+                                member.hasPin -> { pinError = null; pinFor = member }
                                 else -> scope.launch { attempt { deps.switcher.switchTo(member, null) } }
                             }
                         },
@@ -262,11 +361,11 @@ private fun ProfilesTab(me: FamilyMe, switched: Boolean, refresh: () -> Unit) {
         if (!switched) {
             item {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { confirm = "Quitter la famille « ${family.name} » ?" to { if (attempt { deps.family.leave() }) refresh() } }, modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(onClick = { ask = Ask("Quitter la famille ?", "Vous ne verrez plus les profils ni la conversation de « ${family.name} ».", "Quitter", true) { if (attempt { deps.family.leave() }) refresh() } }, modifier = Modifier.fillMaxWidth()) {
                         Text("Quitter la famille")
                     }
                     if (me.isHead) {
-                        OutlinedButton(onClick = { confirm = "Supprimer la famille « ${family.name} » ? Les messages de groupe seront effacés." to { if (attempt { deps.family.deleteFamily() }) refresh() } }, modifier = Modifier.fillMaxWidth()) {
+                        OutlinedButton(onClick = { ask = Ask("Supprimer la famille ?", "« ${family.name} », ses profils et sa conversation de groupe seront supprimés. Cette action est définitive.", "Supprimer", true) { if (attempt { deps.family.deleteFamily() }) refresh() } }, modifier = Modifier.fillMaxWidth()) {
                             Text("Supprimer la famille", color = Nflix.Red)
                         }
                     }
@@ -276,15 +375,32 @@ private fun ProfilesTab(me: FamilyMe, switched: Boolean, refresh: () -> Unit) {
     }
 
     editing?.let { member ->
-        ProfileEditDialog(member, isHead = me.isHead && !switched, isMe = ProfileSwitchLogic.sameUser(member.userId, me.userId), onDismiss = { editing = null }) {
+        ProfileEditDialog(
+            member, isHead = me.isHead && !switched, isMe = ProfileSwitchLogic.sameUser(member.userId, me.userId),
+            onDismiss = { editing = null },
+            onMemberAction = { action ->
+                editing = null
+                ask = when (action) {
+                    "promote" -> Ask("Nommer ${member.displayName} responsable ?", "Un responsable gère la famille et peut ouvrir tous les profils.", "Nommer", false) { if (attempt { deps.family.memberAction(member.userId, action) }) refresh() }
+                    "demote" -> Ask("Retirer le rôle de responsable ?", "${member.displayName} redeviendra simple membre.", "Retirer le rôle", true) { if (attempt { deps.family.memberAction(member.userId, action) }) refresh() }
+                    else -> Ask("Retirer ${member.displayName} de la famille ?", "Les sessions ouvertes depuis ce profil seront fermées.", "Retirer", true) { if (attempt { deps.family.memberAction(member.userId, action) }) refresh() }
+                }
+            },
+        ) {
             editing = null
             refresh()
         }
     }
     pinFor?.let { member ->
-        PinDialog("Code PIN de ${member.displayName}", onDismiss = { pinFor = null }) { pin ->
+        PinDialog(member, error = pinError, busy = deps.switcher.busy, onDismiss = { pinFor = null }) { pin ->
             scope.launch {
-                if (attempt { deps.switcher.switchTo(member, pin) }) pinFor = null
+                pinError = null
+                try {
+                    deps.switcher.switchTo(member, pin)
+                    pinFor = null
+                } catch (e: FamilyException) {
+                    pinError = e.message ?: "Code PIN incorrect."
+                }
             }
         }
     }
@@ -299,14 +415,7 @@ private fun ProfilesTab(me: FamilyMe, switched: Boolean, refresh: () -> Unit) {
             }
         }
     }
-    confirm?.let { (text, action) ->
-        AlertDialog(
-            onDismissRequest = { confirm = null },
-            text = { Text(text) },
-            confirmButton = { TextButton(onClick = { confirm = null; scope.launch { action() } }) { Text("Confirmer", color = Nflix.Red) } },
-            dismissButton = { TextButton(onClick = { confirm = null }) { Text("Annuler") } },
-        )
-    }
+    ask?.let { a -> ConfirmDialog(a.title, a.text, a.label, a.danger, onDismiss = { ask = null }) { scope.launch { a.action() } } }
 }
 
 @Composable
@@ -355,7 +464,9 @@ private fun NoFamily(refresh: () -> Unit) {
 private fun MemberAvatar(member: FamilyMemberInfo, size: Int) {
     val deps = LocalDeps.current
     val image = if (member.useUserImage && member.hasImage) deps.api.userImageUrl(member.userId, null) else null
-    Box(Modifier.size(size.dp).clip(RoundedCornerShape((size / 6).dp)).background(parseColor(member.avatarColor)), contentAlignment = Alignment.Center) {
+    val base = parseColor(member.avatarColor)
+    val dark = Color(base.red * 0.6f, base.green * 0.6f, base.blue * 0.6f, 1f)
+    Box(Modifier.size(size.dp).clip(RoundedCornerShape((size * 0.22f).dp)).background(Brush.linearGradient(listOf(base, dark))), contentAlignment = Alignment.Center) {
         AvatarImage(image, Modifier.size(size.dp)) {
             Text(FamilyFormat.initials(member.displayName), fontSize = (size / 3).sp, fontWeight = FontWeight.Bold, color = Color.White)
         }
@@ -363,20 +474,39 @@ private fun MemberAvatar(member: FamilyMemberInfo, size: Int) {
 }
 
 @Composable
-private fun ProfileTile(member: FamilyMemberInfo, isMe: Boolean, onClick: () -> Unit, onEdit: (() -> Unit)?) {
-    Column(Modifier.width(96.dp).clickable(onClick = onClick), horizontalAlignment = Alignment.CenterHorizontally) {
+private fun ProfileTile(member: FamilyMemberInfo, isMe: Boolean, index: Int, onClick: () -> Unit, onEdit: (() -> Unit)?, size: Int = 96, light: Boolean = false) {
+    val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(if (pressed) 0.93f else 1f, spring(dampingRatio = 0.5f, stiffness = 600f), label = "tile-press")
+    Column(
+        Modifier.width((size + 12).dp).appear(index).graphicsLayer { scaleX = scale; scaleY = scale }
+            .clickable(interactionSource = interaction, indication = null, onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
         Box {
-            Box(if (isMe) Modifier.border(2.dp, Color.White, RoundedCornerShape(16.dp)).padding(2.dp) else Modifier) { MemberAvatar(member, 88) }
-            if (member.hasPin) Icon(Icons.Rounded.Lock, "PIN", tint = Color.White, modifier = Modifier.align(Alignment.BottomEnd).padding(4.dp).size(16.dp))
+            Box(if (isMe) Modifier.border(2.dp, Color.White, RoundedCornerShape((size * 0.25f).dp)).padding(3.dp) else Modifier.padding(3.dp)) { MemberAvatar(member, size) }
+            if (member.isKid) {
+                Text("ENFANT", fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF1A1A1A), letterSpacing = 0.6.sp,
+                    modifier = Modifier.align(Alignment.TopCenter).clip(RoundedCornerShape(50))
+                        .background(Brush.horizontalGradient(listOf(Color(0xFFFFB300), Color(0xFFFF6F00)))).padding(horizontal = 7.dp, vertical = 2.dp))
+            }
+            if (member.hasPin) {
+                Box(Modifier.align(Alignment.BottomEnd).size(24.dp).clip(CircleShape).background(Color(0xFF111111)).border(2.dp, Nflix.Night, CircleShape), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Rounded.Lock, "Protégé par un code PIN", tint = Color.White, modifier = Modifier.size(13.dp))
+                }
+            }
             if (onEdit != null) {
-                Box(Modifier.align(Alignment.TopEnd).padding(2.dp).size(26.dp).clip(CircleShape).background(Color.Black.copy(alpha = .6f)).clickable(onClick = onEdit), contentAlignment = Alignment.Center) {
+                Box(Modifier.align(Alignment.TopEnd).size(28.dp).clip(CircleShape).background(Color.Black.copy(alpha = .65f)).clickable(onClick = onEdit), contentAlignment = Alignment.Center) {
                     Icon(Icons.Rounded.Edit, "Modifier", tint = Color.White, modifier = Modifier.size(15.dp))
                 }
             }
         }
-        Spacer(Modifier.height(6.dp))
-        Text(member.displayName, color = Nflix.Text, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text(if (isMe) "Vous" else FamilyFormat.roleLabel(member), color = Nflix.Muted, fontSize = 11.sp)
+        Spacer(Modifier.height(8.dp))
+        Text(member.displayName, color = if (light) Color.White else Nflix.Text, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (member.isHead) Icon(Icons.Rounded.Star, null, tint = Color(0xFFFFC35A), modifier = Modifier.size(12.dp).padding(end = 2.dp))
+            Text(if (isMe) "Vous" else FamilyFormat.roleLabel(member), color = if (member.isHead) Color(0xFFFFC35A) else Nflix.Muted, fontSize = 11.sp)
+        }
     }
 }
 
@@ -419,7 +549,7 @@ private fun ActivitySection() {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ProfileEditDialog(member: FamilyMemberInfo, isHead: Boolean, isMe: Boolean, onDismiss: () -> Unit, onDone: () -> Unit) {
+private fun ProfileEditDialog(member: FamilyMemberInfo, isHead: Boolean, isMe: Boolean, onDismiss: () -> Unit, onMemberAction: (String) -> Unit, onDone: () -> Unit) {
     val deps = LocalDeps.current
     val scope = rememberCoroutineScope()
     var name by remember { mutableStateOf(member.displayName) }
@@ -448,14 +578,15 @@ private fun ProfileEditDialog(member: FamilyMemberInfo, isHead: Boolean, isMe: B
                         Switch(kid, { kid = it })
                     }
                 }
-                OutlinedTextField(
+                val canPin = isMe || (isHead && !member.isHead)
+                if (canPin) OutlinedTextField(
                     pin, { v -> pin = v.filter(Char::isDigit).take(8); clearPin = false },
                     label = { Text(if (member.hasPin) "Nouveau code PIN (4 à 8 chiffres)" else "Code PIN (facultatif)") },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                 )
-                if (member.hasPin) {
+                if (canPin && member.hasPin) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("Retirer le code PIN", Modifier.weight(1f))
                         Switch(clearPin, { clearPin = it; if (it) pin = "" })
@@ -464,10 +595,10 @@ private fun ProfileEditDialog(member: FamilyMemberInfo, isHead: Boolean, isMe: B
                 if (isHead && !isMe) {
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (member.isHead) {
-                            OutlinedButton(onClick = { scope.launch { if (attempt { deps.family.memberAction(member.userId, "demote") }) onDone() } }) { Text("Retirer responsable") }
+                            OutlinedButton(onClick = { onMemberAction("demote") }) { Text("Retirer responsable") }
                         } else {
-                            OutlinedButton(onClick = { scope.launch { if (attempt { deps.family.memberAction(member.userId, "promote") }) onDone() } }) { Text("Nommer responsable") }
-                            OutlinedButton(onClick = { scope.launch { if (attempt { deps.family.memberAction(member.userId, "remove") }) onDone() } }) { Text("Retirer", color = Nflix.Red) }
+                            if (!member.isKid) OutlinedButton(onClick = { onMemberAction("promote") }) { Text("Nommer responsable") }
+                            OutlinedButton(onClick = { onMemberAction("remove") }) { Text("Retirer", color = Nflix.Red) }
                         }
                     }
                 }
@@ -494,38 +625,68 @@ private fun ProfileEditDialog(member: FamilyMemberInfo, isHead: Boolean, isMe: B
     )
 }
 
-/** Numeric PIN pad (4 to 8 digits). */
+/** Numeric PIN pad (4 to 8 digits) with the profile avatar, dots and a shake on a wrong code. */
 @Composable
-fun PinDialog(title: String, onDismiss: () -> Unit, onSubmit: (String) -> Unit) {
+fun PinDialog(member: FamilyMemberInfo, error: String?, busy: Boolean, onDismiss: () -> Unit, onSubmit: (String) -> Unit) {
     var pin by remember { mutableStateOf("") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title) },
-        text = {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                Text("•".repeat(pin.length).ifEmpty { " " }, fontSize = 30.sp, letterSpacing = 6.sp, color = Nflix.Text)
-                Spacer(Modifier.height(10.dp))
-                listOf(listOf("1", "2", "3"), listOf("4", "5", "6"), listOf("7", "8", "9"), listOf("", "0", "<")).forEach { row ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(vertical = 4.dp)) {
-                        row.forEach { key ->
-                            Box(
-                                Modifier.size(58.dp).clip(CircleShape).background(if (key.isEmpty()) Color.Transparent else Nflix.SurfaceHigh)
-                                    .clickable(enabled = key.isNotEmpty()) {
-                                        pin = if (key == "<") pin.dropLast(1) else (pin + key).take(8)
-                                    },
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                if (key == "<") Icon(Icons.AutoMirrored.Rounded.Backspace, "Effacer", tint = Color.White)
-                                else Text(key, fontSize = 22.sp, color = Color.White)
+    val shake = remember { Animatable(0f) }
+    LaunchedEffect(error) {
+        if (error != null) {
+            pin = ""
+            repeat(3) {
+                shake.animateTo(14f, tween(45))
+                shake.animateTo(-14f, tween(45))
+            }
+            shake.animateTo(0f, tween(45))
+        }
+    }
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        Column(
+            Modifier.clip(RoundedCornerShape(28.dp)).background(Color(0xFF141417)).padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            MemberAvatar(member, 72)
+            Spacer(Modifier.height(10.dp))
+            Text(member.displayName, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+            Text("Saisissez le code PIN", color = Nflix.Muted, fontSize = 13.sp)
+            Spacer(Modifier.height(14.dp))
+            Row(Modifier.graphicsLayer { translationX = shake.value }, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                repeat(maxOf(4, pin.length)) { i ->
+                    val filled = i < pin.length
+                    Box(Modifier.size(14.dp).clip(CircleShape).background(if (filled) Color.White else Color.Transparent).border(2.dp, if (filled) Color.White else Nflix.Muted, CircleShape))
+                }
+            }
+            Text(error ?: " ", color = Color(0xFFFF7B82), fontSize = 12.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 8.dp).height(18.dp))
+            Spacer(Modifier.height(6.dp))
+            listOf(listOf("1", "2", "3"), listOf("4", "5", "6"), listOf("7", "8", "9"), listOf("<", "0", "ok")).forEach { row ->
+                Row(horizontalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.padding(vertical = 6.dp)) {
+                    row.forEach { key ->
+                        val enabled = !busy && (key != "ok" || pin.length >= 4)
+                        Box(
+                            Modifier.size(64.dp).clip(CircleShape)
+                                .background(if (key == "ok") Nflix.Red.copy(alpha = if (enabled) 1f else .35f) else Color.White.copy(alpha = .08f))
+                                .clickable(enabled = enabled) {
+                                    when (key) {
+                                        "<" -> pin = pin.dropLast(1)
+                                        "ok" -> onSubmit(pin)
+                                        else -> if (pin.length < 8) pin += key
+                                    }
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            when (key) {
+                                "<" -> Icon(Icons.AutoMirrored.Rounded.Backspace, "Effacer", tint = Color.White)
+                                "ok" -> if (busy) CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(22.dp))
+                                else Icon(Icons.AutoMirrored.Rounded.Send, "Valider", tint = Color.White)
+                                else -> Text(key, fontSize = 24.sp, color = Color.White)
                             }
                         }
                     }
                 }
             }
-        },
-        confirmButton = { TextButton(onClick = { onSubmit(pin) }, enabled = pin.length >= 4) { Text("Valider") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Annuler") } },
-    )
+            TextButton(onClick = onDismiss) { Text("Annuler", color = Nflix.Muted) }
+        }
+    }
 }
 
 @Composable
@@ -584,9 +745,13 @@ private fun RequestsTab(me: FamilyMe, switched: Boolean, refresh: () -> Unit) {
     val pending = me.requests.filter { it.state == "pending" }
     val past = me.requests.filter { it.state != "pending" }.take(20)
     LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = ContentBottomPadding), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (me.requests.isEmpty()) item { Text("Aucune demande ni invitation.", color = Nflix.Muted, modifier = Modifier.padding(16.dp)) }
-        items(pending + past, key = { it.id }) { request ->
-            GlassCard(Modifier.fillMaxWidth()) {
+        if (me.requests.isEmpty()) {
+            item {
+                EmptyState(Icons.Rounded.MarkEmailRead, "Aucune demande", if (me.family == null) "Les invitations à rejoindre une famille apparaîtront ici." else "Les demandes pour rejoindre votre famille apparaîtront ici.")
+            }
+        }
+        itemsIndexed(pending + past, key = { _, r -> r.id }) { index, request ->
+            GlassCard(Modifier.fillMaxWidth().appear(index)) {
                 Column(Modifier.padding(14.dp)) {
                     Text(FamilyFormat.requestTitle(request), color = Nflix.Text, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                     Text("${FamilyFormat.stateLabel(request.state)} · ${FamilyFormat.messageTime(request.createdUtc)}", color = Nflix.Muted, fontSize = 12.sp)
@@ -610,14 +775,15 @@ private fun RequestsTab(me: FamilyMe, switched: Boolean, refresh: () -> Unit) {
 // ------------------------------------------------------------------ friends
 
 @Composable
-private fun FriendsTab(refreshMe: () -> Unit) {
+private fun FriendsTab(refreshMe: () -> Unit, outerReload: Int, canInvite: Boolean) {
     val deps = LocalDeps.current
     val navigator = LocalNavigator.current
     val scope = rememberCoroutineScope()
     var data by remember { mutableStateOf<FriendsInfo?>(null) }
     var reload by remember { mutableIntStateOf(0) }
     var searchOpen by remember { mutableStateOf(false) }
-    LaunchedEffect(reload) { data = runCatching { deps.family.friends() }.getOrNull() ?: data ?: FriendsInfo() }
+    var ask by remember { mutableStateOf<Ask?>(null) }
+    LaunchedEffect(reload, outerReload) { data = runCatching { deps.family.friends() }.getOrNull() ?: data ?: FriendsInfo() }
     val act: (String, String) -> Unit = { id, action ->
         scope.launch {
             if (attempt { deps.family.friendAction(id, action) }) {
@@ -632,7 +798,7 @@ private fun FriendsTab(refreshMe: () -> Unit) {
             Button(onClick = { searchOpen = true }, colors = ButtonDefaults.buttonColors(containerColor = Nflix.Red), modifier = Modifier.fillMaxWidth()) { Text("Ajouter un ami") }
         }
         if (current == null) {
-            item { CircularProgressIndicator(color = Nflix.Red) }
+            item { Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Nflix.Red) } }
             return@LazyColumn
         }
         if (current.incoming.isNotEmpty()) {
@@ -641,6 +807,9 @@ private fun FriendsTab(refreshMe: () -> Unit) {
                 FriendRow(f.userId, f.userName, f.hasImage) {
                     TextButton(onClick = { act(f.id, "accept") }) { Text("Accepter") }
                     TextButton(onClick = { act(f.id, "decline") }) { Text("Refuser", color = Nflix.Muted) }
+                    IconButton(onClick = { ask = Ask("Bloquer ${f.userName} ?", "Cette personne ne pourra plus vous écrire, vous inviter ni vous envoyer de demande.", "Bloquer", true) { act(f.userId, "block") } }) {
+                        Icon(Icons.Rounded.Block, "Bloquer", tint = Nflix.Muted)
+                    }
                 }
             }
         }
@@ -651,7 +820,7 @@ private fun FriendsTab(refreshMe: () -> Unit) {
             }
         }
         item { SectionLabel("Amis (${current.friends.size})") }
-        if (current.friends.isEmpty()) item { Text("Pas encore d’amis. Ajoutez-en avec leur nom d’utilisateur.", color = Nflix.Muted, fontSize = 13.sp) }
+        if (current.friends.isEmpty()) item { EmptyState(Icons.Rounded.PersonSearch, "Pas encore d’amis", "Cherchez un proche par son nom d’utilisateur pour lui envoyer une demande.") }
         items(current.friends, key = { "f-" + it.id }) { f ->
             var menu by remember { mutableStateOf(false) }
             FriendRow(f.userId, f.userName, f.hasImage) {
@@ -669,8 +838,21 @@ private fun FriendsTab(refreshMe: () -> Unit) {
                 AlertDialog(
                     onDismissRequest = { menu = false },
                     title = { Text(f.userName) },
-                    confirmButton = { TextButton(onClick = { menu = false; act(f.id, "remove") }) { Text("Retirer des amis") } },
-                    dismissButton = { TextButton(onClick = { menu = false; act(f.id, "block") }) { Text("Bloquer", color = Nflix.Red) } },
+                    text = {
+                        Column {
+                            if (canInvite) {
+                                TextButton(onClick = {
+                                    menu = false
+                                    scope.launch { if (attempt { deps.family.invite(f.userId) }) Toasts.show("Invitation envoyée à ${f.userName}", ToastKind.Success) }
+                                }) { Icon(Icons.Rounded.GroupAdd, null); Spacer(Modifier.width(8.dp)); Text("Inviter dans la famille") }
+                            }
+                            TextButton(onClick = { menu = false; ask = Ask("Retirer ${f.userName} de vos amis ?", "Vous ne pourrez plus vous écrire.", "Retirer", true) { act(f.id, "remove") } }) { Text("Retirer des amis") }
+                            TextButton(onClick = { menu = false; ask = Ask("Bloquer ${f.userName} ?", "Cette personne ne pourra plus vous écrire, vous inviter ni vous envoyer de demande. Votre amitié sera supprimée.", "Bloquer", true) { act(f.id, "block") } }) {
+                                Text("Bloquer", color = Nflix.Red)
+                            }
+                        }
+                    },
+                    confirmButton = { TextButton(onClick = { menu = false }) { Text("Fermer") } },
                 )
             }
         }
@@ -681,6 +863,7 @@ private fun FriendsTab(refreshMe: () -> Unit) {
             }
         }
     }
+    ask?.let { a -> ConfirmDialog(a.title, a.text, a.label, a.danger, onDismiss = { ask = null }) { scope.launch { a.action() } } }
     if (searchOpen) {
         UserSearchDialog("Ajouter un ami", "Ajouter", onDismiss = { searchOpen = false }) { user ->
             scope.launch {
@@ -706,11 +889,11 @@ private fun FriendRow(userId: String, name: String, hasImage: Boolean, actions: 
 // ------------------------------------------------------------------ messages
 
 @Composable
-private fun MessagesTab() {
+private fun MessagesTab(outerReload: Int) {
     val deps = LocalDeps.current
     val navigator = LocalNavigator.current
     var list by remember { mutableStateOf<List<ConversationInfo>?>(null) }
-    LaunchedEffect(Unit) {
+    LaunchedEffect(outerReload) {
         while (true) {
             list = runCatching { deps.family.conversations() }.getOrNull() ?: list ?: emptyList()
             delay(15_000)
@@ -719,13 +902,21 @@ private fun MessagesTab() {
     val current = list
     LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = ContentBottomPadding), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         when {
-            current == null -> item { CircularProgressIndicator(color = Nflix.Red) }
-            current.isEmpty() -> item { Text("Aucune conversation. Rejoignez une famille ou ajoutez des amis pour discuter.", color = Nflix.Muted, fontSize = 13.sp) }
-            else -> items(current, key = { it.id }) { c ->
+            current == null -> item { Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Nflix.Red) } }
+            current.isEmpty() -> item { EmptyState(Icons.Rounded.Forum, "Aucune conversation", "Rejoignez une famille ou ajoutez des amis pour discuter.") }
+            else -> itemsIndexed(current, key = { _, c -> c.id }) { index, c ->
                 Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Nflix.Surface).clickable { navigator.open(Route.FamilyChat(c.id, c.title)) }.padding(12.dp),
+                    Modifier.fillMaxWidth().appear(index).clip(RoundedCornerShape(18.dp)).background(Nflix.Surface).clickable { navigator.open(Route.FamilyChat(c.id, c.title)) }.padding(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    if (c.kind == "family") {
+                        Box(Modifier.size(44.dp).clip(CircleShape).background(Brush.linearGradient(listOf(Nflix.Red, Color(0xFF6B0A10)))), contentAlignment = Alignment.Center) {
+                            Text(FamilyFormat.initials(c.title), color = Color.White, fontWeight = FontWeight.Bold)
+                        }
+                    } else {
+                        UserBubble(c.peerUserId ?: c.id, c.title, true, 44)
+                    }
+                    Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text((if (c.kind == "family") "Famille · " else "") + c.title, color = Nflix.Text, fontWeight = if (c.unread > 0) FontWeight.Bold else FontWeight.Normal, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         c.lastMessage?.let { m ->
@@ -753,6 +944,8 @@ fun FamilyChatScreen(conversationId: String, title: String) {
     var sending by remember { mutableStateOf(false) }
     var hasOlder by remember { mutableStateOf(true) }
     var poke by remember { mutableIntStateOf(0) }
+    var firstUnread by remember { mutableStateOf<Long?>(null) }
+    var initialised by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
     suspend fun pull() {
@@ -760,6 +953,10 @@ fun FamilyChatScreen(conversationId: String, title: String) {
         val known = messages.map { it.id }.toHashSet()
         val fresh = latest.filter { it.id !in known }
         if (messages.isEmpty() && latest.size < 50) hasOlder = false
+        if (!initialised) {
+            firstUnread = FamilyFormat.firstUnreadId(latest)
+            initialised = true
+        }
         if (fresh.isNotEmpty()) {
             messages.addAll(fresh)
             messages.sortBy { it.id }
@@ -791,7 +988,15 @@ fun FamilyChatScreen(conversationId: String, title: String) {
                         }, modifier = Modifier.fillMaxWidth()) { Text("Messages précédents") }
                     }
                 }
-                items(messages, key = { it.id }) { m -> Bubble(m) }
+                if (initialised && messages.isEmpty()) {
+                    item(key = "empty") { EmptyState(Icons.Rounded.ChatBubbleOutline, "Aucun message", "Dites bonjour !") }
+                }
+                itemsIndexed(messages, key = { _, m -> m.id }) { index, m ->
+                    val previous = messages.getOrNull(index - 1)
+                    if (previous == null || FamilyFormat.dayKey(previous.sentUtc) != FamilyFormat.dayKey(m.sentUtc)) DaySeparator(FamilyFormat.dayLabel(m.sentUtc))
+                    if (m.id == firstUnread) UnreadSeparator()
+                    Bubble(m, grouped = FamilyFormat.continuesGroup(previous, m) && m.id != firstUnread)
+                }
             }
             Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(text, { text = it.take(2000) }, placeholder = { Text("Message") }, modifier = Modifier.weight(1f), maxLines = 4)
@@ -803,6 +1008,7 @@ fun FamilyChatScreen(conversationId: String, title: String) {
                         scope.launch {
                             if (attempt { deps.family.send(conversationId, toSend) }) {
                                 text = ""
+                                firstUnread = null
                                 poke++
                             }
                             sending = false
@@ -816,17 +1022,39 @@ fun FamilyChatScreen(conversationId: String, title: String) {
 }
 
 @Composable
-private fun Bubble(m: MessageInfo) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = if (m.mine) Arrangement.End else Arrangement.Start) {
+private fun DaySeparator(label: String) {
+    Box(Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
+        Text(label.replaceFirstChar { it.titlecase(java.util.Locale.FRANCE) }, fontSize = 11.sp, color = Nflix.Muted,
+            modifier = Modifier.clip(RoundedCornerShape(50)).background(Nflix.SurfaceHigh).padding(horizontal = 10.dp, vertical = 3.dp))
+    }
+}
+
+@Composable
+private fun UnreadSeparator() {
+    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.weight(1f).height(1.dp).background(Nflix.Red.copy(alpha = .6f)))
+        Text("NOUVEAUX MESSAGES", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Nflix.Red, letterSpacing = 0.8.sp, modifier = Modifier.padding(horizontal = 8.dp))
+        Box(Modifier.weight(1f).height(1.dp).background(Nflix.Red.copy(alpha = .6f)))
+    }
+}
+
+@Composable
+private fun Bubble(m: MessageInfo, grouped: Boolean) {
+    val shape = if (m.mine) RoundedCornerShape(18.dp, 18.dp, 6.dp, 18.dp) else RoundedCornerShape(18.dp, 18.dp, 18.dp, 6.dp)
+    Row(Modifier.fillMaxWidth().padding(top = if (grouped) 0.dp else 4.dp), horizontalArrangement = if (m.mine) Arrangement.End else Arrangement.Start, verticalAlignment = Alignment.Bottom) {
+        if (!m.mine) {
+            if (grouped) Spacer(Modifier.width(30.dp)) else UserBubble(m.senderId, m.senderName, true, 30)
+            Spacer(Modifier.width(6.dp))
+        }
         Column(
-            Modifier.widthIn(max = 300.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .background(if (m.mine) Nflix.Red.copy(alpha = .85f) else Nflix.SurfaceHigh)
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+            Modifier.widthIn(max = 290.dp)
+                .clip(shape)
+                .background(if (m.mine) Brush.linearGradient(listOf(Nflix.Red, Color(0xFFB20710))) else Brush.linearGradient(listOf(Nflix.SurfaceHigh, Nflix.SurfaceHigh)))
+                .padding(horizontal = 12.dp, vertical = 7.dp),
         ) {
-            if (!m.mine) Text(m.senderName, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Nflix.Info)
+            if (!m.mine && !grouped) Text(m.senderName, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Nflix.Info)
             Text(m.text, color = Color.White, fontSize = 14.sp)
-            Text(FamilyFormat.messageTime(m.sentUtc), fontSize = 10.sp, color = Color.White.copy(alpha = .7f), modifier = Modifier.align(Alignment.End))
+            Text(FamilyFormat.clock(m.sentUtc), fontSize = 10.sp, color = Color.White.copy(alpha = .7f), modifier = Modifier.align(Alignment.End))
         }
     }
 }
@@ -840,18 +1068,28 @@ fun WhoIsWatchingScreen(me: FamilyMe, onDone: () -> Unit) {
     val deps = LocalDeps.current
     val scope = rememberCoroutineScope()
     var pinFor by remember { mutableStateOf<FamilyMemberInfo?>(null) }
+    var pinError by remember { mutableStateOf<String?>(null) }
     val members = me.family?.members.orEmpty()
-    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .97f)).clickable(enabled = false) {}, contentAlignment = Alignment.Center) {
+    val title = remember { Animatable(0f) }
+    LaunchedEffect(Unit) { title.animateTo(1f, tween(450)) }
+    Box(
+        Modifier.fillMaxSize()
+            .background(Brush.radialGradient(listOf(Color(0xFF3A0508), Color.Black), radius = 1400f))
+            .clickable(enabled = false) {},
+        contentAlignment = Alignment.Center,
+    ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
-            Text("Qui regarde ?", fontSize = 30.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
-            Spacer(Modifier.height(28.dp))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(18.dp, Alignment.CenterHorizontally), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-                members.forEach { member ->
+            Text("Qui regarde ?", fontSize = 32.sp, fontWeight = FontWeight.SemiBold, color = Color.White,
+                modifier = Modifier.graphicsLayer { alpha = title.value; translationY = (1f - title.value) * 30f })
+            Spacer(Modifier.height(32.dp))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(20.dp, Alignment.CenterHorizontally), verticalArrangement = Arrangement.spacedBy(22.dp)) {
+                members.forEachIndexed { index, member ->
                     val isMe = ProfileSwitchLogic.sameUser(member.userId, me.userId)
-                    ProfileTile(member, isMe = false, onClick = {
+                    ProfileTile(member, isMe = false, index = index + 1, size = 104, light = true, onClick = {
                         when {
+                            deps.switcher.busy -> Unit
                             isMe -> onDone()
-                            member.hasPin -> pinFor = member
+                            member.hasPin -> { pinError = null; pinFor = member }
                             else -> scope.launch { attempt { deps.switcher.switchTo(member, null) } }
                         }
                     }, onEdit = null)
@@ -864,8 +1102,16 @@ fun WhoIsWatchingScreen(me: FamilyMe, onDone: () -> Unit) {
         }
     }
     pinFor?.let { member ->
-        PinDialog("Code PIN de ${member.displayName}", onDismiss = { pinFor = null }) { pin ->
-            scope.launch { if (attempt { deps.switcher.switchTo(member, pin) }) pinFor = null }
+        PinDialog(member, error = pinError, busy = deps.switcher.busy, onDismiss = { pinFor = null }) { pin ->
+            scope.launch {
+                pinError = null
+                try {
+                    deps.switcher.switchTo(member, pin)
+                    pinFor = null
+                } catch (e: FamilyException) {
+                    pinError = e.message ?: "Code PIN incorrect."
+                }
+            }
         }
     }
 }

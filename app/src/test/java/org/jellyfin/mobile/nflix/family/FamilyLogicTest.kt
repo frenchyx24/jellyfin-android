@@ -75,4 +75,33 @@ class FamilyLogicTest : FunSpec({
         FamilyFormat.messageTime("2025-11-14T10:05:00Z", now, paris) shouldBe "14/11 11:05"
         FamilyFormat.messageTime(null, now, paris) shouldBe ""
     }
+    test("day separators: today, yesterday, then the French date") {
+        val paris = TimeZone.getTimeZone("Europe/Paris")
+        val now = 1_763_294_400_000L // 2025-11-16T12:00:00Z (Sunday)
+        FamilyFormat.dayLabel("2025-11-16T08:00:00Z", now, paris) shouldBe "Aujourd’hui"
+        FamilyFormat.dayLabel("2025-11-15T08:00:00Z", now, paris) shouldBe "Hier"
+        FamilyFormat.dayLabel("2025-11-13T08:00:00Z", now, paris) shouldBe "jeudi 13 novembre"
+        FamilyFormat.clock("2025-11-16T10:05:00.1234567Z", paris) shouldBe "11:05"
+    }
+    test("first unread message ignores own and read messages") {
+        val list = listOf(
+            MessageInfo(id = 3, mine = false, read = false),
+            MessageInfo(id = 1, mine = false, read = true),
+            MessageInfo(id = 2, mine = true, read = true),
+            MessageInfo(id = 4, mine = false, read = false),
+        )
+        FamilyFormat.firstUnreadId(list) shouldBe 3L
+        FamilyFormat.firstUnreadId(list.map { it.copy(read = true) }) shouldBe null
+    }
+    test("bubbles group by sender within five minutes") {
+        val a = MessageInfo(id = 1, senderId = "x", sentUtc = "2025-11-16T10:00:00Z")
+        FamilyFormat.continuesGroup(a, MessageInfo(id = 2, senderId = "x", sentUtc = "2025-11-16T10:04:00Z")) shouldBe true
+        FamilyFormat.continuesGroup(a, MessageInfo(id = 2, senderId = "x", sentUtc = "2025-11-16T10:06:00Z")) shouldBe false
+        FamilyFormat.continuesGroup(a, MessageInfo(id = 2, senderId = "y", sentUtc = "2025-11-16T10:01:00Z")) shouldBe false
+        FamilyFormat.continuesGroup(null, a) shouldBe false
+    }
+    test("switched flag and read flag default safely when the server is older") {
+        FamilyMe().isSwitched shouldBe false
+        MessageInfo().read shouldBe true
+    }
 })

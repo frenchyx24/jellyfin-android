@@ -10,6 +10,8 @@ data class FamilyMe(
     @SerialName("UserId") val userId: String = "",
     @SerialName("Role") val role: String? = null,
     @SerialName("IsHead") val isHead: Boolean = false,
+    /** True when this session was opened by a profile switch (server truth). */
+    @SerialName("IsSwitched") val isSwitched: Boolean = false,
     @SerialName("Family") val family: FamilyInfo? = null,
     @SerialName("Requests") val requests: List<JoinRequestInfo> = emptyList(),
     @SerialName("PendingRequestCount") val pendingRequestCount: Int = 0,
@@ -100,6 +102,7 @@ data class MessageInfo(
     @SerialName("Mine") val mine: Boolean = false,
     @SerialName("Text") val text: String = "",
     @SerialName("SentUtc") val sentUtc: String? = null,
+    @SerialName("Read") val read: Boolean = true,
 )
 
 @Serializable

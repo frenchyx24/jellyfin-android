@@ -77,4 +77,40 @@ object FamilyFormat {
 
     fun initials(name: String): String =
         name.trim().split(' ', '-', '_').filter { it.isNotEmpty() }.take(2).joinToString("") { it.first().uppercase() }.ifEmpty { "?" }
+
+    private fun parseUtc(iso: String?): java.util.Date? {
+        if (iso == null || iso.length < 19) return null
+        val parser = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.ROOT).apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
+        return runCatching { parser.parse(iso.substring(0, 19)) }.getOrNull()
+    }
+
+    /** "14:05" in [zone]. */
+    fun clock(iso: String?, zone: java.util.TimeZone = java.util.TimeZone.getDefault()): String =
+        parseUtc(iso)?.let { java.text.SimpleDateFormat("HH:mm", java.util.Locale.FRANCE).apply { timeZone = zone }.format(it) } ?: ""
+
+    /** Calendar day key (yyyyMMdd) of a message in [zone], used for the day separators. */
+    fun dayKey(iso: String?, zone: java.util.TimeZone = java.util.TimeZone.getDefault()): String =
+        parseUtc(iso)?.let { java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.ROOT).apply { timeZone = zone }.format(it) } ?: ""
+
+    /** "Aujourd’hui", "Hier" or "lundi 16 novembre" for a day separator. */
+    fun dayLabel(iso: String?, now: Long = System.currentTimeMillis(), zone: java.util.TimeZone = java.util.TimeZone.getDefault()): String {
+        val date = parseUtc(iso) ?: return ""
+        val key = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.ROOT).apply { timeZone = zone }
+        return when (key.format(date)) {
+            key.format(java.util.Date(now)) -> "Aujourd’hui"
+            key.format(java.util.Date(now - 86_400_000L)) -> "Hier"
+            else -> java.text.SimpleDateFormat("EEEE d MMMM", java.util.Locale.FRANCE).apply { timeZone = zone }.format(date)
+        }
+    }
+
+    /** Id of the first message the viewer has not read yet (others' messages only), or null. */
+    fun firstUnreadId(messages: List<MessageInfo>): Long? = messages.sortedBy { it.id }.firstOrNull { !it.mine && !it.read }?.id
+
+    /** True when [message] continues [previous]'s group: same sender, same day, less than 5 minutes apart. */
+    fun continuesGroup(previous: MessageInfo?, message: MessageInfo): Boolean {
+        if (previous == null || previous.senderId != message.senderId) return false
+        val a = parseUtc(previous.sentUtc) ?: return false
+        val b = parseUtc(message.sentUtc) ?: return false
+        return dayKey(previous.sentUtc) == dayKey(message.sentUtc) && b.time - a.time in 0..300_000
+    }
 }
