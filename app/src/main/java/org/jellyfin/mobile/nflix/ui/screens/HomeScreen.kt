@@ -70,6 +70,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import org.jellyfin.mobile.nflix.ui.seasonGlow
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -477,6 +478,9 @@ private fun Hero(items: List<Item>) {
                 .background(Brush.verticalGradient(listOf(Color.Transparent, Nflix.Night.copy(alpha = 0.7f), Nflix.Night))),
         )
 
+        // Themed corners (pumpkins, gifts, eggs…) under the hero text and buttons.
+        org.jellyfin.mobile.nflix.ui.SeasonHeroCorners(Modifier.fillMaxSize(), active = animations)
+
         val current = items.getOrNull(pager.currentPage) ?: return@Box
         val merged = userData[current.id]?.let { current.copy(userData = it) } ?: current
         Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -511,7 +515,10 @@ private fun Hero(items: List<Item>) {
                     scope.launch { deps.jellyfin.setFavorite(merged, !favorite) }
                 }
                 Spacer(Modifier.width(22.dp))
-                Button(
+                val playLabel = if (merged.progress > 0f) "Reprendre" else "Lecture"
+                if (org.jellyfin.mobile.nflix.ui.NflixSeason.theme.isSeasonal && org.jellyfin.mobile.nflix.ui.NflixSeason.decorations) {
+                    org.jellyfin.mobile.nflix.ui.SeasonPlayButton(playLabel, onClick = { deps.play(scope, merged, navigator = navigator) })
+                } else Button(
                     onClick = { deps.play(scope, merged, navigator = navigator) },
                     colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black),
                     shape = RoundedCornerShape(8.dp),
@@ -650,6 +657,10 @@ private fun TopBar(scrolled: Boolean) {
     val read by deps.plugins.read.collectAsState()
     val unread = notices.count { it.id !in dismissed && it.id !in read }
     val alpha by animateFloatAsState(if (scrolled) 0.96f else 0f, tween(250), label = "topbar")
+    val decorAlpha by animateFloatAsState(if (scrolled) 0f else 1f, tween(400), label = "topbar-decor")
+    Box(Modifier.fillMaxWidth()) {
+    // Themed sky (moon, stars, fireworks, corner decorations) behind the top bar; paused once scrolled away.
+    org.jellyfin.mobile.nflix.ui.SeasonHeader(Modifier.matchParentSize().graphicsLayer { this.alpha = decorAlpha }, active = !scrolled)
     Column(Modifier.fillMaxWidth().background(Nflix.Night.copy(alpha = alpha))) {
         Row(Modifier.statusBarsPadding().fillMaxWidth().padding(start = 16.dp, end = 6.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             org.jellyfin.mobile.nflix.ui.AnimatedNflixLogo(deps.plugins.serverLogoUrl, compact = scrolled)
@@ -668,7 +679,7 @@ private fun TopBar(scrolled: Boolean) {
         org.jellyfin.mobile.nflix.ui.SeasonalGreeting(visible = !scrolled)
         // Category shortcuts: always labelled, so the user knows where each one leads.
         LazyRow(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            item { CategoryPill("Séries") { navigator.open(Route.Browse("all", "Séries", "Series")) } }
+            item { CategoryPill("Séries", featured = true) { navigator.open(Route.Browse("all", "Séries", "Series")) } }
             item { CategoryPill("Films") { navigator.open(Route.Browse("all", "Films", "Movie")) } }
             item { CategoryPill("Livres") { navigator.selectTab(Route.Books) } }
             item { CategoryPill("Musique") { navigator.selectTab(Route.Music) } }
@@ -676,13 +687,17 @@ private fun TopBar(scrolled: Boolean) {
             item { CategoryPill("Succès") { navigator.open(Route.Badges) } }
         }
     }
+    }
 }
 
 @Composable
-private fun CategoryPill(label: String, onClick: () -> Unit) {
+private fun CategoryPill(label: String, featured: Boolean = false, onClick: () -> Unit) {
+    val theme = org.jellyfin.mobile.nflix.ui.NflixSeason.theme
+    val glowing = featured && theme.isSeasonal && org.jellyfin.mobile.nflix.ui.NflixSeason.decorations
     Box(
-        Modifier.height(36.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.25f))
-            .border(1.dp, Color.White.copy(alpha = 0.55f), CircleShape).clickable(onClick = onClick).padding(horizontal = 16.dp),
+        Modifier.height(36.dp).then(if (glowing) Modifier.seasonChipGlow(theme) else Modifier).clip(CircleShape).background(Color.Black.copy(alpha = 0.25f))
+            .border(if (glowing) 1.5.dp else 1.dp, if (glowing) theme.accent else Color.White.copy(alpha = 0.55f), CircleShape)
+            .clickable(onClick = onClick).padding(horizontal = 16.dp),
         contentAlignment = Alignment.Center,
     ) { Text(label, style = MaterialTheme.typography.labelLarge, color = Color.White) }
 }
@@ -740,3 +755,7 @@ private fun NoticeBanner() {
         }
     }
 }
+
+/** Glowing accent ring of the featured category chip in a seasonal theme. */
+private fun Modifier.seasonChipGlow(theme: org.jellyfin.mobile.nflix.ui.NflixSeasonTheme): Modifier =
+    seasonGlow(1f, CircleShape, theme.accent)

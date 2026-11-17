@@ -166,7 +166,7 @@ fun ProfileScreen() {
     val seasonalSubtitle = org.jellyfin.mobile.nflix.ui.NflixSeason.summary
     val lookEntries = listOf(
         ProfileEntry("settings", Icons.Rounded.Settings, "Réglages", "Lecteur, musique, téléchargements, application", ProfileAccents.Playback) { navigator.open(Route.Settings) },
-        ProfileEntry("seasonal", Icons.Rounded.Celebration, "Thèmes saisonniers", seasonalSubtitle, Nflix.Red) { navigator.open(Route.SeasonalSettings) },
+        ProfileEntry("seasonal", Icons.Rounded.Celebration, "Thème saisonnier", seasonalSubtitle, Nflix.Red) { navigator.open(Route.SeasonalSettings) },
     )
     val appEntries = buildList {
         add(ProfileEntry("tv", Icons.Rounded.Tv, "Connecter une TV", "Rechercher les TV Nflix sur votre Wi-Fi, ou saisir leur code", ProfileAccents.Releases) { org.jellyfin.mobile.nflix.tv.TvLink.openDiscovery() })

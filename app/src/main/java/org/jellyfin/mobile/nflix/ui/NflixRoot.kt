@@ -20,6 +20,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -291,6 +292,11 @@ private fun BottomBar(navigator: Navigator) {
             .navigationBarsPadding()
             .padding(top = 8.dp),
     ) {
+        // Themed silhouette (graveyard, firs, city…) resting on the bar; drawn outside the bar's
+        // bounds so the bar keeps its height, and never takes touches.
+        SeasonGround(Modifier.align(Alignment.TopCenter).offset(y = (-30).dp).fillMaxWidth().height(40.dp))
+        val season = NflixSeason.theme
+        val seasonal = season.isSeasonal && NflixSeason.decorations
         Surface(color = Nflix.Surface, shape = RoundedCornerShape(0.dp), tonalElevation = 0.dp, shadowElevation = 0.dp) {
             Row(Modifier.fillMaxWidth().padding(4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                     tabs.forEach { spec ->
@@ -300,8 +306,10 @@ private fun BottomBar(navigator: Navigator) {
                             Modifier
                                 .weight(1f)
                                 .height(64.dp)
+                                .then(if (seasonal) Modifier.seasonGlow(background, RoundedCornerShape(16.dp), season.accent) else Modifier)
                                 .clip(RoundedCornerShape(16.dp))
-                                .background(Nflix.Red.copy(alpha = 0.16f * background))
+                                .background(Nflix.Red.copy(alpha = (if (seasonal) 0.24f else 0.16f) * background))
+                                .then(if (seasonal && background > 0.01f) Modifier.border(1.dp, season.accent.copy(alpha = 0.8f * background), RoundedCornerShape(16.dp)) else Modifier)
                                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { navigator.selectTab(spec.tab) }
                                 .padding(vertical = 5.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,

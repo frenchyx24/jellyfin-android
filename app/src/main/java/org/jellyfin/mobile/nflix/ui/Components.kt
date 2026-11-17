@@ -241,6 +241,7 @@ fun SectionHeader(title: String, modifier: Modifier = Modifier, action: String? 
         modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 22.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        SeasonSectionIcon()
         Text(
             title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = Nflix.Text,
             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
