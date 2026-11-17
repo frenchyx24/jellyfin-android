@@ -319,7 +319,7 @@ fun rememberSeasonClock(active: Boolean = true): State<Float> {
     return clock
 }
 
-private class SeasonMote(index: Int, salt: Int) {
+internal class SeasonMote(index: Int, salt: Int) {
     private val r = java.util.Random(index * 7919L + salt * 104729L)
     val x = r.nextFloat()
     val phase = r.nextFloat()
@@ -334,7 +334,7 @@ private class SeasonMote(index: Int, salt: Int) {
     private companion object { val DEPTHS = floatArrayOf(0.55f, 0.85f, 1.2f) }
 }
 
-private fun motes(count: Int, salt: Int) = List(count) { SeasonMote(it, salt) }
+internal fun motes(count: Int, salt: Int) = List(count) { SeasonMote(it, salt) }
 
 private fun wrap(v: Float) = v - floor(v)
 
@@ -611,7 +611,7 @@ private fun DrawScope.unitGlyph(glyph: Glyph, tint: Color, a: Float, t: Float) {
 
 // ---- Particles --------------------------------------------------------------------------------
 
-private fun DrawScope.drawParticles(p: Particles, motes: List<SeasonMote>, t: Float, alpha: Float, sober: Boolean) {
+internal fun DrawScope.drawParticles(p: Particles, motes: List<SeasonMote>, t: Float, alpha: Float, sober: Boolean) {
     val w = size.width
     val h = size.height
     val d = density
@@ -711,7 +711,7 @@ fun SeasonHeader(modifier: Modifier = Modifier, active: Boolean = true, theme: N
     }
 }
 
-private fun DrawScope.drawHeaderScene(theme: NflixSeasonTheme, t: Float) {
+internal fun DrawScope.drawHeaderScene(theme: NflixSeasonTheme, t: Float) {
     val decor = theme.decor
     val w = size.width
     val h = size.height
@@ -977,7 +977,7 @@ fun SeasonHeroCorners(modifier: Modifier = Modifier, active: Boolean = true, the
     Canvas(modifier) { drawHeroCorners(theme, clock.value, size.width, size.height) }
 }
 
-private fun DrawScope.drawHeroCorners(theme: NflixSeasonTheme, t: Float, w: Float, h: Float) {
+internal fun DrawScope.drawHeroCorners(theme: NflixSeasonTheme, t: Float, w: Float, h: Float) {
     val decor = theme.decor
     val d = density
     if (decor.cobwebs) mirrored(w) { drawCobweb(Offset(0f, h * 0.55f), 70f * d) }
@@ -1099,7 +1099,7 @@ fun SeasonGround(modifier: Modifier = Modifier, active: Boolean = true, theme: N
     Canvas(modifier) { drawGround(theme, clock.value, size.width, size.height) }
 }
 
-private fun DrawScope.drawGround(theme: NflixSeasonTheme, t: Float, w: Float, h: Float) {
+internal fun DrawScope.drawGround(theme: NflixSeasonTheme, t: Float, w: Float, h: Float) {
     val decor = theme.decor
     val d = density
     val ink = theme.barSurface
