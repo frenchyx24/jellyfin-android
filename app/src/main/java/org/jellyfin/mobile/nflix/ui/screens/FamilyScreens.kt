@@ -4,6 +4,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -40,6 +41,13 @@ import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Forum
+import androidx.compose.material.icons.rounded.Groups
+import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.Logout
+import androidx.compose.material.icons.rounded.MarkEmailUnread
+import androidx.compose.material.icons.rounded.People
+import androidx.compose.material.icons.rounded.PersonAdd
+import androidx.compose.material.icons.rounded.SwitchAccount
 import androidx.compose.material.icons.rounded.GroupAdd
 import androidx.compose.material.icons.rounded.MarkEmailRead
 import androidx.compose.material.icons.rounded.PersonSearch
@@ -119,7 +127,12 @@ private suspend fun attempt(block: suspend () -> Unit): Boolean = try {
     false
 }
 
-private enum class FamilyTab(val label: String) { Profiles("Profils"), Requests("Demandes"), Friends("Amis"), Messages("Messages") }
+private enum class FamilyTab(val label: String, val icon: ImageVector) {
+    Profiles("Profils", Icons.Rounded.Groups),
+    Requests("Demandes", Icons.Rounded.MarkEmailUnread),
+    Friends("Amis", Icons.Rounded.People),
+    Messages("Messages", Icons.Rounded.Forum),
+}
 
 /** "Famille": profiles, requests, friends and messages. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -145,14 +158,17 @@ fun FamilyScreen() {
         }
     }
 
+    val accent = parseColor(me?.family?.avatarColor)
     Box(Modifier.fillMaxSize().background(Nflix.Night)) {
+        // Soft glow in the family colour behind the header.
+        Box(Modifier.fillMaxWidth().height(320.dp).background(Brush.verticalGradient(listOf(accent.copy(alpha = .38f), accent.copy(alpha = .10f), Color.Transparent))))
         Column(Modifier.fillMaxSize()) {
-            Row(Modifier.statusBarsPadding().padding(start = 64.dp, end = 12.dp, top = 14.dp, bottom = 4.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("Famille", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.weight(1f))
-                IconButton(onClick = refresh) { Icon(Icons.Rounded.Refresh, "Actualiser") }
-            }
+            FamilyHeader(me, refresh)
             if (switched) SwitchBackBanner()
-            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp).clip(RoundedCornerShape(50))
+                    .background(Color.White.copy(alpha = .06f)).padding(4.dp),
+            ) {
                 FamilyTab.entries.forEach { entry ->
                     val count = when (entry) {
                         FamilyTab.Requests -> (me?.pendingRequestCount ?: 0)
@@ -160,19 +176,29 @@ fun FamilyScreen() {
                         FamilyTab.Messages -> (me?.unreadMessageCount ?: 0)
                         else -> 0
                     }
-                    TabChip(entry.label, entry == tab, FamilyFormat.badgeText(count), Modifier.weight(1f)) { tab = entry }
+                    TabChip(entry, entry == tab, FamilyFormat.badgeText(count), Modifier.weight(1f)) { tab = entry }
                 }
             }
             val current = me
             PullToRefreshBox(isRefreshing = refreshing, onRefresh = { refreshing = true; reload++ }, modifier = Modifier.weight(1f).fillMaxWidth()) {
-                when {
-                    current == null && error != null -> ErrorBox(error!!, refresh)
-                    current == null -> ProfilesSkeleton()
-                    else -> when (tab) {
-                        FamilyTab.Profiles -> ProfilesTab(current, switched, refresh)
-                        FamilyTab.Requests -> RequestsTab(current, switched, refresh)
-                        FamilyTab.Friends -> FriendsTab(refresh, reload, canInvite = current.isHead && !switched)
-                        FamilyTab.Messages -> MessagesTab(reload)
+                androidx.compose.animation.AnimatedContent(
+                    targetState = tab,
+                    transitionSpec = {
+                        val dir = if (targetState.ordinal > initialState.ordinal) 1 else -1
+                        (androidx.compose.animation.slideInHorizontally { it / 5 * dir } + androidx.compose.animation.fadeIn(tween(220)))
+                            .togetherWith(androidx.compose.animation.fadeOut(tween(120)))
+                    },
+                    label = "family-tab",
+                ) { shown ->
+                    when {
+                        current == null && error != null -> ErrorBox(error!!, refresh)
+                        current == null -> ProfilesSkeleton()
+                        else -> when (shown) {
+                            FamilyTab.Profiles -> ProfilesTab(current, switched, refresh) { tab = it }
+                            FamilyTab.Requests -> RequestsTab(current, switched, refresh)
+                            FamilyTab.Friends -> FriendsTab(refresh, reload, canInvite = current.isHead && !switched)
+                            FamilyTab.Messages -> MessagesTab(reload)
+                        }
                     }
                 }
             }
@@ -181,19 +207,45 @@ fun FamilyScreen() {
     }
 }
 
+/** Big header: family name, member avatars stacked, counts. */
 @Composable
-private fun TabChip(label: String, selected: Boolean, badge: String?, modifier: Modifier, onClick: () -> Unit) {
-    Box(
-        modifier.clip(RoundedCornerShape(50)).background(if (selected) Nflix.Red else Nflix.SurfaceHigh).clickable(onClick = onClick).padding(vertical = 9.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(label, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color.White, maxLines = 1)
-            if (badge != null) {
-                Spacer(Modifier.width(4.dp))
-                Text(badge, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (selected) Nflix.Red else Color.White,
-                    modifier = Modifier.clip(RoundedCornerShape(50)).background(if (selected) Color.White else Nflix.Red).padding(horizontal = 5.dp, vertical = 1.dp))
+private fun FamilyHeader(me: FamilyMe?, refresh: () -> Unit) {
+    val family = me?.family
+    Row(Modifier.statusBarsPadding().padding(start = 64.dp, end = 10.dp, top = 12.dp, bottom = 6.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(if (family == null) "FAMILLE" else "MA FAMILLE", color = Color.White.copy(alpha = .6f), fontSize = 11.sp, letterSpacing = 2.sp, fontWeight = FontWeight.Bold)
+            Text(family?.name ?: "Nflix Famille", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (family != null) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 6.dp)) {
+                    Box {
+                        family.members.take(5).forEachIndexed { i, m ->
+                            Box(Modifier.padding(start = (i * 20).dp).border(2.dp, Nflix.Night, RoundedCornerShape(10.dp))) { MemberAvatar(m, 28) }
+                        }
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    val n = family.members.size
+                    Text("$n profil${if (n > 1) "s" else ""}" + (if (me.isHead) " · vous êtes responsable" else ""), color = Color.White.copy(alpha = .75f), fontSize = 12.sp)
+                }
             }
+        }
+        IconButton(onClick = refresh) { Icon(Icons.Rounded.Refresh, "Actualiser", tint = Color.White) }
+    }
+}
+
+@Composable
+private fun TabChip(entry: FamilyTab, selected: Boolean, badge: String?, modifier: Modifier, onClick: () -> Unit) {
+    val bg by androidx.compose.animation.animateColorAsState(if (selected) Color.White else Color.Transparent, tween(200), label = "tab-bg")
+    val fg by androidx.compose.animation.animateColorAsState(if (selected) Color(0xFF111111) else Color.White.copy(alpha = .75f), tween(200), label = "tab-fg")
+    Box(modifier.clip(RoundedCornerShape(50)).background(bg).clickable(onClick = onClick).padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Box {
+                Icon(entry.icon, null, tint = fg, modifier = Modifier.size(20.dp))
+                if (badge != null) {
+                    Text(badge, fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color.White,
+                        modifier = Modifier.align(Alignment.TopEnd).padding(start = 14.dp).clip(RoundedCornerShape(50)).background(Nflix.Red).padding(horizontal = 4.dp))
+                }
+            }
+            Text(entry.label, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = fg, maxLines = 1)
         }
     }
 }
@@ -305,7 +357,7 @@ fun SwitchBackBanner(modifier: Modifier = Modifier) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ProfilesTab(me: FamilyMe, switched: Boolean, refresh: () -> Unit) {
+private fun ProfilesTab(me: FamilyMe, switched: Boolean, refresh: () -> Unit, openTab: (FamilyTab) -> Unit) {
     val deps = LocalDeps.current
     val scope = rememberCoroutineScope()
     val family = me.family
@@ -316,57 +368,73 @@ private fun ProfilesTab(me: FamilyMe, switched: Boolean, refresh: () -> Unit) {
     var pinError by remember { mutableStateOf<String?>(null) }
     val canSwitch = ProfileSwitchLogic.canSwitch(me.isHead, deps.switcher.state) && !switched
 
-    LazyColumn(contentPadding = PaddingValues(bottom = ContentBottomPadding)) {
+    val incoming = if (switched) emptyList() else me.requests.filter { it.state == "pending" && it.direction == "incoming" }
+    LazyColumn(contentPadding = PaddingValues(bottom = ContentBottomPadding), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        if (incoming.isNotEmpty()) item { InboxCard(incoming, refresh) }
         if (family == null) {
             item { NoFamily(refresh) }
             return@LazyColumn
         }
         item {
-            Text(family.name, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, color = Nflix.Text, modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp))
-            Text(
-                if (me.isHead) "Touchez un profil pour l’ouvrir. Crayon : modifier le profil." else "Vous êtes membre de cette famille.",
-                color = Nflix.Muted, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 18.dp),
-            )
-        }
-        item {
-            FlowRow(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                family.members.forEachIndexed { index, member ->
-                    val isMe = ProfileSwitchLogic.sameUser(member.userId, me.userId)
-                    ProfileTile(
-                        member = member,
-                        isMe = isMe,
-                        index = index,
-                        onClick = {
-                            when {
-                                isMe -> Unit
-                                !canSwitch -> Unit
-                                member.hasPin -> { pinError = null; pinFor = member }
-                                else -> scope.launch { attempt { deps.switcher.switchTo(member, null) } }
-                            }
-                        },
-                        onEdit = if ((me.isHead && !switched) || isMe) ({ editing = member }) else null,
+            GlassCard(Modifier.fillMaxWidth().padding(horizontal = 14.dp)) {
+                Column(Modifier.padding(vertical = 16.dp)) {
+                    Text(
+                        if (canSwitch) "Touchez un profil pour l’ouvrir" else "Les profils de la famille",
+                        color = Nflix.Muted, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 18.dp),
                     )
+                    FlowRow(
+                        Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                    ) {
+                        family.members.forEachIndexed { index, member ->
+                            val isMe = ProfileSwitchLogic.sameUser(member.userId, me.userId)
+                            ProfileTile(
+                                member = member,
+                                isMe = isMe,
+                                index = index,
+                                onClick = {
+                                    when {
+                                        isMe || !canSwitch -> editing = if ((me.isHead && !switched) || isMe) member else null
+                                        member.hasPin -> { pinError = null; pinFor = member }
+                                        else -> scope.launch { attempt { deps.switcher.switchTo(member, null) } }
+                                    }
+                                },
+                                onEdit = if ((me.isHead && !switched) || isMe) ({ editing = member }) else null,
+                            )
+                        }
+                        if (me.isHead && !switched) AddProfileTile(family.members.size) { inviteOpen = true }
+                    }
                 }
             }
         }
         if (me.isHead && !switched) {
             item {
-                Column(Modifier.padding(horizontal = 18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { inviteOpen = true }, colors = ButtonDefaults.buttonColors(containerColor = Nflix.Red), modifier = Modifier.fillMaxWidth()) { Text("Inviter quelqu’un") }
-                    PickerSetting()
+                Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    ActionCard(Icons.Rounded.PersonAdd, "Inviter", "un proche", Nflix.Red, Modifier.weight(1f)) { inviteOpen = true }
+                    ActionCard(Icons.Rounded.Forum, "Discuter", "en famille", Nflix.Info, Modifier.weight(1f)) { openTab(FamilyTab.Messages) }
                 }
             }
+            item { Box(Modifier.padding(horizontal = 14.dp)) { GlassCard(Modifier.fillMaxWidth()) { Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) { PickerSetting() } } } }
             item { ActivitySection() }
+        } else if (!switched) {
+            item {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    ActionCard(Icons.Rounded.Forum, "Discuter", "en famille", Nflix.Info, Modifier.weight(1f)) { openTab(FamilyTab.Messages) }
+                    ActionCard(Icons.Rounded.People, "Amis", "ajouter, écrire", Nflix.Success, Modifier.weight(1f)) { openTab(FamilyTab.Friends) }
+                }
+            }
         }
         if (!switched) {
             item {
-                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { ask = Ask("Quitter la famille ?", "Vous ne verrez plus les profils ni la conversation de « ${family.name} ».", "Quitter", true) { if (attempt { deps.family.leave() }) refresh() } }, modifier = Modifier.fillMaxWidth()) {
-                        Text("Quitter la famille")
+                Column(Modifier.padding(horizontal = 14.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SectionLabel("Zone sensible")
+                    TextButton(onClick = { ask = Ask("Quitter la famille ?", "Vous ne verrez plus les profils ni la conversation de « ${family.name} ».", "Quitter", true) { if (attempt { deps.family.leave() }) refresh() } }) {
+                        Icon(Icons.Rounded.Logout, null, tint = Nflix.Muted); Spacer(Modifier.width(8.dp)); Text("Quitter la famille", color = Nflix.Muted)
                     }
                     if (me.isHead) {
-                        OutlinedButton(onClick = { ask = Ask("Supprimer la famille ?", "« ${family.name} », ses profils et sa conversation de groupe seront supprimés. Cette action est définitive.", "Supprimer", true) { if (attempt { deps.family.deleteFamily() }) refresh() } }, modifier = Modifier.fillMaxWidth()) {
-                            Text("Supprimer la famille", color = Nflix.Red)
+                        TextButton(onClick = { ask = Ask("Supprimer la famille ?", "« ${family.name} », ses profils et sa conversation de groupe seront supprimés. Cette action est définitive.", "Supprimer", true) { if (attempt { deps.family.deleteFamily() }) refresh() } }) {
+                            Icon(Icons.Rounded.Block, null, tint = Nflix.Red); Spacer(Modifier.width(8.dp)); Text("Supprimer la famille", color = Nflix.Red)
                         }
                     }
                 }
@@ -423,40 +491,113 @@ private fun NoFamily(refresh: () -> Unit) {
     val deps = LocalDeps.current
     val scope = rememberCoroutineScope()
     var name by remember { mutableStateOf("") }
-    var head by remember { mutableStateOf("") }
-    Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Vous ne faites partie d’aucune famille.", color = Nflix.Text, fontWeight = FontWeight.SemiBold)
-        Text("Créez la vôtre (vous en serez responsable) ou demandez à rejoindre celle d’un proche. Les invitations reçues sont dans « Demandes ».", color = Nflix.Muted, fontSize = 13.sp)
-        GlassCard(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Créer une famille", fontWeight = FontWeight.SemiBold)
-                OutlinedTextField(name, { name = it.take(40) }, label = { Text("Nom de la famille") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+    var joinOpen by remember { mutableStateOf(false) }
+    Column(Modifier.padding(horizontal = 14.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Column(Modifier.fillMaxWidth().padding(vertical = 10.dp).appear(0), horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(Modifier.size(84.dp).clip(RoundedCornerShape(26.dp)).background(Brush.linearGradient(listOf(Nflix.Red, Color(0xFF5A0610)))), contentAlignment = Alignment.Center) {
+                Icon(Icons.Rounded.Groups, null, tint = Color.White, modifier = Modifier.size(46.dp))
+            }
+            Spacer(Modifier.height(12.dp))
+            Text("Regardez Nflix en famille", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text("Un profil par personne, un code PIN si besoin, et une discussion pour toute la maison.", color = Nflix.Muted, fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 4.dp))
+        }
+        GlassCard(Modifier.fillMaxWidth().appear(1)) {
+            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconTile(Icons.Rounded.Groups, Nflix.Red); Spacer(Modifier.width(12.dp))
+                    Column { Text("Créer ma famille", fontWeight = FontWeight.SemiBold, color = Nflix.Text); Text("Vous en serez le responsable", color = Nflix.Muted, fontSize = 12.sp) }
+                }
+                OutlinedTextField(name, { name = it.take(40) }, placeholder = { Text("Ex. : Famille Martin") }, singleLine = true, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp))
                 Button(
-                    onClick = { scope.launch { if (attempt { deps.family.createFamily(name.trim()) }) refresh() } },
-                    enabled = name.isNotBlank(),
+                    onClick = { scope.launch { if (attempt { deps.family.createFamily(name.trim()) }) { Toasts.show("Famille créée", ToastKind.Success); refresh() } } },
+                    enabled = name.isNotBlank(), modifier = Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(14.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Nflix.Red),
-                ) { Text("Créer") }
+                ) { Text("Créer", fontWeight = FontWeight.Bold) }
             }
         }
-        GlassCard(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Rejoindre une famille", fontWeight = FontWeight.SemiBold)
-                OutlinedTextField(head, { head = it.take(64) }, label = { Text("Nom d’utilisateur du responsable") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                Button(
-                    onClick = {
-                        scope.launch {
-                            if (attempt { deps.family.askToJoin(head.trim()) }) {
-                                Toasts.show("Demande envoyée", ToastKind.Success)
-                                head = ""
-                                refresh()
-                            }
-                        }
-                    },
-                    enabled = head.isNotBlank(),
-                    colors = ButtonDefaults.buttonColors(containerColor = Nflix.Red),
-                ) { Text("Demander à rejoindre") }
+        GlassCard(Modifier.fillMaxWidth().appear(2), onClick = { joinOpen = true }) {
+            Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconTile(Icons.Rounded.PersonSearch, Nflix.Info); Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Rejoindre une famille", fontWeight = FontWeight.SemiBold, color = Nflix.Text)
+                    Text("Cherchez le responsable, il recevra votre demande", color = Nflix.Muted, fontSize = 12.sp)
+                }
+                Icon(Icons.AutoMirrored.Rounded.Send, null, tint = Nflix.Muted)
             }
         }
+        Text("Une invitation reçue apparaît tout en haut de cet écran.", color = Nflix.Muted, fontSize = 12.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+    }
+    if (joinOpen) {
+        UserSearchDialog("Rejoindre une famille", "Demander", onDismiss = { joinOpen = false }) { user ->
+            scope.launch {
+                if (attempt { deps.family.askToJoin(user.name) }) {
+                    Toasts.show("Demande envoyée à ${user.name}", ToastKind.Success)
+                    joinOpen = false
+                    refresh()
+                }
+            }
+        }
+    }
+}
+
+/** Pending invitations and join requests to answer, right on the main screen. */
+@Composable
+private fun InboxCard(incoming: List<org.jellyfin.mobile.nflix.family.JoinRequestInfo>, refresh: () -> Unit) {
+    val deps = LocalDeps.current
+    val scope = rememberCoroutineScope()
+    Box(Modifier.padding(horizontal = 14.dp).appear(0)) {
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))
+                .background(Brush.linearGradient(listOf(Nflix.Red.copy(alpha = .30f), Nflix.Red.copy(alpha = .10f))))
+                .border(1.dp, Nflix.Red.copy(alpha = .45f), RoundedCornerShape(24.dp)).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Rounded.MarkEmailUnread, null, tint = Color.White)
+                Spacer(Modifier.width(8.dp))
+                Text("À traiter (${incoming.size})", color = Color.White, fontWeight = FontWeight.Bold)
+            }
+            incoming.forEach { r ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    UserBubble(r.userId, if (r.kind == "invite") r.createdByName else r.userName, false, 40)
+                    Text(FamilyFormat.requestTitle(r), color = Color.White, fontSize = 13.sp, modifier = Modifier.weight(1f).padding(horizontal = 10.dp))
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { scope.launch { if (attempt { deps.family.resolveRequest(r.id, "accept") }) { Toasts.show(if (r.kind == "invite") "Bienvenue dans « ${r.familyName} » !" else "${r.userName} a rejoint la famille", ToastKind.Success); refresh() } } },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color(0xFF111111)), shape = RoundedCornerShape(12.dp), modifier = Modifier.weight(1f),
+                    ) { Text("Accepter", fontWeight = FontWeight.Bold) }
+                    OutlinedButton(onClick = { scope.launch { if (attempt { deps.family.resolveRequest(r.id, "decline") }) refresh() } }, shape = RoundedCornerShape(12.dp), modifier = Modifier.weight(1f)) {
+                        Text("Refuser", color = Color.White)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActionCard(icon: ImageVector, title: String, subtitle: String, tint: Color, modifier: Modifier, onClick: () -> Unit) {
+    GlassCard(modifier, onClick = onClick) {
+        Column(Modifier.padding(16.dp)) {
+            IconTile(icon, tint)
+            Spacer(Modifier.height(10.dp))
+            Text(title, color = Nflix.Text, fontWeight = FontWeight.SemiBold)
+            Text(subtitle, color = Nflix.Muted, fontSize = 12.sp)
+        }
+    }
+}
+
+/** "+" tile at the end of the profiles grid (heads only). */
+@Composable
+private fun AddProfileTile(index: Int, onClick: () -> Unit) {
+    Column(Modifier.width(108.dp).appear(index).clickable(onClick = onClick), horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            Modifier.padding(3.dp).size(96.dp).clip(RoundedCornerShape(22.dp)).border(2.dp, Color.White.copy(alpha = .25f), RoundedCornerShape(22.dp)),
+            contentAlignment = Alignment.Center,
+        ) { Icon(Icons.Rounded.PersonAdd, "Inviter", tint = Color.White.copy(alpha = .7f), modifier = Modifier.size(36.dp)) }
+        Spacer(Modifier.height(8.dp))
+        Text("Inviter", color = Nflix.Muted, fontSize = 14.sp)
     }
 }
 
@@ -974,8 +1115,19 @@ fun FamilyChatScreen(conversationId: String, title: String) {
 
     Box(Modifier.fillMaxSize().background(Nflix.Night)) {
         Column(Modifier.fillMaxSize().imePadding()) {
-            Text(title, style = MaterialTheme.typography.headlineSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.statusBarsPadding().padding(start = 64.dp, end = 16.dp, top = 18.dp, bottom = 8.dp))
+            Row(
+                Modifier.fillMaxWidth().background(Nflix.Surface).statusBarsPadding().padding(start = 64.dp, end = 16.dp, top = 10.dp, bottom = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.size(40.dp).clip(CircleShape).background(Brush.linearGradient(listOf(Nflix.Red, Color(0xFF6B0A10)))), contentAlignment = Alignment.Center) {
+                    Text(FamilyFormat.initials(title), color = Color.White, fontWeight = FontWeight.Bold)
+                }
+                Spacer(Modifier.width(12.dp))
+                Column {
+                    Text(title, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("Messages actualisés toutes les 5 s", color = Nflix.Muted, fontSize = 11.sp)
+                }
+            }
             LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = listState, contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 item(key = "older") {
                     if (hasOlder && messages.isNotEmpty()) {
@@ -998,10 +1150,24 @@ fun FamilyChatScreen(conversationId: String, title: String) {
                     Bubble(m, grouped = FamilyFormat.continuesGroup(previous, m) && m.id != firstUnread)
                 }
             }
-            Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                OutlinedTextField(text, { text = it.take(2000) }, placeholder = { Text("Message") }, modifier = Modifier.weight(1f), maxLines = 4)
+            Row(
+                Modifier.fillMaxWidth().background(Nflix.Surface).navigationBarsPadding().padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                androidx.compose.foundation.text.BasicTextField(
+                    value = text,
+                    onValueChange = { text = it.take(2000) },
+                    textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 15.sp),
+                    cursorBrush = androidx.compose.ui.graphics.SolidColor(Nflix.Red),
+                    maxLines = 5,
+                    modifier = Modifier.weight(1f).clip(RoundedCornerShape(24.dp)).background(Nflix.SurfaceHigh).padding(horizontal = 16.dp, vertical = 12.dp),
+                    decorationBox = { inner -> Box { if (text.isEmpty()) Text("Écrire un message…", color = Nflix.Muted, fontSize = 15.sp); inner() } },
+                )
+                Spacer(Modifier.width(8.dp))
+                val canSend = text.isNotBlank() && !sending
                 IconButton(
-                    enabled = text.isNotBlank() && !sending,
+                    modifier = Modifier.size(46.dp).clip(CircleShape).background(if (canSend) Nflix.Red else Nflix.SurfaceHigh),
+                    enabled = canSend,
                     onClick = {
                         val toSend = text.trim()
                         sending = true
@@ -1014,7 +1180,10 @@ fun FamilyChatScreen(conversationId: String, title: String) {
                             sending = false
                         }
                     },
-                ) { Icon(Icons.AutoMirrored.Rounded.Send, "Envoyer", tint = Nflix.Red) }
+                ) {
+                    if (sending) CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                    else Icon(Icons.AutoMirrored.Rounded.Send, "Envoyer", tint = Color.White)
+                }
             }
         }
         BackButton()

@@ -190,7 +190,7 @@ fun NflixRoot(deps: AppDeps, navigator: Navigator, backEnabled: Boolean = true) 
                 }
             }
 
-            val showChrome = navigator.current != Route.NowPlaying && navigator.current !is Route.Reader
+            val showChrome = navigator.current != Route.NowPlaying && navigator.current !is Route.Reader && navigator.current !is Route.FamilyChat
             // Season ambient layer over every screen (draws only, never takes touches).
             if (navigator.current !is Route.Reader && navigator.current != Route.NowPlaying) SeasonAmbience(Modifier.fillMaxSize(), strength = 0.6f, topGlow = false)
             Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().then(hiddenUnderTutorial)) {
