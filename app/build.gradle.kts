@@ -211,6 +211,7 @@ dependencies {
         }
     }
     implementation(libs.bundles.coil)
+    implementation(libs.lottie.compose)
     // Pin the transitive OkHttp (Coil, Media3, Jellyfin SDK) to the latest stable release
     implementation(libs.okhttp)
 

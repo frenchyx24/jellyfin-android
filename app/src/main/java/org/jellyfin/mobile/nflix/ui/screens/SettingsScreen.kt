@@ -407,7 +407,7 @@ fun SeasonalSettingsScreen() {
                     Column(Modifier.padding(horizontal = 18.dp, vertical = 10.dp)) {
                         PrefSwitch(Icons.Rounded.Celebration, shown.accent, "Fêtes", "Noël, 14 Juillet, Pâques… remplacent la saison en mode automatique.", NflixSeason.events, onChange = NflixSeason::updateEvents)
                         PrefSwitch(Icons.Rounded.Celebration, SettingTints.Sky, "Décor", "Ciel, coins décorés, bouton Lecture et silhouette au-dessus de la barre. Désactivé : seulement les couleurs.", NflixSeason.decorations, onChange = NflixSeason::updateDecorations)
-                        PrefSwitch(Icons.Rounded.Celebration, SettingTints.Sky, "Animations", "Chauves-souris, neige, feux d'artifice… Figées si les animations système ou l'économiseur de batterie sont actifs.", NflixSeason.ambient, onChange = NflixSeason::updateAmbient)
+                        PrefSwitch(Icons.Rounded.Celebration, SettingTints.Sky, "Animations", "Chauves-souris, neige, feux d'artifice… Figées seulement si « Supprimer les animations » est activé dans Android ; allégées en économie de batterie.", NflixSeason.ambient, onChange = NflixSeason::updateAmbient)
                     }
                 }
             }

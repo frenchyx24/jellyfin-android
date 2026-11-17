@@ -36,6 +36,10 @@ class JellyfinApplication : Application() {
             coil3.ImageLoader.Builder(context)
                 .memoryCache { coil3.memory.MemoryCache.Builder().maxSizePercent(context, 0.25).build() }
                 .diskCache { coil3.disk.DiskCache.Builder().directory(okio.Path.Companion.run { cacheDir.resolve("nflix-images").toOkioPath() }).maxSizeBytes(250L * 1024 * 1024).build() }
+                // Animated GIF / WebP (distributor logos).
+                .components {
+                    if (android.os.Build.VERSION.SDK_INT >= 28) add(coil3.gif.AnimatedImageDecoder.Factory()) else add(coil3.gif.GifDecoder.Factory())
+                }
                 .build()
         }
 

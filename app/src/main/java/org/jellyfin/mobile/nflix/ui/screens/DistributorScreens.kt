@@ -64,7 +64,12 @@ internal fun DistributorLogo(distributor: Distributor, modifier: Modifier = Modi
         contentAlignment = Alignment.Center,
     ) {
         if (logo != null) {
-            NImage(logo, Modifier.fillMaxSize(), contentScale = ContentScale.Fit, description = distributor.name, placeholderIcon = null, background = Color.Transparent)
+            when (distributor.logoKind) {
+                org.jellyfin.mobile.nflix.data.LogoMedia.VIDEO -> LoopingVideo(logo, Modifier.fillMaxSize())
+                org.jellyfin.mobile.nflix.data.LogoMedia.LOTTIE -> LottieLogo(logo, Modifier.fillMaxSize())
+                // PNG/JPEG and animated GIF/WebP: Coil animates the latter.
+                else -> NImage(logo, Modifier.fillMaxSize(), contentScale = ContentScale.Fit, description = distributor.name, placeholderIcon = null, background = Color.Transparent)
+            }
         } else {
             Text(
                 distributor.name, fontWeight = FontWeight.Black, color = if (distributor.lightPlate) Color(0xFF111111) else Color.White,

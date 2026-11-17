@@ -307,6 +307,8 @@ fun AdminDistributorsScreen() {
 private sealed interface PendingLogo {
     data class Tmdb(val logo: CompanyLogo) : PendingLogo
     data class Upload(val bytes: ByteArray, val preview: Bitmap) : PendingLogo
+    /** GIF, animated WebP, MP4/WebM clip or Lottie JSON, sent as is. */
+    data class Media(val bytes: ByteArray, val kind: String, val mimeType: String) : PendingLogo
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -354,7 +356,7 @@ fun AdminDistributorEditScreen(id: String?) {
         matches = null
         matches = runCatching { deps.admin.matchingStudios(query) }.getOrElse { emptyList() }
     }
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
             runCatching { withContext(Dispatchers.IO) { prepareLogo(context, uri) } }
@@ -379,6 +381,7 @@ fun AdminDistributorEditScreen(id: String?) {
                 when (val logo = pendingLogo) {
                     is PendingLogo.Tmdb -> deps.admin.logoFromTmdb(target.id, logo.logo.logoPath)
                     is PendingLogo.Upload -> deps.admin.uploadLogo(target.id, logo.bytes, "image/png")
+                    is PendingLogo.Media -> deps.admin.uploadLogo(target.id, logo.bytes, logo.mimeType)
                     null -> Unit
                 }
             }.onSuccess {
@@ -411,6 +414,10 @@ fun AdminDistributorEditScreen(id: String?) {
                             when (val logo = pendingLogo) {
                                 is PendingLogo.Tmdb -> NImage(logo.logo.previewUrl, Modifier.fillMaxSize(), contentScale = ContentScale.Fit, placeholderIcon = null, background = Color.Transparent)
                                 is PendingLogo.Upload -> androidx.compose.foundation.Image(logo.preview.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+                                is PendingLogo.Media -> Text(
+                                    "${org.jellyfin.mobile.nflix.data.LogoMedia.label(logo.kind)} prête · ${String.format(java.util.Locale.FRANCE, "%.1f", logo.bytes.size / 1048576f)} Mo\nAperçu animé après l'enregistrement",
+                                    style = MaterialTheme.typography.labelMedium, color = if (lightPlate) Color.Black else Color.White, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                )
                                 null -> original?.let { DistributorLogo(it.copy(lightPlate = lightPlate), Modifier.fillMaxSize(), height = 52.dp) }
                                     ?: Text(name.ifBlank { "Logo" }, fontWeight = FontWeight.Black, color = if (lightPlate) Color.Black else Color.White)
                             }
@@ -432,7 +439,7 @@ fun AdminDistributorEditScreen(id: String?) {
                 Column(Modifier.padding(top = 12.dp)) {
                     Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text("Logos trouvés", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                        OutlinedButton(onClick = { picker.launch("image/*") }) { Icon(Icons.Rounded.UploadFile, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Envoyer un logo") }
+                        OutlinedButton(onClick = { picker.launch(arrayOf("image/*", "video/mp4", "video/webm", "application/json", "application/octet-stream")) }) { Icon(Icons.Rounded.UploadFile, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Envoyer un fichier") }
                     }
                     Spacer(Modifier.height(8.dp))
                     when (val found = logos) {
@@ -528,7 +535,8 @@ fun AdminDistributorEditScreen(id: String?) {
 }
 
 /** Reads a picked image, scales it to at most 800 px wide and re-encodes it as PNG (keeps transparency, strips metadata). */
-private fun prepareLogo(context: android.content.Context, uri: Uri): PendingLogo.Upload {
+/** Static pictures are resized to a PNG; GIF, animated WebP, clips and Lottie go as they are. */
+private fun prepareLogo(context: android.content.Context, uri: Uri): PendingLogo {
     val bytes = context.contentResolver.openInputStream(uri)?.use { input ->
         val out = ByteArrayOutputStream()
         val chunk = ByteArray(16 * 1024)
@@ -542,6 +550,12 @@ private fun prepareLogo(context: android.content.Context, uri: Uri): PendingLogo
         }
         out.toByteArray()
     } ?: error("fichier vide")
+    val media = org.jellyfin.mobile.nflix.data.LogoMedia.sniff(bytes) ?: error("format refusé (PNG, JPEG, WebP, GIF, MP4, WebM ou Lottie JSON)")
+    if (media.first != org.jellyfin.mobile.nflix.data.LogoMedia.IMAGE) {
+        val max = org.jellyfin.mobile.nflix.data.LogoMedia.maxBytes(media.first)
+        if (bytes.size > max) error("${org.jellyfin.mobile.nflix.data.LogoMedia.label(media.first).lowercase()} trop lourde (${max / 1048576} Mo maximum)")
+        return PendingLogo.Media(bytes, media.first, media.second)
+    }
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
     if (bounds.outWidth <= 0 || bounds.outHeight <= 0) error("format non reconnu")

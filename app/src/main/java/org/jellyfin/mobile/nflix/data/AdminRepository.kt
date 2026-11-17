@@ -23,6 +23,8 @@ data class Distributor(
     @SerialName("LightPlate") val lightPlate: Boolean = false,
     @SerialName("Enabled") val enabled: Boolean = true,
     @SerialName("LogoVersion") val logoVersion: Long = 0,
+    /** "image", "animated" (GIF/WebP), "video" (MP4/WebM) or "lottie"; see [LogoMedia]. */
+    @SerialName("LogoKind") val logoKind: String = LogoMedia.IMAGE,
 )
 
 /** A company found on TMDB through Horus, offered as a logo candidate. */

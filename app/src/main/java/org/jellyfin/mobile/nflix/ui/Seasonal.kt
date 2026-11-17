@@ -314,7 +314,7 @@ object NflixSeason {
     var events by mutableStateOf(true)
         private set
 
-    /** Animated decorations (always frozen under reduce-motion or battery saver). */
+    /** Animated decorations (frozen only under the system "remove animations" setting). */
     var ambient by mutableStateOf(true)
         private set
 
@@ -346,7 +346,8 @@ object NflixSeason {
         val legacyOff = !prefs.getBoolean("seasonal", true)
         mode = prefs.getString("season_mode", null) ?: if (legacyOff) OFF else AUTO
         events = prefs.getBoolean("season_events", true)
-        ambient = prefs.getBoolean("season_ambient", true)
+        // New key: older builds could leave a stale "off" from the previous ambience switch.
+        ambient = prefs.getBoolean("season_animations", true)
         decorations = prefs.getBoolean("season_decor", true)
     }
 
@@ -358,19 +359,25 @@ object NflixSeason {
 
     fun updateMode(value: String) { mode = value; prefs()?.edit { putString("season_mode", value) } }
     fun updateEvents(value: Boolean) { events = value; prefs()?.edit { putBoolean("season_events", value) } }
-    fun updateAmbient(value: Boolean) { ambient = value; prefs()?.edit { putBoolean("season_ambient", value) } }
+    fun updateAmbient(value: Boolean) { ambient = value; prefs()?.edit { putBoolean("season_animations", value) } }
     fun updateDecorations(value: Boolean) { decorations = value; prefs()?.edit { putBoolean("season_decor", value) } }
 }
 
 // ---- Motion policy ----------------------------------------------------------------------------
 
-/** False when system animations are off or battery saver is on. */
+/** False only when the user turned system animations off (accessibility "remove animations"). */
 @Composable
 fun rememberAmbientMotionAllowed(): Boolean {
     val context = LocalContext.current
-    val animations = remember(context) {
+    return remember(context) {
         Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) > 0f
     }
+}
+
+/** Battery saver: decorations keep moving, but lighter (fewer particles, 30 fps). */
+@Composable
+fun rememberPowerSaver(): Boolean {
+    val context = LocalContext.current
     val power = remember(context) { context.getSystemService(Context.POWER_SERVICE) as? PowerManager }
     var saver by remember { mutableStateOf(power?.isPowerSaveMode == true) }
     DisposableEffect(context) {
@@ -380,17 +387,18 @@ fun rememberAmbientMotionAllowed(): Boolean {
         ContextCompat.registerReceiver(context, receiver, IntentFilter(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED), ContextCompat.RECEIVER_NOT_EXPORTED)
         onDispose { runCatching { context.unregisterReceiver(receiver) } }
     }
-    return animations && !saver
+    return saver
 }
 
-/** Low-RAM or small-heap devices get fewer particles at 30 fps. */
+/** Low-RAM devices and battery saver get fewer particles at 30 fps. */
 @Composable
 fun rememberLowEndDevice(): Boolean {
     val context = LocalContext.current
-    return remember(context) {
+    val lowRam = remember(context) {
         val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
-        am == null || am.isLowRamDevice || am.memoryClass <= 128
+        am != null && (am.isLowRamDevice || am.memoryClass < 96)
     }
+    return lowRam || rememberPowerSaver()
 }
 
 // ---- Backdrop and hero ------------------------------------------------------------------------
