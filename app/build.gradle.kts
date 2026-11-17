@@ -162,6 +162,7 @@ android {
         getByName("libre").res.srcDir(nflixBrandingDir)
         getByName("play").res.srcDir(nflixBrandingDir)
         getByName("play").java.srcDir("src/proprietary/java")
+        getByName("play").kotlin.srcDir("src/proprietary/java")
     }
 }
 
