@@ -8,6 +8,7 @@
   <ItemGroup>
     <!-- Pure contract rules only: no Jellyfin dependency needed to test them. -->
     <Compile Include="../server-plugin/AnnouncementRules.cs" Link="AnnouncementRules.cs" />
+    <Compile Include="../server-plugin/LogoMedia.cs" Link="LogoMedia.cs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />

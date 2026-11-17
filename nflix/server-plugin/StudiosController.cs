@@ -28,6 +28,9 @@ public sealed class Distributor
 
     /// <summary>Gets or sets the logo version; changes whenever a new logo is stored, so clients refresh their cache.</summary>
     public long LogoVersion { get; set; }
+
+    /// <summary>Gets or sets the logo media kind: "image", "animated" (GIF/WebP), "video" (MP4/WebM) or "lottie".</summary>
+    public string LogoKind { get; set; } = LogoMedia.Image;
 }
 
 /// <summary>
@@ -39,6 +42,7 @@ public sealed class Distributor
 public sealed partial class StudiosController : ControllerBase
 {
     private const int MaxLogoBytes = 2 * 1024 * 1024;
+    private const int MaxUploadBytes = 8 * 1024 * 1024;
     private const int MaxDistributors = 40;
     private static readonly SemaphoreSlim Lock = new(1, 1);
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = true, PropertyNamingPolicy = null };
@@ -90,7 +94,7 @@ public sealed partial class StudiosController : ControllerBase
                 if (!IdRegex().IsMatch(id) || cleaned.Any(c => c.Id == id)) return BadRequest(new { Message = "Identifiant de distributeur invalide." });
                 var studios = (d.Studios ?? new()).Select(s => s.Trim()).Where(s => s.Length is > 0 and <= 120).Distinct(StringComparer.OrdinalIgnoreCase).Take(20).ToList();
                 var previous = current.FirstOrDefault(c => c.Id == id);
-                cleaned.Add(new Distributor { Id = id, Name = name, Studios = studios, LightPlate = d.LightPlate, Enabled = d.Enabled, LogoVersion = previous?.LogoVersion ?? 0 });
+                cleaned.Add(new Distributor { Id = id, Name = name, Studios = studios, LightPlate = d.LightPlate, Enabled = d.Enabled, LogoVersion = previous?.LogoVersion ?? 0, LogoKind = previous?.LogoKind ?? LogoMedia.Image });
             }
 
             foreach (var removed in current.Where(c => cleaned.All(n => n.Id != c.Id)))
@@ -117,20 +121,24 @@ public sealed partial class StudiosController : ControllerBase
         if (!IdRegex().IsMatch(id)) return NotFound();
         var file = LogoFile(id);
         if (!System.IO.File.Exists(file)) return NotFound();
-        var head = new byte[12];
-        using (var stream = System.IO.File.OpenRead(file)) _ = stream.Read(head, 0, head.Length);
+        var bytes = System.IO.File.ReadAllBytes(file);
         Response.Headers.CacheControl = "public, max-age=86400";
-        return PhysicalFile(file, ImageType(head) ?? "application/octet-stream");
+        Response.Headers.XContentTypeOptions = "nosniff";
+        // Range requests let video players seek and buffer.
+        return PhysicalFile(file, LogoMedia.Detect(bytes)?.ContentType ?? "application/octet-stream", enableRangeProcessing: true);
     }
 
-    /// <summary>Stores a logo uploaded by an administrator (PNG, JPEG or WebP, 2 MB maximum).</summary>
+    /// <summary>
+    /// Stores a logo uploaded by an administrator: PNG/JPEG/WebP (2 MB), GIF or animated WebP (6 MB),
+    /// MP4/WebM clip (8 MB) or Lottie JSON (2 MB).
+    /// </summary>
     [HttpPut("{id}/Logo")]
     [Authorize(Policy = Policies.RequiresElevation)]
-    [RequestSizeLimit(MaxLogoBytes + 1024)]
+    [RequestSizeLimit(MaxUploadBytes + 1024)]
     public async Task<IActionResult> UploadLogo([FromRoute] string id, CancellationToken cancellationToken)
     {
-        var bytes = await ReadLimitedAsync(Request.Body, MaxLogoBytes, cancellationToken).ConfigureAwait(false);
-        if (bytes is null) return BadRequest(new { Message = "Le logo dépasse 2 Mo." });
+        var bytes = await ReadLimitedAsync(Request.Body, MaxUploadBytes, cancellationToken).ConfigureAwait(false);
+        if (bytes is null) return BadRequest(new { Message = "Le fichier dépasse 8 Mo." });
         return await StoreLogoAsync(id, bytes).ConfigureAwait(false);
     }
 
@@ -162,8 +170,10 @@ public sealed partial class StudiosController : ControllerBase
     private async Task<IActionResult> StoreLogoAsync(string id, byte[] bytes)
     {
         if (!IdRegex().IsMatch(id)) return BadRequest(new { Message = "Identifiant invalide." });
-        if (bytes.Length is 0 or > MaxLogoBytes) return BadRequest(new { Message = "Le logo doit faire entre 1 octet et 2 Mo." });
-        if (ImageType(bytes) is null) return BadRequest(new { Message = "Format refusé : utilisez une image PNG, JPEG ou WebP." });
+        var media = LogoMedia.Detect(bytes);
+        if (bytes.Length == 0 || media is null) return BadRequest(new { Message = "Format refusé : PNG, JPEG, WebP, GIF, MP4, WebM ou Lottie (JSON)." });
+        var kind = media.Value.Kind;
+        if (bytes.Length > LogoMedia.MaxBytes(kind)) return BadRequest(new { Message = $"Fichier trop lourd pour une {LogoMedia.Describe(kind)} ({LogoMedia.MaxBytes(kind) / (1024 * 1024)} Mo maximum)." });
         await Lock.WaitAsync().ConfigureAwait(false);
         try
         {
@@ -175,6 +185,7 @@ public sealed partial class StudiosController : ControllerBase
             await System.IO.File.WriteAllBytesAsync(temp, bytes).ConfigureAwait(false);
             System.IO.File.Move(temp, LogoFile(id), true);
             row.LogoVersion = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            row.LogoKind = kind;
             await SaveUnlockedAsync(list).ConfigureAwait(false);
             return Ok(row);
         }
@@ -182,15 +193,6 @@ public sealed partial class StudiosController : ControllerBase
         {
             Lock.Release();
         }
-    }
-
-    /// <summary>Recognises PNG, JPEG and WebP by their signature; anything else (SVG, HTML…) is refused.</summary>
-    internal static string? ImageType(byte[] head)
-    {
-        if (head.Length >= 8 && head[0] == 0x89 && head[1] == 0x50 && head[2] == 0x4E && head[3] == 0x47) return "image/png";
-        if (head.Length >= 3 && head[0] == 0xFF && head[1] == 0xD8 && head[2] == 0xFF) return "image/jpeg";
-        if (head.Length >= 12 && head[0] == 'R' && head[1] == 'I' && head[2] == 'F' && head[3] == 'F' && head[8] == 'W' && head[9] == 'E' && head[10] == 'B' && head[11] == 'P') return "image/webp";
-        return null;
     }
 
     private static async Task<byte[]?> ReadLimitedAsync(Stream input, int maximumBytes, CancellationToken cancellationToken)
