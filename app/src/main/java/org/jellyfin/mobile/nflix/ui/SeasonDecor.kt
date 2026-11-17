@@ -738,8 +738,9 @@ internal fun DrawScope.drawHeaderScene(theme: NflixSeasonTheme, t: Float) {
 private fun DrawScope.drawMoon(decor: SeasonDecor, t: Float, castle: Boolean) {
     val w = size.width
     val h = size.height
-    val r = minOf(w * 0.12f, h * 0.26f)
-    val c = Offset(w * 0.4f, h * 0.42f)
+    // Small and high: the moon and castle stay above the badge line and the chips.
+    val r = minOf(w * 0.09f, h * 0.17f)
+    val c = Offset(w * 0.42f, h * 0.27f)
     val base = decor.featureColors.first()
     val light = decor.featureColors.getOrElse(1) { Color.White }
     val pulse = 0.82f + 0.18f * sin(t * 0.9f)
@@ -754,8 +755,8 @@ private fun DrawScope.drawMoon(decor: SeasonDecor, t: Float, castle: Boolean) {
     val ink = Color(0xFF0A0510)
     val sil = Path().apply {
         // Hill
-        moveTo(c.x - u * 3.2f, by + u * 0.9f)
-        quadraticTo(c.x, by - u * 0.55f, c.x + u * 3.2f, by + u * 0.9f)
+        moveTo(c.x - u * 3.2f, by + u * 0.3f)
+        quadraticTo(c.x, by - u * 0.6f, c.x + u * 3.2f, by + u * 0.3f)
         close()
         // Curtain wall
         addRect(androidx.compose.ui.geometry.Rect(c.x - u * 1.25f, by - u * 0.55f, c.x + u * 1.25f, by + u * 0.2f))
@@ -816,7 +817,7 @@ private fun DrawScope.drawFireworks(colors: List<Color>, t: Float) {
             drawLine(color.copy(alpha = 0.3f), Offset(cx, y), Offset(cx, y + 18f * d), 1.2f * d)
         } else {
             val q = (p - 0.22f) / 0.78f
-            val radius = 46f * d * (1f - (1f - q).pow(3))
+            val radius = 56f * d * (1f - (1f - q).pow(3))
             val fade = (1f - q).pow(1.4f)
             drawCircle(Brush.radialGradient(listOf(color.copy(alpha = 0.22f * fade), Color.Transparent), Offset(cx, cy), radius * 1.4f + 1f), radius * 1.4f + 1f, Offset(cx, cy))
             for (k in 0 until 14) {
@@ -824,7 +825,7 @@ private fun DrawScope.drawFireworks(colors: List<Color>, t: Float) {
                 val dir = Offset(cos(ang), sin(ang))
                 val pos = Offset(cx, cy) + dir * radius + Offset(0f, q * q * 16f * d)
                 val tail = Offset(cx, cy) + dir * (radius * 0.72f) + Offset(0f, q * q * 12f * d)
-                drawLine(color.copy(alpha = 0.55f * fade), tail, pos, 1.3f * d, StrokeCap.Round)
+                drawLine(color.copy(alpha = 0.75f * fade), tail, pos, 1.6f * d, StrokeCap.Round)
                 drawCircle(color.copy(alpha = fade), 1.5f * d, pos)
             }
         }
@@ -935,15 +936,16 @@ private fun DrawScope.drawCorners(decor: SeasonDecor, t: Float, w: Float, h: Flo
             drawGlyph(Glyph.Snowflake, Offset(14f * d, 70f * d), 7f * d, Color.White, 0.3f, rotation = t * 5f)
         }
         Corners.Ribbon -> {
+            // Thin tricolour ribbon waving along the bottom edge of the header, under the chips.
             val speed = if (decor.sober) 0.5f else 1.3f
-            val stripe = 5f * d
+            val stripe = 2.5f * d
             colors.forEachIndexed { k, col ->
                 val path = Path()
-                var x = w * 0.48f
+                var x = -4f * d
                 var first = true
                 while (x <= w + 4f * d) {
-                    val s = (x - w * 0.48f) / (w * 0.52f)
-                    val y = 6f * d + s * 58f * d + sin(s * 5f - t * speed) * 5f * d + k * stripe
+                    val s = x / w
+                    val y = h - 12f * d + sin(s * 7f - t * speed) * 3f * d + k * stripe
                     if (first) { path.moveTo(x, y); first = false } else path.lineTo(x, y)
                     x += 6f * d
                 }
@@ -1166,6 +1168,7 @@ internal fun DrawScope.drawGround(theme: NflixSeasonTheme, t: Float, w: Float, h
             val tx = w * 0.72f
             city.moveTo(tx - 12f * d, h); city.lineTo(tx, h * 0.02f); city.lineTo(tx + 12f * d, h); city.close()
             drawPath(city, ink)
+            drawPath(city, theme.accentSoft.copy(alpha = 0.22f), style = Stroke(1f * d))
             for (k in 0 until 18) {
                 val wx = hash(k, 11) * w
                 val wy = h * (0.55f + hash(k, 12) * 0.35f)
