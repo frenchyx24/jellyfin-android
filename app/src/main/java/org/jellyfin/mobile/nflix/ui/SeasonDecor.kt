@@ -319,7 +319,7 @@ fun rememberSeasonClock(active: Boolean = true): State<Float> {
     return clock
 }
 
-private class Mote(index: Int, salt: Int) {
+private class SeasonMote(index: Int, salt: Int) {
     private val r = java.util.Random(index * 7919L + salt * 104729L)
     val x = r.nextFloat()
     val phase = r.nextFloat()
@@ -334,7 +334,7 @@ private class Mote(index: Int, salt: Int) {
     private companion object { val DEPTHS = floatArrayOf(0.55f, 0.85f, 1.2f) }
 }
 
-private fun motes(count: Int, salt: Int) = List(count) { Mote(it, salt) }
+private fun motes(count: Int, salt: Int) = List(count) { SeasonMote(it, salt) }
 
 private fun wrap(v: Float) = v - floor(v)
 
@@ -611,7 +611,7 @@ private fun DrawScope.unitGlyph(glyph: Glyph, tint: Color, a: Float, t: Float) {
 
 // ---- Particles --------------------------------------------------------------------------------
 
-private fun DrawScope.drawParticles(p: Particles, motes: List<Mote>, t: Float, alpha: Float, sober: Boolean) {
+private fun DrawScope.drawParticles(p: Particles, motes: List<SeasonMote>, t: Float, alpha: Float, sober: Boolean) {
     val w = size.width
     val h = size.height
     val d = density
