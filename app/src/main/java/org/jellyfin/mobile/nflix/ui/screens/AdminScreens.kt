@@ -306,6 +306,7 @@ fun AdminDistributorsScreen() {
 /** Logo picked in the editor, applied once the distributor exists on the server. */
 private sealed interface PendingLogo {
     data class Tmdb(val logo: CompanyLogo) : PendingLogo
+    data class Giphy(val candidate: org.jellyfin.mobile.nflix.data.AnimatedCandidate) : PendingLogo
     data class Upload(val bytes: ByteArray, val preview: Bitmap) : PendingLogo
     /** GIF, animated WebP, MP4/WebM clip or Lottie JSON, sent as is. */
     data class Media(val bytes: ByteArray, val kind: String, val mimeType: String) : PendingLogo
@@ -326,6 +327,8 @@ fun AdminDistributorEditScreen(id: String?) {
     val studios = remember { mutableStateListOf<String>() }
     var pendingLogo by remember { mutableStateOf<PendingLogo?>(null) }
     var logos by remember { mutableStateOf<List<CompanyLogo>?>(null) }
+    var animated by remember { mutableStateOf<List<org.jellyfin.mobile.nflix.data.AnimatedCandidate>?>(null) }
+    var animatedError by remember { mutableStateOf<String?>(null) }
     var matches by remember { mutableStateOf<List<StudioMatch>?>(null) }
     var studioQuery by remember { mutableStateOf("") }
     var saving by remember { mutableStateOf(false) }
@@ -348,6 +351,9 @@ fun AdminDistributorEditScreen(id: String?) {
         delay(450)
         logos = null
         logos = runCatching { deps.admin.searchLogos(name) }.getOrElse { error = "Recherche de logos impossible : ${it.message}"; emptyList() }
+        animated = null
+        animatedError = null
+        animated = runCatching { deps.admin.searchAnimated(name) }.getOrElse { animatedError = "Animations indisponibles : ${it.message}"; emptyList() }
     }
     LaunchedEffect(studioQuery.ifBlank { name }) {
         val query = studioQuery.ifBlank { name }
@@ -380,6 +386,7 @@ fun AdminDistributorEditScreen(id: String?) {
                 original = target
                 when (val logo = pendingLogo) {
                     is PendingLogo.Tmdb -> deps.admin.logoFromTmdb(target.id, logo.logo.logoPath)
+                    is PendingLogo.Giphy -> deps.admin.logoFromGiphy(target.id, logo.candidate.id)
                     is PendingLogo.Upload -> deps.admin.uploadLogo(target.id, logo.bytes, "image/png")
                     is PendingLogo.Media -> deps.admin.uploadLogo(target.id, logo.bytes, logo.mimeType)
                     null -> Unit
@@ -413,6 +420,7 @@ fun AdminDistributorEditScreen(id: String?) {
                         Box(Modifier.width(200.dp).height(72.dp).clip(RoundedCornerShape(10.dp)).background(plate).padding(10.dp), contentAlignment = Alignment.Center) {
                             when (val logo = pendingLogo) {
                                 is PendingLogo.Tmdb -> NImage(logo.logo.previewUrl, Modifier.fillMaxSize(), contentScale = ContentScale.Fit, placeholderIcon = null, background = Color.Transparent)
+                                is PendingLogo.Giphy -> NImage(logo.candidate.previewUrl, Modifier.fillMaxSize(), contentScale = ContentScale.Fit, placeholderIcon = null, background = Color.Transparent)
                                 is PendingLogo.Upload -> androidx.compose.foundation.Image(logo.preview.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
                                 is PendingLogo.Media -> Text(
                                     "${org.jellyfin.mobile.nflix.data.LogoMedia.label(logo.kind)} prête · ${String.format(java.util.Locale.FRANCE, "%.1f", logo.bytes.size / 1048576f)} Mo\nAperçu animé après l'enregistrement",
@@ -461,6 +469,37 @@ fun AdminDistributorEditScreen(id: String?) {
                                     ) { NImage(logo.previewUrl, Modifier.fillMaxSize(), contentScale = ContentScale.Fit, placeholderIcon = null, background = Color.Transparent) }
                                     Text(logo.name, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     logo.country?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = Nflix.Muted) }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            item {
+                // Animated suggestions, like the TMDB logos above: GIPHY stickers (transparent) and GIFs.
+                Column(Modifier.padding(top = 16.dp)) {
+                    Text("Animations trouvées", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 16.dp))
+                    Text("GIF animés et autocollants · Powered by GIPHY", style = MaterialTheme.typography.labelSmall, color = Nflix.Muted, modifier = Modifier.padding(horizontal = 16.dp))
+                    Spacer(Modifier.height(8.dp))
+                    when (val found = animated) {
+                        null -> Row(Modifier.padding(16.dp)) { CircularProgressIndicator(Modifier.size(22.dp), color = Nflix.Red, strokeWidth = 2.dp) }
+                        else -> if (found.isEmpty()) {
+                            Text(
+                                animatedError ?: if (name.isBlank()) "Saisissez un nom pour chercher des animations." else "Aucune animation pour « $name ».",
+                                style = MaterialTheme.typography.bodySmall, color = Nflix.Muted, modifier = Modifier.padding(horizontal = 16.dp),
+                            )
+                        } else LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            items(found, key = { "giphy-${it.id}" }) { candidate ->
+                                val selected = (pendingLogo as? PendingLogo.Giphy)?.candidate?.id == candidate.id
+                                Column(Modifier.width(140.dp).clickable { pendingLogo = PendingLogo.Giphy(candidate) }) {
+                                    Box(
+                                        Modifier.fillMaxWidth().aspectRatio(2f).clip(RoundedCornerShape(10.dp))
+                                            .background(if (lightPlate) Color(0xFFF3F3F3) else Color(0xFF1C1C1C))
+                                            .border(if (selected) 3.dp else 1.dp, if (selected) Nflix.Red else Nflix.Outline, RoundedCornerShape(10.dp)),
+                                        contentAlignment = Alignment.Center,
+                                    ) { NImage(candidate.previewUrl, Modifier.fillMaxSize(), contentScale = if (candidate.sticker) ContentScale.Fit else ContentScale.Crop, placeholderIcon = null, background = Color.Transparent) }
+                                    Text(candidate.title.ifBlank { "Animation" }, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(if (candidate.sticker) "Autocollant" else "GIF", style = MaterialTheme.typography.labelSmall, color = Nflix.Muted)
                                 }
                             }
                         }

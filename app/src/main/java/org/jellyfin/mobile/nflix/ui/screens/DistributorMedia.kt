@@ -59,7 +59,7 @@ internal fun LoopingVideo(url: String, modifier: Modifier = Modifier) {
         modifier = modifier,
         factory = { ctx ->
             AspectRatioFrameLayout(ctx).apply {
-                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
                 val texture = TextureView(ctx).apply { isOpaque = false }
                 addView(texture, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
                 player.setVideoTextureView(texture)

@@ -59,8 +59,11 @@ internal fun DistributorLogo(distributor: Distributor, modifier: Modifier = Modi
     val deps = LocalDeps.current
     val logo = deps.admin.logoUrl(distributor)
     val plate = if (distributor.lightPlate) Color(0xFFF3F3F3) else Color(0xFF1C1C1C)
+    // Clips fill the whole tile (cropped like a cover); pictures keep a margin on their plate.
+    val fill = logo != null && distributor.logoKind == org.jellyfin.mobile.nflix.data.LogoMedia.VIDEO
     Box(
-        modifier.height(height).clip(RoundedCornerShape(8.dp)).background(plate).padding(horizontal = 10.dp, vertical = 6.dp),
+        modifier.height(height).clip(RoundedCornerShape(8.dp)).background(plate)
+            .then(if (fill) Modifier else Modifier.padding(horizontal = 10.dp, vertical = 6.dp)),
         contentAlignment = Alignment.Center,
     ) {
         if (logo != null) {

@@ -167,6 +167,95 @@ public sealed partial class StudiosController : ControllerBase
         return await StoreLogoAsync(id, bytes).ConfigureAwait(false);
     }
 
+    /// <summary>Animated logo candidates from GIPHY (stickers first: they often have a transparent background).</summary>
+    [HttpGet("Animated/Search")]
+    [Authorize(Policy = Policies.RequiresElevation)]
+    public async Task<ActionResult<List<AnimatedCandidate>>> SearchAnimated([FromQuery] string q, CancellationToken cancellationToken)
+    {
+        var key = Plugin.Instance?.Configuration.GiphyApiKey;
+        if (string.IsNullOrWhiteSpace(key)) return StatusCode(StatusCodes.Status503ServiceUnavailable, new { Message = "Recherche GIPHY non configurée sur le serveur." });
+        q = (q ?? string.Empty).Trim();
+        if (q.Length is < 2 or > 60) return BadRequest(new { Message = "Recherche invalide." });
+        var results = new List<AnimatedCandidate>();
+        foreach (var kind in new[] { "stickers", "gifs" })
+        {
+            var url = $"https://api.giphy.com/v1/{kind}/search?api_key={Uri.EscapeDataString(key)}&q={Uri.EscapeDataString(q)}&limit=15&rating=g&lang=fr";
+            try
+            {
+                using var response = await Http.GetAsync(new Uri(url), cancellationToken).ConfigureAwait(false);
+                if (!response.IsSuccessStatusCode) continue;
+                await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+                using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
+                foreach (var gif in doc.RootElement.GetProperty("data").EnumerateArray())
+                {
+                    var id = gif.GetProperty("id").GetString();
+                    if (id is null || !GiphyIdRegex().IsMatch(id)) continue;
+                    var preview = gif.GetProperty("images").GetProperty("fixed_height_small");
+                    var previewUrl = preview.TryGetProperty("webp", out var w) ? w.GetString() : preview.GetProperty("url").GetString();
+                    if (previewUrl is null || !IsGiphyMedia(previewUrl)) continue;
+                    results.Add(new AnimatedCandidate { Id = id, Title = gif.TryGetProperty("title", out var t) ? t.GetString() ?? string.Empty : string.Empty, PreviewUrl = previewUrl, Sticker = kind == "stickers" });
+                }
+            }
+            catch (HttpRequestException)
+            {
+                // One source down still leaves the other.
+            }
+        }
+
+        return results;
+    }
+
+    /// <summary>Downloads a GIPHY animation (animated WebP, or MP4 when asked) and stores it as the logo. Only giphy.com hosts are contacted.</summary>
+    [HttpPost("{id}/Logo/Giphy")]
+    [Authorize(Policy = Policies.RequiresElevation)]
+    public async Task<IActionResult> LogoFromGiphy([FromRoute] string id, [FromQuery] string gifId, [FromQuery] bool video = false, CancellationToken cancellationToken = default)
+    {
+        var key = Plugin.Instance?.Configuration.GiphyApiKey;
+        if (string.IsNullOrWhiteSpace(key)) return StatusCode(StatusCodes.Status503ServiceUnavailable, new { Message = "GIPHY non configuré sur le serveur." });
+        if (string.IsNullOrEmpty(gifId) || !GiphyIdRegex().IsMatch(gifId)) return BadRequest(new { Message = "Animation GIPHY invalide." });
+        byte[]? bytes = null;
+        try
+        {
+            using var meta = await Http.GetAsync(new Uri($"https://api.giphy.com/v1/gifs/{gifId}?api_key={Uri.EscapeDataString(key)}"), cancellationToken).ConfigureAwait(false);
+            if (!meta.IsSuccessStatusCode) return StatusCode(StatusCodes.Status502BadGateway, new { Message = $"GIPHY a répondu {(int)meta.StatusCode}." });
+            await using var metaStream = await meta.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            using var doc = await JsonDocument.ParseAsync(metaStream, cancellationToken: cancellationToken).ConfigureAwait(false);
+            var images = doc.RootElement.GetProperty("data").GetProperty("images");
+            var field = video ? "mp4" : "webp";
+            var limit = LogoMedia.MaxBytes(video ? LogoMedia.Video : LogoMedia.Animated);
+            // Best quality that fits under the limit.
+            foreach (var rendition in new[] { "original", "fixed_width", "fixed_height", "downsized" })
+            {
+                if (!images.TryGetProperty(rendition, out var r) || !r.TryGetProperty(field, out var u)) continue;
+                var url = u.GetString();
+                if (url is null || !IsGiphyMedia(url)) continue;
+                using var response = await Http.GetAsync(new Uri(url), HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+                if (!response.IsSuccessStatusCode || response.Content.Headers.ContentLength > limit) continue;
+                await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+                bytes = await ReadLimitedAsync(stream, limit, cancellationToken).ConfigureAwait(false);
+                if (bytes is not null) break;
+            }
+        }
+        catch (HttpRequestException error)
+        {
+            return StatusCode(StatusCodes.Status502BadGateway, new { Message = "GIPHY est injoignable : " + error.Message });
+        }
+        catch (KeyNotFoundException)
+        {
+            return StatusCode(StatusCodes.Status502BadGateway, new { Message = "Réponse GIPHY inattendue." });
+        }
+
+        if (bytes is null) return BadRequest(new { Message = "Animation trop lourde ou introuvable." });
+        return await StoreLogoAsync(id, bytes).ConfigureAwait(false);
+    }
+
+    [GeneratedRegex("^[A-Za-z0-9]{6,40}$")]
+    private static partial Regex GiphyIdRegex();
+
+    private static bool IsGiphyMedia(string url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps
+        && (uri.Host == "giphy.com" || uri.Host.EndsWith(".giphy.com", StringComparison.Ordinal));
+
     private async Task<IActionResult> StoreLogoAsync(string id, byte[] bytes)
     {
         if (!IdRegex().IsMatch(id)) return BadRequest(new { Message = "Identifiant invalide." });
@@ -235,4 +324,20 @@ public sealed partial class StudiosController : ControllerBase
         await System.IO.File.WriteAllTextAsync(temp, JsonSerializer.Serialize(list, Json)).ConfigureAwait(false);
         System.IO.File.Move(temp, ListFile, true);
     }
+}
+
+/// <summary>An animated logo candidate found on GIPHY.</summary>
+public sealed class AnimatedCandidate
+{
+    /// <summary>Gets or sets the GIPHY id.</summary>
+    public string Id { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the title.</summary>
+    public string Title { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the small animated preview (media.giphy.com).</summary>
+    public string PreviewUrl { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets a value indicating whether it is a sticker (transparent background).</summary>
+    public bool Sticker { get; set; }
 }

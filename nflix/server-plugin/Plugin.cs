@@ -41,6 +41,9 @@ public sealed class PluginConfiguration : BasePluginConfiguration
 
     /// <summary>Gets or sets the previous secret, accepted during a rotation.</summary>
     public string AnnouncementPreviousSecret { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the GIPHY API key used to suggest animated distributor logos (server side only).</summary>
+    public string GiphyApiKey { get; set; } = string.Empty;
 }
 
 /// <summary>Nflix Auth plugin: exchanges a Mira Connect ID token for a Jellyfin session.</summary>

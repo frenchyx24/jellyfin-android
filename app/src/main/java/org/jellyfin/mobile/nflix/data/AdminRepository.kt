@@ -27,6 +27,16 @@ data class Distributor(
     @SerialName("LogoKind") val logoKind: String = LogoMedia.IMAGE,
 )
 
+/** An animated logo found on GIPHY through the Nflix Auth plugin. */
+@Immutable
+@Serializable
+data class AnimatedCandidate(
+    @SerialName("Id") val id: String = "",
+    @SerialName("Title") val title: String = "",
+    @SerialName("PreviewUrl") val previewUrl: String = "",
+    @SerialName("Sticker") val sticker: Boolean = false,
+)
+
 /** A company found on TMDB through Horus, offered as a logo candidate. */
 @Immutable
 data class CompanyLogo(val id: Int, val name: String, val logoPath: String, val country: String?) {
@@ -85,6 +95,18 @@ class AdminRepository(private val api: NflixApi, private val jellyfin: JellyfinR
 
     suspend fun uploadLogo(id: String, bytes: ByteArray, mediaType: String) {
         api.sendBytes("PUT", "NflixAuth/Studios/$id/Logo", bytes, mediaType)
+        cached = null
+    }
+
+    /** Animated candidates (GIPHY stickers and GIFs) searched by the server, which keeps the API key. */
+    suspend fun searchAnimated(query: String): List<AnimatedCandidate> {
+        if (query.trim().length < 2) return emptyList()
+        val text = api.raw("GET", api.url("NflixAuth/Studios/Animated/Search", mapOf("q" to query.trim())))
+        return json.decodeFromString(ListSerializer(AnimatedCandidate.serializer()), text.ifBlank { "[]" })
+    }
+
+    suspend fun logoFromGiphy(id: String, gifId: String) {
+        api.send("POST", "NflixAuth/Studios/$id/Logo/Giphy", mapOf("gifId" to gifId))
         cached = null
     }
 
