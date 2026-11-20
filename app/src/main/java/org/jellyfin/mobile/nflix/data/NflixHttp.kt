@@ -38,7 +38,7 @@ object NflixHttp {
                     attempt++
                 } catch (error: IOException) {
                     // Certificate problems do not heal with another attempt.
-                    val hopeless = error is javax.net.ssl.SSLException || !replayable || attempt >= maxAttempts || chain.isCancelled
+                    val hopeless = error is javax.net.ssl.SSLException || !replayable || attempt >= maxAttempts || (chain.call()?.isCanceled() == true)
                     if (hopeless) throw error
                     sleep(backoff(attempt))
                     attempt++

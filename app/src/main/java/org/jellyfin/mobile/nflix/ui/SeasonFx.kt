@@ -39,6 +39,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import kotlin.math.PI
 import kotlin.math.cos
+import kotlin.math.pow
 import kotlin.math.sin
 
 // ---- Shared clock -----------------------------------------------------------------------------
@@ -431,7 +432,6 @@ object SeasonSound {
             .setBufferSizeInBytes(bytes.size)
             .build()
         track.write(bytes, 0, bytes.size)
-        track.notifyAll()
         val listener = object : android.media.AudioTrack.OnPlaybackPositionUpdateListener {
             override fun onMarkerReached(t: android.media.AudioTrack?) { runCatching { t?.release() } }
             override fun onPeriodicNotification(t: android.media.AudioTrack?) = Unit

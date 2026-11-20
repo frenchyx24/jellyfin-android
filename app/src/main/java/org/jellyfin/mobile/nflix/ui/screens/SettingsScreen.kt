@@ -31,6 +31,10 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Cake
+import androidx.compose.material.icons.rounded.CalendarMonth
+import androidx.compose.material.icons.rounded.VolumeUp
+import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Tv
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Brightness6
@@ -341,6 +345,7 @@ fun SettingsScreen() {
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun SeasonalSettingsScreen() {
+    val navigator = LocalNavigator.current
     val theme = NflixSeason.theme
     val shown = theme.takeIf { it.isSeasonal } ?: NflixSeason.automatic
     val mode = NflixSeason.mode

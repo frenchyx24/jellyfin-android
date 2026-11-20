@@ -75,6 +75,9 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import org.jellyfin.mobile.nflix.data.AchievementBadge
 import org.jellyfin.mobile.nflix.ui.Nflix
+import org.jellyfin.mobile.nflix.ui.NflixSeason
+import org.jellyfin.mobile.nflix.ui.seasonConfettiColors
+import org.jellyfin.mobile.nflix.ui.SeasonGlyphBurst
 import java.time.Duration
 import java.time.OffsetDateTime
 import kotlin.math.PI
