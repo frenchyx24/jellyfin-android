@@ -101,10 +101,13 @@ class ProfileSwitchStore(context: Context) {
             prefs.edit(commit = true) { remove(KEY_STATE) }
             return
         }
-        val plain = json.encodeToString(SwitchState.serializer(), newState).toByteArray(Charsets.UTF_8)
-        val cipher = Cipher.getInstance(TRANSFORMATION).apply { init(Cipher.ENCRYPT_MODE, key()) }
-        val sealed = cipher.iv + cipher.doFinal(plain)
-        prefs.edit(commit = true) { putString(KEY_STATE, Base64.encodeToString(sealed, Base64.NO_WRAP)) }
+        // A broken keystore must not crash the caller; the in-memory state still applies.
+        runCatching {
+            val plain = json.encodeToString(SwitchState.serializer(), newState).toByteArray(Charsets.UTF_8)
+            val cipher = Cipher.getInstance(TRANSFORMATION).apply { init(Cipher.ENCRYPT_MODE, key()) }
+            val sealed = cipher.iv + cipher.doFinal(plain)
+            prefs.edit(commit = true) { putString(KEY_STATE, Base64.encodeToString(sealed, Base64.NO_WRAP)) }
+        }
     }
 
     fun clear() {
