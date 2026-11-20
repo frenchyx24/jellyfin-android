@@ -47,6 +47,8 @@ class AppDeps(
     val family: org.jellyfin.mobile.nflix.family.FamilyRepository get() = switcher.repo
 
     /** Family 1.4: presence, parental control, usage, weekly report, watch party. */
+    val social15: org.jellyfin.mobile.nflix.family.FamilySocial15Repository by lazy { org.jellyfin.mobile.nflix.family.FamilySocial15Repository(api) }
+
     val social: org.jellyfin.mobile.nflix.family.FamilySocialRepository by lazy { org.jellyfin.mobile.nflix.family.FamilySocialRepository(api) }
 
     /** Administration tools; the server enforces rights, the app only hides what a member cannot use. */
@@ -144,6 +146,8 @@ class AppDeps(
                 Toasts.show(verdict.reason ?: "Lecture non autorisée sur ce profil.", ToastKind.Warning)
                 return@launch
             }
+            // Opt-in friends wall (the server ignores it when the user did not opt in).
+            jellyfin.cachedItem(selectedId.toString())?.let { launch { social15.watched(it.id, it.seriesName ?: it.name) } }
             val local = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 val download = downloadDao.getDownloadByItemId(selectedId) ?: return@withContext false
                 if (download.status != DownloadStatus.DOWNLOADED) return@withContext false

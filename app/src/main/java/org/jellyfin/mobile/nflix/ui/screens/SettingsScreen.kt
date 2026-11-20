@@ -248,6 +248,14 @@ fun SettingsScreen() {
         LazyColumn(contentPadding = PaddingValues(start = 18.dp, end = 18.dp, bottom = 140.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             item { SettingsHeader("Réglages", "Apparence, lecture et téléchargements de Nflix.", Modifier.settleIn(0)) }
 
+            item {
+                GlassCard(Modifier.fillMaxWidth().settleIn(1), onClick = { navigator.open(Route.Wrapped) }) {
+                    Column(Modifier.padding(horizontal = 18.dp, vertical = 14.dp)) {
+                        Text("Mes stats et Nflix Wrapped", fontWeight = FontWeight.SemiBold)
+                        Text("Heures regardées, genres et séries préférés, série de jours.", fontSize = 12.sp, color = Nflix.Muted)
+                    }
+                }
+            }
             item { SectionLabel("Apparence", Modifier.settleIn(1)) }
             item {
                 GlassCard(Modifier.fillMaxWidth().settleIn(1), onClick = { navigator.open(Route.SeasonalSettings) }) {

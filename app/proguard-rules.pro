@@ -32,3 +32,22 @@
 -assumevalues class android.os.Build$VERSION {
   int SDK_INT return 21..2147483647;
 }
+
+# kotlinx.serialization: generated serializers and companions, looked up at runtime
+-keepattributes *Annotation*, InnerClasses, Signature, EnclosingMethod
+-keepclassmembers @kotlinx.serialization.Serializable class org.jellyfin.mobile.** {
+    *** Companion;
+    *** INSTANCE;
+    kotlinx.serialization.KSerializer serializer(...);
+}
+-keep,includedescriptorclasses class org.jellyfin.mobile.**$$serializer { *; }
+-keepclasseswithmembers class org.jellyfin.mobile.** {
+    kotlinx.serialization.KSerializer serializer(...);
+}
+
+# Koin resolves by class; keep constructors of classes it builds
+-keepclassmembers class org.jellyfin.mobile.** { public <init>(...); }
+
+# Room: generated database and DAO implementations are created through reflection
+-keep class * extends androidx.room.RoomDatabase { <init>(); }
+-keep class org.jellyfin.mobile.data.**_Impl { *; }

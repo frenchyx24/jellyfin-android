@@ -9,7 +9,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import okhttp3.Cache
 import okhttp3.CacheControl
-import okhttp3.CertificatePinner
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
@@ -23,6 +22,7 @@ import org.jellyfin.sdk.api.client.util.AuthorizationHeaderBuilder
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
+import timber.log.Timber
 import java.util.concurrent.TimeUnit
 
 class NflixHttpException(val code: Int, message: String, val body: String? = null) : IOException(message)
@@ -71,12 +71,11 @@ class NflixApi(
         }
         .apply {
             if (pinPolicy.pinningEnabled()) {
-                val pinner = CertificatePinner.Builder().apply {
-                    PinPolicy.Pins.byHost.forEach { (host, pins) ->
-                        pins.forEach { add(host, it) }
-                    }
-                }.build()
-                certificatePinner(pinner)
+                // A bad pin must never stop the app: without a pinner, system trust still applies.
+                runCatching { PinPolicy.Pins.pinner() }
+                    .onFailure { Timber.e(it, "Nflix certificate pins rejected, pinning disabled") }
+                    .getOrNull()
+                    ?.let(::certificatePinner)
             }
         }
         .build()
@@ -205,6 +204,18 @@ class NflixApi(
     }
 
     /** Sends raw bytes (image uploads); the media type is sent verbatim. */
+    /** Raw authenticated GET (chat images), size capped. */
+    suspend fun getBytes(path: String, maxBytes: Int = 4 * 1024 * 1024): ByteArray = withContext(Dispatchers.IO) {
+        val target = url(path, emptyMap())
+        val request = Request.Builder().url(target).header("Authorization", authorization()).get().build()
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) throw NflixHttpException(response.code, "HTTP ${response.code} ${target.encodedPath}")
+            val bytes = response.body?.bytes() ?: ByteArray(0)
+            require(bytes.size <= maxBytes) { "Image trop lourde" }
+            bytes
+        }
+    }
+
     suspend fun sendBytes(method: String, path: String, bytes: ByteArray, mediaType: String, query: Map<String, Any?> = emptyMap()): JsonElement? = withContext(Dispatchers.IO) {
         val target = url(path, query)
         val request = Request.Builder().url(target)

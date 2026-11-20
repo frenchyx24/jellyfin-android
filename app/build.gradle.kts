@@ -192,6 +192,8 @@ dependencies {
     // Kotlin
     implementation(libs.bundles.coroutines)
     implementation(libs.kotlin.serialization.json)
+    // QR codes for Family invite links (pure Java, no Play Services)
+    implementation("com.google.zxing:core:3.5.3")
 
     // Core
     implementation(libs.bundles.koin)

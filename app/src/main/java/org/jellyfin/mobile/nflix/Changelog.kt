@@ -5,6 +5,9 @@ object Changelog {
     data class Entry(val version: String, val title: String, val lines: List<String>)
 
     val entries: List<Entry> = listOf(
+        Entry("5.8.2", "Nflix 5.8.2", listOf(
+            "Correction du plantage au lancement (épinglage de certificat).",
+        )),
         Entry("5.8.0", "Nflix 5.8.0", listOf(
             "Famille : sondages « on regarde quoi ce soir », réactions emoji, réponses et indicateur « écrit… » dans les messages.",
             "Partagez un lien vers n'importe quel titre depuis son menu.",

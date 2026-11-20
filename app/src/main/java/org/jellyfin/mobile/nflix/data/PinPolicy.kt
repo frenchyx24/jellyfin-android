@@ -91,6 +91,13 @@ class PinPolicy(
         )
 
         val byHost: Map<String, List<String>> = hosts.associateWith { accepted }
+
+        /** OkHttp pin strings need the hash prefix: a bare base64 value makes CertificatePinner throw. */
+        fun pin(hash: String): String = if (hash.startsWith("sha256/")) hash else "sha256/$hash"
+
+        fun pinner(): okhttp3.CertificatePinner = okhttp3.CertificatePinner.Builder().apply {
+            byHost.forEach { (host, pins) -> pins.forEach { add(host, pin(it)) } }
+        }.build()
     }
 
     companion object {

@@ -344,6 +344,9 @@ private fun Actions(item: Item, accent: Color, onChanged: () -> Unit) {
             }
             if (resumable) ActionIcon(Icons.Rounded.Replay, "Du début") { deps.play(scope, item, fromStart = true) }
             if (item.type == "Movie" || item.type == "Episode") ActionIcon(Icons.Rounded.Groups, "Soirée", accent = accent) { startParty(deps, scope, item) }
+            var shareOpen by remember { mutableStateOf(false) }
+            ActionIcon(Icons.Rounded.Groups, "Recommander", accent = accent) { shareOpen = true }
+            if (shareOpen) ShareTitleDialog(item) { shareOpen = false }
             ActionIcon(Icons.Rounded.Report, "Signaler", accent = accent) { org.jellyfin.mobile.nflix.ui.ItemMenu.report(item) }
             val remoteTrailer = item.trailers.firstNotNullOfOrNull { org.jellyfin.mobile.nflix.ui.TrailerSource.youtubeId(it.url) }
             if ((item.localTrailerCount ?: 0) > 0 || remoteTrailer != null) {

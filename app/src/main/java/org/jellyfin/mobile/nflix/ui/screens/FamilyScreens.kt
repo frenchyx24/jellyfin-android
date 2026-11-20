@@ -6,6 +6,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.material.icons.rounded.Image
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.border
@@ -532,6 +533,7 @@ private fun NoFamily(refresh: () -> Unit) {
             }
         }
         Text("Une invitation reçue apparaît tout en haut de cet écran.", color = Nflix.Muted, fontSize = 12.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+        JoinByLinkCard(refresh)
     }
     if (joinOpen) {
         UserSearchDialog("Rejoindre une famille", "Demander", onDismiss = { joinOpen = false }) { user ->
@@ -615,7 +617,7 @@ private fun MemberAvatar(member: FamilyMemberInfo, size: Int) {
     val dark = Color(base.red * 0.6f, base.green * 0.6f, base.blue * 0.6f, 1f)
     Box(Modifier.size(size.dp).clip(RoundedCornerShape((size * 0.22f).dp)).background(Brush.linearGradient(listOf(base, dark))), contentAlignment = Alignment.Center) {
         AvatarImage(image, Modifier.size(size.dp)) {
-            Text(FamilyFormat.initials(member.displayName), fontSize = (size / 3).sp, fontWeight = FontWeight.Bold, color = Color.White)
+            GeneratedAvatarArt(member.userId, FamilyFormat.initials(member.displayName), size)
         }
     }
 }
@@ -878,7 +880,7 @@ private fun UserBubble(userId: String, name: String, hasImage: Boolean, size: In
     val deps = LocalDeps.current
     Box(Modifier.size(size.dp).clip(CircleShape).background(Nflix.SurfaceHigh), contentAlignment = Alignment.Center) {
         AvatarImage(if (hasImage) deps.api.userImageUrl(userId, null) else null, Modifier.size(size.dp)) {
-            Text(FamilyFormat.initials(name), fontSize = (size / 3).sp, fontWeight = FontWeight.Bold, color = Color.White)
+            GeneratedAvatarArt(userId, FamilyFormat.initials(name), size)
         }
     }
 }
@@ -1085,6 +1087,7 @@ private fun MessagesTab(outerReload: Int) {
 @Composable
 fun FamilyChatScreen(conversationId: String, title: String) {
     val deps = LocalDeps.current
+    val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
     val messages = remember { mutableStateListOf<MessageInfo>() }
     var text by remember { mutableStateOf("") }
@@ -1211,6 +1214,21 @@ fun FamilyChatScreen(conversationId: String, title: String) {
                 Modifier.fillMaxWidth().background(Nflix.Surface).navigationBarsPadding().padding(horizontal = 10.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                val picker = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()) { uri ->
+                    if (uri != null) scope.launch {
+                        sending = true
+                        val bytes = runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } } }.getOrNull()
+                        if (bytes == null || bytes.size > 3 * 1024 * 1024) {
+                            org.jellyfin.mobile.nflix.ui.Toasts.show("Image trop lourde (3 Mo max).", org.jellyfin.mobile.nflix.ui.ToastKind.Warning)
+                        } else if (attempt { deps.social15.sendImage(conversationId, bytes) }) {
+                            firstUnread = null; poke++
+                        }
+                        sending = false
+                    }
+                }
+                IconButton(onClick = { picker.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly)) }, modifier = Modifier.size(40.dp)) {
+                    Icon(Icons.Rounded.Image, "Envoyer une photo ou un GIF", tint = Color.White)
+                }
                 IconButton(onClick = { showPollForm = true }, modifier = Modifier.size(40.dp)) {
                     Icon(Icons.Rounded.Poll, "Créer un sondage « on regarde quoi ce soir »", tint = Color.White)
                 }
@@ -1290,7 +1308,7 @@ private fun Bubble(m: MessageInfo, grouped: Boolean, conversationId: String = ""
         ) {
             if (!m.mine && !grouped) Text(m.senderName, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Nflix.Info)
             if (m.replyToId != 0L) Text("↩ réponse à un message", fontSize = 10.sp, color = Color.White.copy(alpha = .6f))
-            Text(m.text, color = Color.White, fontSize = 14.sp)
+            if (m.imageId != null) ChatImage(m.imageId) else Text(m.text, color = Color.White, fontSize = 14.sp)
             if (m.reactions.isNotEmpty() || conversationId.isNotEmpty()) {
                 Row(Modifier.padding(top = 2.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     m.reactions.forEach { (emoji, count) -> Text("$emoji $count", fontSize = 11.sp, color = Color.White.copy(alpha = .85f)) }
@@ -1316,7 +1334,8 @@ private fun Bubble(m: MessageInfo, grouped: Boolean, conversationId: String = ""
                     }
                 }
             }
-            Text(FamilyFormat.clock(m.sentUtc), fontSize = 10.sp, color = Color.White.copy(alpha = .7f), modifier = Modifier.align(Alignment.End))
+            val receipt = if (m.mine && m.readByNames.isNotEmpty()) " · Lu par " + m.readByNames.take(3).joinToString(", ") + (if (m.readByNames.size > 3) "…" else "") else ""
+            Text(FamilyFormat.clock(m.sentUtc) + receipt, fontSize = 10.sp, color = Color.White.copy(alpha = .7f), modifier = Modifier.align(Alignment.End))
         }
     }
 }

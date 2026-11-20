@@ -47,6 +47,15 @@ class AlertPrefs(context: Context) {
 
     fun isEnabled(kind: AlertKind): Boolean = masterEnabled && prefs.getBoolean("kind_${kind.wire}", true)
 
+    /** Night do-not-disturb: chat notifications are held from 22 h to 8 h. */
+    var quietNights: Boolean
+        get() = prefs.getBoolean("quiet_nights", true)
+        set(value) { prefs.edit { putBoolean("quiet_nights", value) }; _version.value++ }
+
+    fun chatCursor(conversationId: String): Long = prefs.getLong("chat_$conversationId", -1)
+
+    fun setChatCursor(conversationId: String, id: Long) = prefs.edit { putLong("chat_$conversationId", id) }
+
     fun kindSwitch(kind: AlertKind): Boolean = prefs.getBoolean("kind_${kind.wire}", true)
 
     fun setEnabled(kind: AlertKind, enabled: Boolean) {
@@ -142,6 +151,7 @@ object NflixAlerts {
             .setColor(0xFFE50914.toInt())
             .setCategory(NotificationCompat.CATEGORY_RECOMMENDATION)
             .setOnlyAlertOnce(true)
+            .setGroup("nflix_" + alert.kind)
             .setContentIntent(open)
             .setAutoCancel(true)
             .build()

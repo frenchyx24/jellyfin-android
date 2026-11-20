@@ -423,6 +423,9 @@ fun AlertSettingsScreen() {
                     SettingSwitch(kind.label, kind.description, deps.alertPrefs.kindSwitch(kind), enabled = deps.alertPrefs.masterEnabled) { deps.alertPrefs.setEnabled(kind, it) }
                 }
             }
+            item(key = "quiet-$version") {
+                SettingSwitch("Nuit sans notification", "Messages Famille silencieux de 22 h à 8 h", deps.alertPrefs.quietNights, enabled = deps.alertPrefs.masterEnabled) { deps.alertPrefs.quietNights = it }
+            }
             item {
                 Text(
                     "Séries suivies : ${follows?.size ?: "…"}. Activez « M'alerter » sur la page d'une série ou d'un animé.",

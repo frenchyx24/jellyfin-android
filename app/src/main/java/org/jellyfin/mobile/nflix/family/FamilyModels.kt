@@ -107,6 +107,10 @@ data class MessageInfo(
     @SerialName("ReplyToId") val replyToId: Long = 0,
     /** 5.8: emoji -> reaction count. */
     @SerialName("Reactions") val reactions: Map<String, Int> = emptyMap(),
+    /** 1.5: attached image (plugin route Images/{id}). */
+    @SerialName("ImageId") val imageId: String? = null,
+    /** 1.5: who read my message (read receipts, sender only). */
+    @SerialName("ReadByNames") val readByNames: List<String> = emptyList(),
 )
 
 @Serializable

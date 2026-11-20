@@ -80,6 +80,7 @@ fun FamilySocialSection(me: FamilyMe, switched: Boolean) {
             }
         }
     }
+    FamilyMoreSection(me, switched)
     parentalFor?.let { kid -> ParentalDialog(kid) { parentalFor = null } }
 }
 

@@ -25,6 +25,7 @@ enum class AlertKind(val wire: String, val label: String, val description: Strin
     Episode("episode_available", "Nouveaux épisodes", "Quand un épisode d'une série suivie arrive sur Nflix."),
     Announced("episode_announced", "Épisodes annoncés", "Quand un nouvel épisode d'une série suivie est programmé."),
     Achievement("achievement", "Succès débloqués", "Quand vous débloquez un badge ou terminez une quête."),
+    Chat("family_message", "Messages Famille", "Quand un proche vous écrit (silencieux de 22 h à 8 h)."),
     ;
 
     companion object {
