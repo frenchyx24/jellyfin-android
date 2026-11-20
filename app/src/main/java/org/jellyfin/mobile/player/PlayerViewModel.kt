@@ -141,6 +141,9 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application),
     private var playSpeed = 1f
 
     private var progressUpdateJob: Job? = null
+    private var partySyncJob: Job? = null
+    private var usageMs = 0L
+    private val social by lazy { org.jellyfin.mobile.nflix.family.FamilySocialRepository(get<org.jellyfin.mobile.nflix.data.NflixApi>()) }
     private var chapterMarkingUpdateJob: Job? = null
     private var skipMediaSegmentUpdateJob: Job? = null
     private var fallbackRetryJob: Job? = null
@@ -394,11 +397,49 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application),
             while (true) {
                 delay(Constants.PLAYER_TIME_UPDATE_RATE)
                 playerOrNull?.reportPlaybackState()
+                if (playerOrNull?.isPlaying == true) accountUsage(Constants.PLAYER_TIME_UPDATE_RATE)
+            }
+        }
+        startPartySync()
+    }
+
+    /** Family usage: whole minutes go to the server (daily limit, weekly report). */
+    private fun accountUsage(ms: Long) {
+        usageMs += ms
+        val chunks = org.jellyfin.mobile.nflix.family.UsageMeter.chunks(usageMs)
+        if (chunks.isEmpty()) return
+        usageMs -= chunks.sum() * 60_000L
+        viewModelScope.launch(Dispatchers.IO) { chunks.forEach { social.reportUsage(it) } }
+    }
+
+    /** Watch party: the host pushes its position every 3 s, followers seek when drift exceeds 2 s. */
+    private fun startPartySync() {
+        partySyncJob?.cancel()
+        val partyId = org.jellyfin.mobile.nflix.family.PartySession.partyId ?: return
+        partySyncJob = viewModelScope.launch {
+            while (true) {
+                val player = playerOrNull
+                if (player != null) {
+                    runCatching {
+                        val party = withContext(Dispatchers.IO) { social.party(partyId) }
+                        val host = org.jellyfin.mobile.nflix.family.PartySync.isHost(party, org.jellyfin.mobile.nflix.family.PartySession.myUserId)
+                        val latest = if (host) {
+                            withContext(Dispatchers.IO) { social.pushState(partyId, player.currentPosition * 10_000, !player.isPlaying) }
+                        } else {
+                            org.jellyfin.mobile.nflix.family.PartySync.seekTarget(player.currentPosition, party)?.let { player.seekTo(it) }
+                            if (party.paused == player.isPlaying) player.playWhenReady = !party.paused
+                            party
+                        }
+                        org.jellyfin.mobile.nflix.family.PartySession.last.value = latest
+                    }.onFailure { Timber.w(it, "Party sync failed") }
+                }
+                delay(3_000)
             }
         }
     }
 
     private fun stopProgressUpdates() {
+        partySyncJob?.cancel()
         progressUpdateJob?.cancel()
     }
 

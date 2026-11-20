@@ -421,6 +421,7 @@ private fun ProfilesTab(me: FamilyMe, switched: Boolean, refresh: () -> Unit, op
             }
             item { Box(Modifier.padding(horizontal = 14.dp)) { GlassCard(Modifier.fillMaxWidth()) { Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) { PickerSetting() } } } }
             item { ActivitySection() }
+            item { FamilySocialSection(me, switched) }
         } else if (!switched) {
             item {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -428,6 +429,7 @@ private fun ProfilesTab(me: FamilyMe, switched: Boolean, refresh: () -> Unit, op
                     ActionCard(Icons.Rounded.People, "Amis", "ajouter, écrire", Nflix.Success, Modifier.weight(1f)) { openTab(FamilyTab.Friends) }
                 }
             }
+            item { FamilySocialSection(me, switched) }
         }
         if (!switched) {
             item {

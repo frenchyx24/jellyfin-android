@@ -115,6 +115,51 @@ object CastProtocol {
         is CastCommand.Volume -> null // receiver volume goes through the Cast session API
     }
 
+    const val TICKS_PER_SECOND = 10_000_000L
+    const val TICKS_PER_MS = 10_000L
+
+    /** Relative seek on the remote screen, clamped to [0, duration] when the duration is known. */
+    fun seekBy(positionTicks: Long, deltaSeconds: Int, durationTicks: Long?): Long {
+        val target = (positionTicks + deltaSeconds * TICKS_PER_SECOND).coerceAtLeast(0)
+        return durationTicks?.takeIf { it > 0 }?.let { target.coerceAtMost(it) } ?: target
+    }
+
+    /** Hand-over from the phone player: ExoPlayer milliseconds to Jellyfin ticks. */
+    fun handoffTicks(positionMs: Long): Long = positionMs.coerceAtLeast(0) * TICKS_PER_MS
+
+    /** A Jellyfin server call that drives a remote session. */
+    data class SessionRequest(val method: String, val path: String, val query: Map<String, Any> = emptyMap(), val body: JsonObject? = null)
+
+    fun playRequest(sessionId: String, itemIds: List<String>, startTicks: Long, audioIndex: Int?, subtitleIndex: Int?) = SessionRequest(
+        "POST", "Sessions/$sessionId/Playing",
+        body = buildJsonObject {
+            put("PlayCommand", "PlayNow")
+            putJsonArray("ItemIds") { itemIds.forEach { add(JsonPrimitive(it)) } }
+            if (startTicks > 0) put("StartPositionTicks", startTicks)
+            audioIndex?.let { put("AudioStreamIndex", it) }
+            subtitleIndex?.let { put("SubtitleStreamIndex", it) }
+        },
+    )
+
+    fun sessionRequest(sessionId: String, command: CastCommand): SessionRequest {
+        fun general(name: String, argument: String, value: String) = SessionRequest(
+            "POST", "Sessions/$sessionId/Command",
+            body = buildJsonObject {
+                put("Name", name)
+                put("Arguments", buildJsonObject { put(argument, value) })
+            },
+        )
+        return when (command) {
+            CastCommand.Pause -> SessionRequest("POST", "Sessions/$sessionId/Playing/Pause")
+            CastCommand.Resume -> SessionRequest("POST", "Sessions/$sessionId/Playing/Unpause")
+            CastCommand.Stop -> SessionRequest("POST", "Sessions/$sessionId/Playing/Stop")
+            is CastCommand.Seek -> SessionRequest("POST", "Sessions/$sessionId/Playing/Seek", mapOf("seekPositionTicks" to command.ticks.coerceAtLeast(0)))
+            is CastCommand.Volume -> general("SetVolume", "Volume", (command.level * 100).toInt().coerceIn(0, 100).toString())
+            is CastCommand.Audio -> general("SetAudioStreamIndex", "Index", command.index.toString())
+            is CastCommand.Subtitle -> general("SetSubtitleStreamIndex", "Index", command.index.toString())
+        }
+    }
+
     /** Applies a receiver message ({type, data}) to the current status. */
     fun applyMessage(current: CastStatus, message: JsonObject): CastStatus {
         val type = (message["type"] as? JsonPrimitive)?.contentOrNull ?: return current
@@ -234,26 +279,12 @@ class JellyfinSessionsBackend(private val api: NflixApi, private val ownDeviceId
     }
 
     override suspend fun play(target: CastTarget, items: List<Item>, startTicks: Long, audioIndex: Int?, subtitleIndex: Int?) {
-        api.send("POST", "Sessions/${target.id}/Playing", body = buildJsonObject {
-            put("PlayCommand", "PlayNow")
-            putJsonArray("ItemIds") { items.forEach { add(JsonPrimitive(it.id)) } }
-            if (startTicks > 0) put("StartPositionTicks", startTicks)
-            audioIndex?.let { put("AudioStreamIndex", it) }
-            subtitleIndex?.let { put("SubtitleStreamIndex", it) }
-        })
+        send(CastProtocol.playRequest(target.id, items.map { it.id }, startTicks, audioIndex, subtitleIndex))
         _status.value = CastStatus(target, items.firstOrNull()?.id, items.firstOrNull()?.name, startTicks, items.firstOrNull()?.runTimeTicks)
     }
 
     override suspend fun command(target: CastTarget, command: CastCommand) {
-        when (command) {
-            CastCommand.Pause -> api.send("POST", "Sessions/${target.id}/Playing/Pause")
-            CastCommand.Resume -> api.send("POST", "Sessions/${target.id}/Playing/Unpause")
-            CastCommand.Stop -> api.send("POST", "Sessions/${target.id}/Playing/Stop")
-            is CastCommand.Seek -> api.send("POST", "Sessions/${target.id}/Playing/Seek", mapOf("seekPositionTicks" to command.ticks))
-            is CastCommand.Volume -> general(target, "SetVolume", "Volume", (command.level * 100).toInt().coerceIn(0, 100).toString())
-            is CastCommand.Audio -> general(target, "SetAudioStreamIndex", "Index", command.index.toString())
-            is CastCommand.Subtitle -> general(target, "SetSubtitleStreamIndex", "Index", command.index.toString())
-        }
+        send(CastProtocol.sessionRequest(target.id, command))
         _status.value = _status.value?.let { s ->
             when (command) {
                 CastCommand.Pause -> s.copy(paused = true)
@@ -267,11 +298,8 @@ class JellyfinSessionsBackend(private val api: NflixApi, private val ownDeviceId
         }
     }
 
-    private suspend fun general(target: CastTarget, name: String, argument: String, value: String) {
-        api.send("POST", "Sessions/${target.id}/Command", body = buildJsonObject {
-            put("Name", name)
-            put("Arguments", buildJsonObject { put(argument, value) })
-        })
+    private suspend fun send(request: CastProtocol.SessionRequest) {
+        api.send(request.method, request.path, request.query, request.body)
     }
 
     override suspend fun disconnect(target: CastTarget) {
