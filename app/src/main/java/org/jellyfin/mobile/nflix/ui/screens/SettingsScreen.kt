@@ -49,6 +49,7 @@ import androidx.compose.material.icons.rounded.VideoLibrary
 import androidx.compose.material.icons.rounded.FastForward
 import androidx.compose.material.icons.rounded.Headphones
 import androidx.compose.material.icons.rounded.Memory
+import androidx.compose.material.icons.rounded.NewReleases
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.ScreenRotation
@@ -373,6 +374,23 @@ fun SettingsScreen() {
                         SettingLink(Icons.Rounded.NotificationsActive, SettingTints.Coral, "Notifications", "Demandes, séries suivies, succès") { navigator.open(Route.AlertSettings) }
                         if (BuildConfig.STORE_UPDATES) SettingLink(Icons.Rounded.SystemUpdate, SettingTints.Mint, "Rechercher une mise à jour", "Version ${BuildConfig.VERSION_NAME}") { scope.launch { deps.updater.check(force = true) } }
                         SettingLink(Icons.Rounded.School, SettingTints.Amber, "Didacticiel", "Revoir la présentation de Nflix") { org.jellyfin.mobile.nflix.ui.tutorial.Tutorial.open() }
+                        var changelog by remember { mutableStateOf(false) }
+                        SettingLink(Icons.Rounded.NewReleases, SettingTints.Sky, "Nouveautés de la version", "Ce qui change dans cette version de Nflix") { changelog = true }
+                        if (changelog) {
+                            androidx.compose.material3.AlertDialog(
+                                onDismissRequest = { changelog = false },
+                                title = { Text("Nouveautés — Nflix ${BuildConfig.VERSION_NAME}") },
+                                text = {
+                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        org.jellyfin.mobile.nflix.Changelog.entries.forEach { e ->
+                                            Text(e.title, fontWeight = FontWeight.Bold)
+                                            e.lines.forEach { Text("• $it", fontSize = 13.sp, color = Nflix.Muted) }
+                                        }
+                                    }
+                                },
+                                confirmButton = { TextButton(onClick = { changelog = false }) { Text("Fermer") } },
+                            )
+                        }
                         SettingLink(Icons.AutoMirrored.Rounded.OpenInNew, SettingTints.Sky, "Réglages Android de l'app", "Autorisations, stockage, notifications", external = true) {
                             runCatching { context.startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))) }
                         }
