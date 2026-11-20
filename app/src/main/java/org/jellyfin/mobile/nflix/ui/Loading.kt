@@ -1,6 +1,12 @@
 package org.jellyfin.mobile.nflix.ui
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -30,6 +36,19 @@ class Reloader {
 
 @Composable
 fun rememberReloader() = remember { Reloader() }
+
+/**
+ * Themed loading indicator for whole screens and cards, aliased as CircularProgressIndicator in
+ * the screens that use it (see SeasonSpinner). Brand look keeps the Material spinner.
+ */
+@Composable
+fun SeasonLoading(modifier: Modifier = Modifier) = SeasonSpinner(modifier.size(40.dp), color = Nflix.Red, strokeWidth = 3.dp)
+
+/** Full-screen loading state of a screen. */
+@Composable
+fun SeasonLoadingScreen(modifier: Modifier = Modifier) {
+    Box(modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) { SeasonLoading() }
+}
 
 /**
  * Loads data for a screen. [initial] lets a screen show cached content immediately (no flash),

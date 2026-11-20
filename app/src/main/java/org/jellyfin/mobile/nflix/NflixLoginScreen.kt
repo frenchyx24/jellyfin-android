@@ -140,8 +140,33 @@ fun NflixLoginScreen(
     onRetryConnection: () -> Unit,
 ) {
     val exit by animateFloatAsState(if (state.success) 1f else 0f, tween(520, easing = FastOutSlowInEasing), label = "exit")
-    Box(Modifier.fillMaxSize().background(NflixNight)) {
+    // The login page carries the active season lightly; readability stays first (white text, brand CTA).
+    val context = androidx.compose.ui.platform.LocalContext.current
+    remember(context) { org.jellyfin.mobile.nflix.ui.NflixSeason.init(context) }
+    org.jellyfin.mobile.nflix.ui.SeasonClockHost()
+    val season = org.jellyfin.mobile.nflix.ui.NflixSeason.theme
+    val seasonal = season.isSeasonal
+    Box(Modifier.fillMaxSize().background(if (seasonal) season.night else NflixNight)) {
         AnimatedBackdrop(Modifier.fillMaxSize())
+        if (seasonal) {
+            // Soft season light behind the logo and a few drifting glyphs, low opacity.
+            org.jellyfin.mobile.nflix.ui.SeasonAmbience(Modifier.fillMaxSize(), strength = 0.35f, topGlow = true)
+            Canvas(Modifier.fillMaxSize()) {
+                drawCircle(
+                    Brush.radialGradient(
+                        listOf(season.accent.copy(alpha = 0.10f), Color.Transparent),
+                        center = Offset(size.width * 0.5f, size.height * 0.22f),
+                        radius = size.width * 0.8f,
+                    ),
+                    radius = size.width * 0.8f,
+                    center = Offset(size.width * 0.5f, size.height * 0.22f),
+                )
+            }
+            org.jellyfin.mobile.nflix.ui.AnimatedSeasonGlyph(
+                season.decor.badgeGlyph, season,
+                Modifier.align(Alignment.TopEnd).padding(top = 96.dp, end = 24.dp).size(26.dp),
+            )
+        }
         Column(
             modifier = Modifier
                 .fillMaxSize()

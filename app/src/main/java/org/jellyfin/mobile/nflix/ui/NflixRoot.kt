@@ -264,6 +264,7 @@ private fun Screen(route: Route) {
         Route.Family -> org.jellyfin.mobile.nflix.ui.screens.FamilyScreen()
         is Route.FamilyChat -> org.jellyfin.mobile.nflix.ui.screens.FamilyChatScreen(route.id, route.title)
         Route.SeasonalSettings -> org.jellyfin.mobile.nflix.ui.screens.SeasonalSettingsScreen()
+        Route.SeasonalCalendar -> org.jellyfin.mobile.nflix.ui.screens.SeasonalCalendarScreen()
         is Route.YtArtist -> org.jellyfin.mobile.nflix.ui.screens.OnlineArtistScreen(null, route.name)
         is Route.OnlineArtist -> org.jellyfin.mobile.nflix.ui.screens.OnlineArtistScreen(route.id, route.name)
         is Route.OnlineAlbum -> org.jellyfin.mobile.nflix.ui.screens.OnlineAlbumScreen(route.id)

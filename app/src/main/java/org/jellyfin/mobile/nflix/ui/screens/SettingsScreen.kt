@@ -53,6 +53,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -76,6 +77,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.edit
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.jellyfin.mobile.BuildConfig
@@ -87,6 +90,8 @@ import org.jellyfin.mobile.nflix.ui.NflixSeason
 import org.jellyfin.mobile.nflix.ui.NflixSeasonTheme
 import org.jellyfin.mobile.nflix.ui.SeasonBadge
 import org.jellyfin.mobile.nflix.ui.SeasonGlyphIcon
+import org.jellyfin.mobile.nflix.ui.SeasonBirthday
+import org.jellyfin.mobile.nflix.ui.SeasonIntensity
 import org.jellyfin.mobile.nflix.ui.SeasonScene
 import org.jellyfin.mobile.utils.Constants
 
@@ -384,6 +389,18 @@ fun SeasonalSettingsScreen() {
             }
             item { SectionLabel("Calendrier $year", Modifier.settleIn(8)) }
             item {
+                GlassCard(Modifier.fillMaxWidth().settleIn(8), onClick = { navigator.open(Route.SeasonalCalendar) }) {
+                    Row(Modifier.padding(horizontal = 18.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                        IconTile(Icons.Rounded.CalendarMonth, shown.accent)
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text("12 prochains mois", fontWeight = FontWeight.SemiBold)
+                            Text("Toutes les fêtes et saisons à venir, avec aperçu animé.", fontSize = 12.sp, color = Nflix.Muted, lineHeight = 17.sp)
+                        }
+                        Icon(Icons.Rounded.ChevronRight, null, tint = Nflix.Muted)
+                    }
+                }
+            }
+            item {
                 GlassCard(Modifier.fillMaxWidth().settleIn(8)) {
                     Column(Modifier.padding(horizontal = 18.dp, vertical = 8.dp)) {
                         org.jellyfin.mobile.nflix.ui.FrenchCalendar.year(year).forEach { (event, _) ->
@@ -408,6 +425,66 @@ fun SeasonalSettingsScreen() {
                         PrefSwitch(Icons.Rounded.Celebration, shown.accent, "Fêtes", "Noël, 14 Juillet, Pâques… remplacent la saison en mode automatique.", NflixSeason.events, onChange = NflixSeason::updateEvents)
                         PrefSwitch(Icons.Rounded.Celebration, SettingTints.Sky, "Décor", "Ciel, coins décorés, bouton Lecture et silhouette au-dessus de la barre. Désactivé : seulement les couleurs.", NflixSeason.decorations, onChange = NflixSeason::updateDecorations)
                         PrefSwitch(Icons.Rounded.Celebration, SettingTints.Sky, "Animations", "Chauves-souris, neige, feux d'artifice… Figées seulement si « Supprimer les animations » est activé dans Android ; allégées en économie de batterie.", NflixSeason.ambient, onChange = NflixSeason::updateAmbient)
+                        SettingChoice(
+                            Icons.Rounded.Speed, SettingTints.Violet, "Intensité des effets",
+                            "Nombre de particules et amplitude des mouvements.", 
+                            SeasonIntensity.entries.map { it to it.label }, NflixSeason.intensity,
+                            enabled = NflixSeason.ambient,
+                        ) { NflixSeason.updateIntensity(it) }
+                        PrefSwitch(
+                            Icons.Rounded.VolumeUp, SettingTints.Sky, "Sons discrets",
+                            "Petit carillon sur le bouton Lecture et au changement de thème. Jamais pendant la lecture, muet en silencieux.",
+                            NflixSeason.sounds, enabled = NflixSeason.ambient, onChange = NflixSeason::updateSounds,
+                        )
+                    }
+                }
+            }
+            item { SectionLabel("Anniversaire", Modifier.settleIn(10)) }
+            item {
+                GlassCard(Modifier.fillMaxWidth().settleIn(10)) {
+                    var picking by remember { mutableStateOf(false) }
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable { picking = true }.padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    ) {
+                        IconTile(Icons.Rounded.Cake, NflixSeasonTheme.Birthday.accent)
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text("Date d'anniversaire", fontWeight = FontWeight.SemiBold)
+                            Text(
+                                NflixSeason.birthday?.let { day ->
+                                    val d = SeasonBirthday.inYear(day, year)
+                                    "${DateTimeFormatter.ofPattern("d MMMM", Locale.FRANCE).format(d)} · thème « Joyeux anniversaire » ce jour-là, prioritaire sur les autres."
+                                } ?: "Jour et mois seulement, gardés sur cet appareil. Ballons et confettis ce jour-là.",
+                                fontSize = 12.sp, color = Nflix.Muted, lineHeight = 17.sp,
+                            )
+                        }
+                        if (NflixSeason.birthday != null) {
+                            Text("Retirer", fontSize = 12.sp, color = Nflix.Muted, modifier = Modifier.clickable { NflixSeason.updateBirthday(null) })
+                        }
+                    }
+                    if (picking) {
+                        val picker = androidx.compose.material3.rememberDatePickerState(
+                            initialSelectedDateMillis = NflixSeason.birthday?.let { SeasonBirthday.inYear(it, 2000).atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli() },
+                        )
+                        androidx.compose.material3.DatePickerDialog(
+                            onDismissRequest = { picking = false },
+                            confirmButton = {
+                                TextButton(onClick = {
+                                    picker.selectedDateMillis?.let { millis ->
+                                        val date = java.time.Instant.ofEpochMilli(millis).atZone(java.time.ZoneOffset.UTC).toLocalDate()
+                                        NflixSeason.updateBirthday(java.time.MonthDay.of(date.month, date.dayOfMonth))
+                                    }
+                                    picking = false
+                                }) { Text("Enregistrer") }
+                            },
+                            dismissButton = { TextButton(onClick = { picking = false }) { Text("Annuler", color = Nflix.Muted) } },
+                        ) {
+                            androidx.compose.material3.DatePicker(
+                                state = picker,
+                                title = { Text("Votre anniversaire", modifier = Modifier.padding(start = 24.dp, top = 16.dp)) },
+                                showModeToggle = false,
+                            )
+                        }
                     }
                 }
             }

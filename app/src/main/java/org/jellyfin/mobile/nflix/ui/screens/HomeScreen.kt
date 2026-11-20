@@ -758,4 +758,4 @@ private fun NoticeBanner() {
 
 /** Glowing accent ring of the featured category chip in a seasonal theme. */
 private fun Modifier.seasonChipGlow(theme: org.jellyfin.mobile.nflix.ui.NflixSeasonTheme): Modifier =
-    seasonGlow(1f, CircleShape, theme.accent)
+    seasonGlow(1f, CircleShape, theme.accent, breathing = true)
