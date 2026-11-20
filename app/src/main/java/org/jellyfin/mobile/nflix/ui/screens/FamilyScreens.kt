@@ -6,6 +6,8 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -54,6 +56,8 @@ import androidx.compose.material.icons.rounded.PersonSearch
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Poll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -1088,6 +1092,11 @@ fun FamilyChatScreen(conversationId: String, title: String) {
     var firstUnread by remember { mutableStateOf<Long?>(null) }
     var initialised by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
+    // 5.8 social
+    val polls = remember { mutableStateListOf<org.jellyfin.mobile.nflix.family.PollInfo>() }
+    var typingUsers by remember { mutableStateOf<List<String>>(emptyList()) }
+    var replyTo by remember { mutableStateOf<MessageInfo?>(null) }
+    var showPollForm by remember { mutableStateOf(false) }
 
     suspend fun pull() {
         val latest = runCatching { deps.family.messages(conversationId) }.getOrNull() ?: return
@@ -1109,6 +1118,8 @@ fun FamilyChatScreen(conversationId: String, title: String) {
     LaunchedEffect(conversationId, poke) {
         while (true) {
             pull()
+            if (text.isNotBlank()) runCatching { typingUsers = deps.family.typing(conversationId) } else typingUsers = emptyList()
+            runCatching { polls.clear(); polls.addAll(deps.family.polls(conversationId)) }
             delay(5_000)
         }
     }
@@ -1125,7 +1136,7 @@ fun FamilyChatScreen(conversationId: String, title: String) {
                 Spacer(Modifier.width(12.dp))
                 Column {
                     Text(title, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text("Messages actualisés toutes les 5 s", color = Nflix.Muted, fontSize = 11.sp)
+                    Text(if (typingUsers.isNotEmpty()) "${typingUsers.joinToString(", ")} écrit…" else "Messages actualisés toutes les 5 s", color = Nflix.Muted, fontSize = 11.sp)
                 }
             }
             LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = listState, contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1147,13 +1158,61 @@ fun FamilyChatScreen(conversationId: String, title: String) {
                     val previous = messages.getOrNull(index - 1)
                     if (previous == null || FamilyFormat.dayKey(previous.sentUtc) != FamilyFormat.dayKey(m.sentUtc)) DaySeparator(FamilyFormat.dayLabel(m.sentUtc))
                     if (m.id == firstUnread) UnreadSeparator()
-                    Bubble(m, grouped = FamilyFormat.continuesGroup(previous, m) && m.id != firstUnread)
+                    Bubble(m, grouped = FamilyFormat.continuesGroup(previous, m) && m.id != firstUnread, conversationId = conversationId, onReply = { replyTo = it }, onChanged = { poke++ }, react = { emoji -> scope.launch { runCatching { deps.family.react(conversationId, m.id, emoji) } } })
                 }
+            }
+            // 5.8: active polls of this conversation, above the input.
+            if (polls.isNotEmpty()) {
+                Column(Modifier.fillMaxWidth().background(Nflix.Surface).padding(horizontal = 12.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    polls.take(3).forEach { poll -> PollCard(poll, conversationId, deps, scope) { poke++ } }
+                    if (polls.size > 3) Text("+ ${polls.size - 3} sondage(s)", fontSize = 11.sp, color = Nflix.Muted)
+                }
+            }
+            if (replyTo != null) {
+                Row(Modifier.fillMaxWidth().background(Nflix.SurfaceHigh).padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Répondre à ${replyTo!!.senderName}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Nflix.Info)
+                        Text(replyTo!!.text, fontSize = 12.sp, color = Nflix.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    IconButton(onClick = { replyTo = null }, modifier = Modifier.size(28.dp)) { Icon(Icons.Rounded.Close, "Annuler la réponse", tint = Nflix.Muted) }
+                }
+            }
+            if (showPollForm) {
+                var q by remember { mutableStateOf("") }
+                var opts by remember { mutableStateOf(listOf("", "")) }
+                androidx.compose.material3.AlertDialog(
+                    onDismissRequest = { showPollForm = false },
+                    title = { Text("On regarde quoi ce soir ?") },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            androidx.compose.material3.OutlinedTextField(q, { q = it.take(200) }, label = { Text("Question") }, singleLine = true)
+                            opts.forEachIndexed { i, o ->
+                                androidx.compose.material3.OutlinedTextField(o, { v -> opts = opts.toMutableList().also { it[i] = v.take(60) } }, label = { Text("Choix ${i + 1}") }, singleLine = true)
+                            }
+                            if (opts.size < 8) TextButton(onClick = { opts = opts + "" }) { Text("+ Ajouter un choix") }
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            scope.launch {
+                                val clean = opts.map { it.trim() }.filter { it.isNotEmpty() }
+                                if (q.isNotBlank() && clean.size >= 2 && attempt { deps.family.createPoll(conversationId, q.trim(), clean, false) }) {
+                                    showPollForm = false; poke++
+                                }
+                            }
+                        }) { Text("Créer") }
+                    },
+                    dismissButton = { TextButton(onClick = { showPollForm = false }) { Text("Annuler") } },
+                )
             }
             Row(
                 Modifier.fillMaxWidth().background(Nflix.Surface).navigationBarsPadding().padding(horizontal = 10.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                IconButton(onClick = { showPollForm = true }, modifier = Modifier.size(40.dp)) {
+                    Icon(Icons.Rounded.Poll, "Créer un sondage « on regarde quoi ce soir »", tint = Color.White)
+                }
+                Spacer(Modifier.width(4.dp))
                 androidx.compose.foundation.text.BasicTextField(
                     value = text,
                     onValueChange = { text = it.take(2000) },
@@ -1172,8 +1231,9 @@ fun FamilyChatScreen(conversationId: String, title: String) {
                         val toSend = text.trim()
                         sending = true
                         scope.launch {
-                            if (attempt { deps.family.send(conversationId, toSend) }) {
+                            if (attempt { deps.family.send(conversationId, toSend, replyTo?.id ?: 0) }) {
                                 text = ""
+                                replyTo = null
                                 firstUnread = null
                                 poke++
                             }
@@ -1208,7 +1268,7 @@ private fun UnreadSeparator() {
 }
 
 @Composable
-private fun Bubble(m: MessageInfo, grouped: Boolean) {
+private fun Bubble(m: MessageInfo, grouped: Boolean, conversationId: String = "", onReply: (MessageInfo) -> Unit = {}, onChanged: () -> Unit = {}, react: ((String) -> Unit) = {}) {
     val shape = if (m.mine) RoundedCornerShape(18.dp, 18.dp, 6.dp, 18.dp) else RoundedCornerShape(18.dp, 18.dp, 18.dp, 6.dp)
     Row(Modifier.fillMaxWidth().padding(top = if (grouped) 0.dp else 4.dp), horizontalArrangement = if (m.mine) Arrangement.End else Arrangement.Start, verticalAlignment = Alignment.Bottom) {
         if (!m.mine) {
@@ -1217,12 +1277,43 @@ private fun Bubble(m: MessageInfo, grouped: Boolean) {
         }
         Column(
             Modifier.widthIn(max = 290.dp)
+                .pointerInput(m.id) {
+                    detectTapGestures(onLongPress = {
+                        onReply(m)
+                    })
+                }
                 .clip(shape)
                 .background(if (m.mine) Brush.linearGradient(listOf(Nflix.Red, Color(0xFFB20710))) else Brush.linearGradient(listOf(Nflix.SurfaceHigh, Nflix.SurfaceHigh)))
                 .padding(horizontal = 12.dp, vertical = 7.dp),
         ) {
             if (!m.mine && !grouped) Text(m.senderName, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Nflix.Info)
+            if (m.replyToId != 0L) Text("↩ réponse à un message", fontSize = 10.sp, color = Color.White.copy(alpha = .6f))
             Text(m.text, color = Color.White, fontSize = 14.sp)
+            if (m.reactions.isNotEmpty() || conversationId.isNotEmpty()) {
+                Row(Modifier.padding(top = 2.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    m.reactions.forEach { (emoji, count) -> Text("$emoji $count", fontSize = 11.sp, color = Color.White.copy(alpha = .85f)) }
+                    if (conversationId.isNotEmpty()) {
+                        var picker by remember { mutableStateOf(false) }
+                        Text("+", fontSize = 11.sp, color = Color.White.copy(alpha = .6f), modifier = Modifier.clickable { picker = true })
+                        if (picker) {
+                            androidx.compose.material3.AlertDialog(
+                                onDismissRequest = { picker = false },
+                                title = { Text("Réagir") },
+                                text = { Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    listOf("\uD83D\uDC4D", "\uD83D\uDE02", "\uD83D\uDE2E", "\uD83D\uDE22", "\uD83D\uDE21", "\uD83C\uDF89", "\u2764\uFE0F", "\uD83D\uDE31").forEach { e ->
+                                        Text(e, fontSize = 20.sp, modifier = Modifier.clickable {
+                                            picker = false
+                                            react(e)
+                                            onChanged()
+                                        })
+                                    }
+                                } },
+                                confirmButton = { TextButton(onClick = { picker = false }) { Text("Fermer") } },
+                            )
+                        }
+                    }
+                }
+            }
             Text(FamilyFormat.clock(m.sentUtc), fontSize = 10.sp, color = Color.White.copy(alpha = .7f), modifier = Modifier.align(Alignment.End))
         }
     }
@@ -1282,5 +1373,39 @@ fun WhoIsWatchingScreen(me: FamilyMe, onDone: () -> Unit) {
                 }
             }
         }
+    }
+}
+
+/** 5.8: one poll card with vote bars; tapping an option votes (or un-votes). */
+@Composable
+private fun PollCard(poll: org.jellyfin.mobile.nflix.family.PollInfo, conversationId: String, deps: org.jellyfin.mobile.nflix.ui.AppDeps, scope: kotlinx.coroutines.CoroutineScope, poke: () -> Unit) {
+    var state by remember(poll.id) { mutableStateOf(poll) }
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Nflix.SurfaceHigh).padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Rounded.Poll, null, tint = Nflix.Info, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(state.question, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = Color.White, modifier = Modifier.weight(1f))
+            Text("par ${state.createdByName}", fontSize = 10.sp, color = Nflix.Muted)
+        }
+        state.options.forEachIndexed { i, opt ->
+            val votes = state.votes[i]?.size ?: 0
+            val mine = i in state.myVotes
+            val total = state.totalVotes.coerceAtLeast(1)
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(if (mine) Nflix.Red.copy(alpha = .25f) else Nflix.Surface).clickable {
+                scope.launch { runCatching { state = deps.family.vote(conversationId, state.id, i) }; poke() }
+            }.padding(8.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(opt, fontSize = 13.sp, color = Color.White)
+                    Text("$votes", fontSize = 11.sp, color = Nflix.Muted)
+                }
+                Box(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(Nflix.SurfaceHigh)) {
+                    Box(Modifier.fillMaxWidth(votes.toFloat() / total).height(4.dp).background(if (mine) Nflix.Red else Nflix.Muted))
+                }
+            }
+        }
+        Text("${state.totalVotes} vote(s)${if (state.multiple) " · choix multiple" else ""} — appuyez pour voter", fontSize = 10.sp, color = Nflix.Muted)
     }
 }

@@ -103,7 +103,27 @@ data class MessageInfo(
     @SerialName("Text") val text: String = "",
     @SerialName("SentUtc") val sentUtc: String? = null,
     @SerialName("Read") val read: Boolean = true,
+    /** 5.8: message this one replies to, 0 when not a reply. */
+    @SerialName("ReplyToId") val replyToId: Long = 0,
+    /** 5.8: emoji -> reaction count. */
+    @SerialName("Reactions") val reactions: Map<String, Int> = emptyMap(),
 )
+
+@Serializable
+data class PollInfo(
+    @SerialName("Id") val id: Long = 0,
+    @SerialName("ConversationId") val conversationId: String = "",
+    @SerialName("CreatedByName") val createdByName: String = "",
+    @SerialName("Question") val question: String = "",
+    @SerialName("Options") val options: List<String> = emptyList(),
+    @SerialName("Multiple") val multiple: Boolean = false,
+    @SerialName("Closed") val closed: Boolean = false,
+    /** option index -> voter ids (hex without dashes). */
+    @SerialName("Votes") val votes: Map<Int, List<String>> = emptyMap(),
+    @SerialName("MyVotes") val myVotes: List<Int> = emptyList(),
+) {
+    val totalVotes: Int get() = votes.values.sumOf { it.size }
+}
 
 @Serializable
 data class ActivityInfo(
