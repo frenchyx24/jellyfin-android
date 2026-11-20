@@ -49,6 +49,8 @@ sealed class Route(val key: String) {
     data object Family : Route("family")
     data class FamilyChat(val id: String, val title: String) : Route("family-chat/$id")
     data object SeasonalSettings : Route("seasonal-settings")
+    /** Annual preview of the themes of the coming 12 months. */
+    data object SeasonalCalendar : Route("seasonal-calendar")
     /** YouTube Music artist page (search by artist name). */
     data class YtArtist(val name: String) : Route("ytartist/${java.net.URLEncoder.encode(name, "UTF-8")}")
     /** YouTube Music album page (MPREb browse id). */

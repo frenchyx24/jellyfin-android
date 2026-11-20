@@ -13,6 +13,9 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -45,6 +48,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
 import java.time.LocalDate
+import java.time.MonthDay
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
@@ -104,7 +108,7 @@ data class NflixSeasonTheme(
 
     /** Recoloured copy for a holiday on top of [this] season. */
     internal fun holiday(
-        key: String, label: String, tagline: String, event: SeasonEvent,
+        key: String, label: String, tagline: String, event: SeasonEvent?,
         accent: Color, accentDeep: Color, accentSoft: Color, glow: Color, glowAlt: Color, heroGrade: Color,
         night: Color, decor: SeasonDecor, radius: Dp = cardRadius,
     ) = copy(
@@ -268,6 +272,13 @@ data class NflixSeasonTheme(
             Color(0xFF060506), Decors.Christmas, radius = 14.dp,
         )
 
+        /** The user's birthday (Settings > Thème saisonnier); beats every other theme that day. */
+        val Birthday = Summer.holiday(
+            "Birthday", "Anniversaire", "Ballons et confettis", null,
+            Color(0xFFFF5FA2), Color(0xFF4A1450), Color(0xFFFFD45C), Color(0xFF5A1E6A), Color(0xFF1E6A8A), Color(0xFF3A1048),
+            Color(0xFF07050A), Decors.Birthday, radius = 16.dp,
+        ).copy(period = "Le jour de votre anniversaire", season = null)
+
         val seasons: List<NflixSeasonTheme> = listOf(Winter, Spring, Summer, Autumn)
 
         /** Holiday themes in calendar order. */
@@ -279,7 +290,10 @@ data class NflixSeasonTheme(
         /** Everything Settings can force. */
         val selectable: List<NflixSeasonTheme> = seasons + holidays
 
-        fun byKey(key: String): NflixSeasonTheme? = selectable.firstOrNull { it.key == key }
+        /** Themes that can be previewed (the birthday included). */
+        val previewable: List<NflixSeasonTheme> get() = selectable + Birthday
+
+        fun byKey(key: String): NflixSeasonTheme? = previewable.firstOrNull { it.key == key }
 
         fun forSeason(season: Season) = when (season) {
             Season.Winter -> Winter
@@ -290,8 +304,16 @@ data class NflixSeasonTheme(
 
         fun forEvent(event: SeasonEvent): NflixSeasonTheme = holidays.first { it.event == event }
 
-        /** [mode] is [NflixSeason.AUTO], [NflixSeason.OFF] or a theme key to force. Holiday beats season. */
-        fun resolve(mode: String, date: LocalDate, events: Boolean): NflixSeasonTheme = when (mode) {
+        /**
+         * [mode] is [NflixSeason.AUTO], [NflixSeason.OFF] or a theme key to force. Birthday beats
+         * everything but Off (it is the user's own date, one day a year); holiday beats season.
+         */
+        fun resolve(mode: String, date: LocalDate, events: Boolean, birthday: MonthDay? = null): NflixSeasonTheme = when {
+            mode != NflixSeason.OFF && SeasonBirthday.isToday(birthday, date) -> Birthday
+            else -> resolveWithoutBirthday(mode, date, events)
+        }
+
+        private fun resolveWithoutBirthday(mode: String, date: LocalDate, events: Boolean): NflixSeasonTheme = when (mode) {
             NflixSeason.OFF -> Brand
             NflixSeason.AUTO -> SeasonEvent.on(date)?.takeIf { events }?.let(::forEvent) ?: forSeason(Season.on(date))
             else -> byKey(mode) ?: resolve(NflixSeason.AUTO, date, events)
@@ -322,13 +344,39 @@ object NflixSeason {
     var decorations by mutableStateOf(true)
         private set
 
+    /** Particle counts and motion amplitude. */
+    var intensity by mutableStateOf(SeasonIntensity.Normal)
+        private set
+
+    /** Short synthesized chimes on themed interactions; off by default. */
+    var sounds by mutableStateOf(false)
+        private set
+
+    /** Day and month only, stored on this device. */
+    var birthday by mutableStateOf<MonthDay?>(null)
+        private set
+
     var today by mutableStateOf(LocalDate.now())
         private set
 
-    val theme: NflixSeasonTheme by derivedStateOf { NflixSeasonTheme.resolve(mode, today, events) }
+    /** What the settings and the date ask for. */
+    val target: NflixSeasonTheme by derivedStateOf { NflixSeasonTheme.resolve(mode, today, events, birthday) }
+
+    /** Crossfade between the theme on screen and [target], driven by [SeasonThemeDriver]. */
+    val transition = SeasonTransition(NflixSeasonTheme.Brand)
+
+    /** True once a [SeasonThemeDriver] runs; before that the target shows at once. */
+    internal var driven by mutableStateOf(false)
+
+    /** The theme the whole interface reads: [target], or a colour mix during a crossfade. */
+    val theme: NflixSeasonTheme get() = if (driven) transition.palette else target
 
     /** What automatic mode would show today. */
-    val automatic: NflixSeasonTheme get() = NflixSeasonTheme.resolve(AUTO, today, events)
+    val automatic: NflixSeasonTheme get() = NflixSeasonTheme.resolve(AUTO, today, events, birthday)
+
+    /** "J-12 avant Noël" for the home badge line, or null. */
+    val countdown: HolidayCountdown?
+        get() = if (mode == OFF || !events) null else HolidayCountdown.next(today)
 
     val summary: String
         get() = when (mode) {
@@ -349,6 +397,9 @@ object NflixSeason {
         // New key: older builds could leave a stale "off" from the previous ambience switch.
         ambient = prefs.getBoolean("season_animations", true)
         decorations = prefs.getBoolean("season_decor", true)
+        intensity = SeasonIntensity.of(prefs.getString("season_intensity", null))
+        sounds = prefs.getBoolean("season_sounds", false)
+        birthday = SeasonBirthday.parse(prefs.getString("season_birthday", null))
     }
 
     fun refreshDate() {
@@ -361,6 +412,12 @@ object NflixSeason {
     fun updateEvents(value: Boolean) { events = value; prefs()?.edit { putBoolean("season_events", value) } }
     fun updateAmbient(value: Boolean) { ambient = value; prefs()?.edit { putBoolean("season_animations", value) } }
     fun updateDecorations(value: Boolean) { decorations = value; prefs()?.edit { putBoolean("season_decor", value) } }
+    fun updateIntensity(value: SeasonIntensity) { intensity = value; prefs()?.edit { putString("season_intensity", value.key) } }
+    fun updateSounds(value: Boolean) { sounds = value; prefs()?.edit { putBoolean("season_sounds", value) } }
+    fun updateBirthday(value: MonthDay?) {
+        birthday = value
+        prefs()?.edit { if (value == null) remove("season_birthday") else putString("season_birthday", SeasonBirthday.format(value)) }
+    }
 }
 
 // ---- Motion policy ----------------------------------------------------------------------------
@@ -456,19 +513,48 @@ fun SeasonalParticles(modifier: Modifier = Modifier, intensity: Float = 1f) = Se
 fun SeasonalGreeting(visible: Boolean) {
     val theme = NflixSeason.theme
     AnimatedVisibility(visible = visible && theme.isSeasonal, enter = fadeIn() + expandVertically(), exit = fadeOut() + shrinkVertically()) {
-        SeasonBadge(theme, Modifier.padding(start = 18.dp, top = 2.dp, bottom = 4.dp))
+        Row(Modifier.padding(start = 18.dp, end = 16.dp, top = 2.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            SeasonBadge(theme, Modifier.weight(1f, fill = false))
+            NflixSeason.countdown?.let {
+                Spacer(Modifier.width(10.dp))
+                SeasonCountdownChip(it, theme)
+            }
+        }
+    }
+}
+
+/** Small "J-12 avant Noël" pill next to the badge line. */
+@Composable
+fun SeasonCountdownChip(countdown: HolidayCountdown, theme: NflixSeasonTheme, modifier: Modifier = Modifier) {
+    val target = NflixSeasonTheme.forEvent(countdown.event)
+    val shape = RoundedCornerShape(50)
+    Row(
+        modifier
+            .then(Modifier.seasonGlow(0.5f, shape, target.accent, breathing = true))
+            .clip(shape)
+            .background(Color.Black.copy(alpha = 0.32f))
+            .border(1.dp, target.accent.copy(alpha = 0.75f), shape)
+            .padding(horizontal = 8.dp, vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        SeasonGlyphIcon(target.decor.badgeGlyph, target, Modifier.size(12.dp))
+        Spacer(Modifier.width(5.dp))
+        Text(countdown.label, color = Color.White.copy(alpha = 0.92f), fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
     }
 }
 
 @Composable
 fun SeasonBadge(theme: NflixSeasonTheme, modifier: Modifier = Modifier) {
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
-        SeasonGlyphIcon(theme.decor.badgeGlyph, theme, Modifier.size(20.dp))
+        AnimatedSeasonGlyph(theme.decor.badgeGlyph, theme, Modifier.size(20.dp))
         Spacer(Modifier.width(10.dp))
         Text(theme.decor.kicker, color = theme.accent, fontSize = 11.sp, letterSpacing = 3.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
         Spacer(Modifier.width(12.dp))
         Box(Modifier.width(1.dp).height(14.dp).drawWithCache { onDrawBehind { drawRect(theme.accentSoft.copy(alpha = 0.45f)) } })
         Spacer(Modifier.width(12.dp))
-        Text(theme.decor.badge, color = Nflix.Text.copy(alpha = 0.88f), fontSize = 13.sp, fontWeight = FontWeight.Normal, maxLines = 1)
+        Text(
+            theme.decor.badge, color = Nflix.Text.copy(alpha = 0.88f), fontSize = 13.sp, fontWeight = FontWeight.Normal, maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
+        )
     }
 }

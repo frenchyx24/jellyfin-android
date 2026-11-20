@@ -77,6 +77,9 @@ private val NflixType = Typography(
 
 @Composable
 fun NflixTheme(content: @Composable () -> Unit) {
+    // One decoration clock and one theme crossfade for the whole app.
+    SeasonThemeDriver()
+    SeasonClockHost()
     val season = NflixSeason.theme
     val colors = nflixColors(season)
     val shapes = Shapes(

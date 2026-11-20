@@ -19,11 +19,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.State
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -57,6 +53,7 @@ import kotlin.math.sin
 enum class Glyph {
     Pumpkin, Bat, Star, Spark, Snowflake, Heart, Egg, Flower, Petal, Lily, Note, Leaf, Poppy,
     Crown, Crepe, Tie, Gift, Confetti, Sun, Book, Candle, Bauble, Cockade, Dot, Bubble,
+    Balloon, Lantern,
 }
 
 /** How a particle family moves. */
@@ -98,6 +95,8 @@ data class SeasonDecor(
     val heroGlyphs: List<Glyph> = emptyList(),
     val heroCandles: Boolean = false,
     val cobwebs: Boolean = false,
+    /** Hanging lanterns that swing at the hero corners. */
+    val lanterns: Boolean = false,
     val sectionGlyph: Glyph = Glyph.Spark,
     val playGlyph: Glyph? = null,
     val drip: Boolean = false,
@@ -255,7 +254,7 @@ object Decors {
         badge = "Spécial Halloween", badgeGlyph = Glyph.Pumpkin,
         sky = listOf(Color(0xFF2A0F3A), Color(0xFF14081E)), feature = Feature.MoonCastle, featureColors = listOf(Color(0xFFF2853A), Color(0xFFFFC27A)),
         corners = Corners.Branches, cornerColors = listOf(Orange, Amber, Color(0xFFC8461A)),
-        heroGlyphs = listOf(Glyph.Pumpkin, Glyph.Pumpkin), heroCandles = true, cobwebs = true,
+        heroGlyphs = listOf(Glyph.Pumpkin, Glyph.Pumpkin), heroCandles = true, cobwebs = true, lanterns = true,
         sectionGlyph = Glyph.Pumpkin, playGlyph = Glyph.Pumpkin, drip = true,
         ground = Ground.Graveyard, groundGlyph = Glyph.Pumpkin,
         particles = listOf(
@@ -279,6 +278,17 @@ object Decors {
         particles = listOf(Particles(Glyph.Petal, Motion.Fall, 4, listOf(Color(0xFFC62828)), 0.6f)),
         sober = true,
     )
+    val Birthday = SeasonDecor(
+        kicker = "ANNIVERSAIRE", badge = "Joyeux anniversaire", badgeGlyph = Glyph.Balloon,
+        sky = listOf(Color(0xFF2A1240), Color(0xFF0E0818)), feature = Feature.Glow, featureColors = listOf(Color(0xFFFF8FC4)),
+        corners = Corners.Bunting, cornerColors = listOf(Color(0xFFFF5FA2), Color(0xFFFFD45C), Color(0xFF5FD3FF), Color(0xFF8AE07A)),
+        heroGlyphs = listOf(Glyph.Gift, Glyph.Balloon), heroCandles = true, sectionGlyph = Glyph.Balloon, playGlyph = Glyph.Gift,
+        ground = Ground.City,
+        particles = listOf(
+            Particles(Glyph.Balloon, Motion.Rise, 7, listOf(Color(0xFFFF5FA2), Color(0xFFFFD45C), Color(0xFF5FD3FF), Color(0xFF8AE07A)), 1.5f),
+            Particles(Glyph.Confetti, Motion.Confetti, 16, listOf(Color(0xFFFF5FA2), Color(0xFFFFD45C), Color(0xFF5FD3FF), Color.White), 0.55f),
+        ),
+    )
     val Christmas = SeasonDecor(
         badge = "Joyeux Noël", badgeGlyph = Glyph.Bauble,
         sky = listOf(Color(0xFF0E1A2E), Color(0xFF0A0A12)), feature = Feature.Stars, featureColors = listOf(Snow, Gold),
@@ -290,34 +300,6 @@ object Decors {
 }
 
 // ---- Clock ------------------------------------------------------------------------------------
-
-/**
- * Seconds since the decorations started, ticking every frame (every other frame on low-end
- * devices). Frozen when [active] is false, when the user turned motion off, under the system
- * "remove animations" setting or battery saver. The frame clock itself stops while the app is
- * in the background, so nothing runs off-screen.
- */
-@Composable
-fun rememberSeasonClock(active: Boolean = true): State<Float> {
-    val motion = active && NflixSeason.ambient && rememberAmbientMotionAllowed()
-    val lowEnd = rememberLowEndDevice()
-    val clock = remember { mutableFloatStateOf(14f) }
-    LaunchedEffect(motion, lowEnd) {
-        if (!motion) return@LaunchedEffect
-        val step = if (lowEnd) 33_000_000L else 0L
-        var last = 0L
-        val start = withFrameNanos { it } - (clock.floatValue * 1_000_000_000L).toLong()
-        while (true) {
-            withFrameNanos { now ->
-                if (now - last >= step) {
-                    last = now
-                    clock.floatValue = (now - start) / 1_000_000_000f
-                }
-            }
-        }
-    }
-    return clock
-}
 
 internal class SeasonMote(index: Int, salt: Int) {
     private val r = java.util.Random(index * 7919L + salt * 104729L)
@@ -606,6 +588,25 @@ private fun DrawScope.unitGlyph(glyph: Glyph, tint: Color, a: Float, t: Float) {
             drawCircle(tint.a(), 0.25f, Offset.Zero)
         }
         Glyph.Bubble -> drawCircle(tint.a(), 0.9f, Offset.Zero, style = Stroke(0.12f))
+        Glyph.Balloon -> {
+            val wiggle = sin(t * 2.2f) * 0.12f
+            val string = Path().apply { moveTo(0f, 0.78f); quadraticTo(0.18f + wiggle, 1.15f, -0.05f - wiggle, 1.6f) }
+            drawPath(string, Color.White.a(0.55f), style = Stroke(0.05f, cap = StrokeCap.Round))
+            drawOval(tint.a(), Offset(-0.62f, -0.95f), Size(1.24f, 1.6f))
+            val knot = Path().apply { moveTo(0f, 0.6f); lineTo(0.12f, 0.8f); lineTo(-0.12f, 0.8f); close() }
+            drawPath(knot, tint.a())
+            drawOval(Color.White.a(0.38f), Offset(-0.38f, -0.7f), Size(0.24f, 0.46f))
+        }
+        Glyph.Lantern -> {
+            val flicker = 0.75f + 0.25f * sin(t * 9f) * sin(t * 5.7f + 1.3f)
+            drawCircle(Brush.radialGradient(listOf(Color(0xFFFFB347).a(0.5f * flicker), Color.Transparent), Offset(0f, 0.1f), 1.5f), 1.5f, Offset(0f, 0.1f))
+            drawCircle(Ink.a(), 0.16f, Offset(0f, -1f), style = Stroke(0.07f))
+            drawRoundRect(Ink.a(), Offset(-0.5f, -0.86f), Size(1f, 0.22f), CornerRadius(0.06f))
+            drawRoundRect(Color(0xFFFFC46B).a(0.55f + 0.45f * flicker), Offset(-0.42f, -0.62f), Size(0.84f, 1.24f), CornerRadius(0.12f))
+            drawRect(Ink.a(), Offset(-0.06f, -0.62f), Size(0.12f, 1.24f))
+            drawRoundRect(Ink.a(), Offset(-0.42f, -0.62f), Size(0.84f, 1.24f), CornerRadius(0.12f), style = Stroke(0.1f))
+            drawRoundRect(Ink.a(), Offset(-0.5f, 0.62f), Size(1f, 0.2f), CornerRadius(0.06f))
+        }
     }
 }
 
@@ -616,6 +617,7 @@ internal fun DrawScope.drawParticles(p: Particles, motes: List<SeasonMote>, t: F
     val h = size.height
     val d = density
     val slow = if (sober) 0.5f else 1f
+    val amp = seasonAmp
     motes.forEach { m ->
         val color = p.colors[m.tone % p.colors.size]
         val r = 6f * d * p.size * m.size * m.depth
@@ -623,26 +625,26 @@ internal fun DrawScope.drawParticles(p: Particles, motes: List<SeasonMote>, t: F
         when (p.motion) {
             Motion.Fall -> {
                 val y = (wrap(m.phase + t * slow * m.speed * 0.010f * m.depth) * 1.15f - 0.08f) * h
-                val x = m.x * w + sin(t * 0.6f * slow + m.sway) * 18f * d * m.depth
+                val x = m.x * w + sin(t * 0.6f * slow + m.sway) * 18f * d * m.depth * amp
                 val flip = cos(t * 0.9f * m.power + m.sway)
                 drawGlyph(p.glyph, Offset(x, y), r, color, baseA, rotation = m.sway * 57f + t * slow * m.spin * 0.4f, sx = 0.35f + 0.65f * abs(flip), t = t)
             }
             Motion.Rise -> {
                 val rise = wrap(m.phase + t * slow * m.speed * 0.011f)
                 val y = (1.06f - rise * 1.14f) * h
-                val x = m.x * w + sin(t * 0.9f + m.sway) * 14f * d
+                val x = m.x * w + sin(t * 0.9f + m.sway) * 14f * d * amp
                 val fade = (rise * 6f).coerceAtMost(1f) * ((1f - rise) * 3f).coerceAtMost(1f)
                 drawGlyph(p.glyph, Offset(x, y), r, color, baseA * fade, rotation = sin(t * 1.1f + m.sway) * 14f, t = t)
             }
             Motion.Fly -> {
                 val x = (wrap(m.x + t * m.speed * 0.03f) * 1.3f - 0.15f) * w
-                val y = m.phase * h * 0.6f + sin(t * 1.3f + m.sway) * 12f * d
+                val y = m.phase * h * 0.6f + sin(t * 1.3f + m.sway) * 12f * d * amp
                 val flap = abs(sin(t * 8f * m.power + m.sway))
                 drawGlyph(p.glyph, Offset(x, y), r, color, 0.9f * alpha, rotation = sin(t * 1.3f + m.sway) * 8f, sy = 0.35f + 0.65f * flap, t = t)
             }
             Motion.Confetti -> {
                 val y = (wrap(m.phase + t * m.speed * 0.016f * m.depth) * 1.15f - 0.08f) * h
-                val x = m.x * w + sin(t * 1.4f + m.sway) * 10f * d
+                val x = m.x * w + sin(t * 1.4f + m.sway) * 10f * d * amp
                 drawGlyph(p.glyph, Offset(x, y), r * 0.6f, color, baseA, rotation = t * m.spin * 3f, sx = cos(t * 3f * m.power + m.sway), t = t)
             }
             Motion.Twinkle -> {
@@ -651,7 +653,7 @@ internal fun DrawScope.drawParticles(p: Particles, motes: List<SeasonMote>, t: F
             }
             Motion.Drift -> {
                 val x = wrap(m.x + t * m.speed * 0.006f) * w
-                val y = m.phase * h * 0.7f + sin(t * 0.5f + m.sway) * 10f * d
+                val y = m.phase * h * 0.7f + sin(t * 0.5f + m.sway) * 10f * d * amp
                 val glint = 0.5f + 0.5f * sin(t * 1.5f * m.power + m.sway)
                 drawGlyph(p.glyph, Offset(x, y), r * 0.8f, color, baseA * glint, t = t)
             }
@@ -666,18 +668,24 @@ internal fun DrawScope.drawParticles(p: Particles, motes: List<SeasonMote>, t: F
 @Composable
 fun SeasonAmbience(
     modifier: Modifier = Modifier,
-    theme: NflixSeasonTheme = NflixSeason.theme,
+    theme: NflixSeasonTheme? = null,
     strength: Float = 1f,
     animated: Boolean = true,
     topGlow: Boolean = true,
 ) {
+    if (theme != null) SeasonAmbienceLayer(modifier, theme, strength, animated, topGlow)
+    else SeasonCrossfade(modifier) { layer, m -> SeasonAmbienceLayer(m, layer, strength, animated, topGlow) }
+}
+
+@Composable
+private fun SeasonAmbienceLayer(modifier: Modifier, theme: NflixSeasonTheme, strength: Float, animated: Boolean, topGlow: Boolean) {
     if (!theme.isSeasonal || !NflixSeason.decorations) return
     val lowEnd = rememberLowEndDevice()
     val clock = rememberSeasonClock(animated)
-    val families = remember(theme.key, strength, lowEnd) {
+    val intensity = NflixSeason.intensity
+    val families = remember(theme.key, strength, lowEnd, intensity) {
         theme.decor.particles.filter { it.motion != Motion.Fly }.mapIndexed { i, p ->
-            val n = (p.count * strength * if (lowEnd) 0.5f else 1f).toInt().coerceAtLeast(2)
-            p to motes(n, theme.key.hashCode() + i * 31)
+            p to motes(intensity.count((p.count * strength).toInt(), lowEnd), theme.key.hashCode() + i * 31)
         }
     }
     Canvas(modifier) {
@@ -700,10 +708,20 @@ fun SeasonAmbience(
  * decorations and flying bats. It fades out at the bottom into the hero.
  */
 @Composable
-fun SeasonHeader(modifier: Modifier = Modifier, active: Boolean = true, theme: NflixSeasonTheme = NflixSeason.theme) {
+fun SeasonHeader(modifier: Modifier = Modifier, active: Boolean = true, theme: NflixSeasonTheme? = null) {
+    if (theme != null) SeasonHeaderLayer(modifier, active, theme)
+    else SeasonCrossfade(modifier) { layer, m -> SeasonHeaderLayer(m, active, layer) }
+}
+
+@Composable
+private fun SeasonHeaderLayer(modifier: Modifier, active: Boolean, theme: NflixSeasonTheme) {
     if (!theme.isSeasonal || !NflixSeason.decorations) return
     val clock = rememberSeasonClock(active)
-    val flyers = remember(theme.key) { theme.decor.particles.filter { it.motion == Motion.Fly }.map { it to motes(it.count, theme.key.hashCode()) } }
+    val lowEnd = rememberLowEndDevice()
+    val intensity = NflixSeason.intensity
+    val flyers = remember(theme.key, lowEnd, intensity) {
+        theme.decor.particles.filter { it.motion == Motion.Fly }.map { it to motes(intensity.count(it.count, lowEnd), theme.key.hashCode()) }
+    }
     Canvas(modifier) {
         val t = clock.value
         drawHeaderScene(theme, t)
@@ -720,8 +738,11 @@ internal fun DrawScope.drawHeaderScene(theme: NflixSeasonTheme, t: Float) {
     }
     when (decor.feature) {
         Feature.None -> Unit
-        Feature.Moon, Feature.MoonCastle -> drawMoon(decor, t, castle = decor.feature == Feature.MoonCastle)
-        Feature.Stars -> drawStars(decor, t)
+        Feature.Moon, Feature.MoonCastle -> {
+            drawStars(decor.copy(featureColors = listOf(Color.White)), t, count = 14)
+            drawMoon(decor, t, castle = decor.feature == Feature.MoonCastle)
+        }
+        Feature.Stars -> { drawStars(decor, t); drawShootingStar(decor.featureColors.first(), t) }
         Feature.Fireworks -> { drawStars(decor.copy(featureColors = listOf(Color.White)), t); drawFireworks(decor.featureColors, t) }
         Feature.Sun -> drawSun(decor.featureColors, t)
         Feature.Glow -> {
@@ -732,7 +753,52 @@ internal fun DrawScope.drawHeaderScene(theme: NflixSeasonTheme, t: Float) {
             )
         }
     }
+    if (decor.feature == Feature.Moon || decor.feature == Feature.MoonCastle || decor.feature == Feature.Stars || decor.feature == Feature.Glow) {
+        drawClouds(decor, t)
+    }
     drawCorners(decor, t, w, h)
+}
+
+/** Soft night clouds drifting across the header (moon, stars and glow skies). */
+private fun DrawScope.drawClouds(decor: SeasonDecor, t: Float) {
+    val w = size.width
+    val h = size.height
+    val d = density
+    val speed = (if (decor.sober) 0.4f else 1f) * seasonAmp
+    val tint = decor.featureColors.first()
+    for (i in 0 until 3) {
+        val span = w + 220f * d
+        val x = wrap(hash(i, 31) + t * speed * (0.006f + i * 0.003f)) * span - 110f * d
+        val y = h * (0.12f + 0.16f * i) + sin(t * 0.25f + i * 2f) * 3f * d
+        val cw = (90f + 40f * hash(i, 32)) * d
+        val ch = cw * 0.28f
+        val color = Color(
+            0.55f + tint.red * 0.45f, 0.55f + tint.green * 0.45f, 0.6f + tint.blue * 0.4f, 1f,
+        ).copy(alpha = 0.06f + 0.03f * i)
+        drawOval(color, Offset(x - cw / 2f, y - ch / 2f), Size(cw, ch))
+        drawOval(color, Offset(x - cw * 0.3f, y - ch * 0.95f), Size(cw * 0.55f, ch * 1.1f))
+        drawOval(color, Offset(x + cw * 0.02f, y - ch * 0.75f), Size(cw * 0.4f, ch * 0.9f))
+    }
+}
+
+/** A shooting star every ~9 s on starry skies. */
+private fun DrawScope.drawShootingStar(color: Color, t: Float) {
+    val period = 9f
+    val cycle = floor(t / period).toInt()
+    val p = (t / period - cycle) * period / 0.9f
+    if (p > 1f) return
+    val w = size.width
+    val h = size.height
+    val start = Offset((0.25f + 0.6f * hash(cycle, 41)) * w, (0.05f + 0.2f * hash(cycle, 42)) * h)
+    val dir = Offset(-0.85f, 0.5f)
+    val len = 70f * density
+    val head = start + dir * (len * 2.2f * p)
+    val fade = sin(p * PI.toFloat())
+    drawLine(
+        Brush.linearGradient(listOf(Color.Transparent, color.copy(alpha = 0.8f * fade)), head - dir * len, head),
+        head - dir * len, head, 1.4f * density, StrokeCap.Round,
+    )
+    drawCircle(color.copy(alpha = fade), 1.6f * density, head)
 }
 
 private fun DrawScope.drawMoon(decor: SeasonDecor, t: Float, castle: Boolean) {
@@ -783,11 +849,11 @@ private fun DrawScope.drawMoon(decor: SeasonDecor, t: Float, castle: Boolean) {
     }
 }
 
-private fun DrawScope.drawStars(decor: SeasonDecor, t: Float) {
+private fun DrawScope.drawStars(decor: SeasonDecor, t: Float, count: Int = 26) {
     val w = size.width
     val h = size.height
     val d = density
-    for (i in 0 until 26) {
+    for (i in 0 until count) {
         val x = hash(i, 1) * w
         val y = hash(i, 2) * h * 0.75f
         val tw = 0.45f + 0.55f * sin(t * (0.8f + hash(i, 3) * 1.6f) + i)
@@ -877,6 +943,8 @@ private fun DrawScope.drawCorners(decor: SeasonDecor, t: Float, w: Float, h: Flo
     when (decor.corners) {
         Corners.None -> Unit
         Corners.Branches, Corners.Blossoms -> mirrored(w) {
+          // The whole branch sways from its anchor in the corner.
+          withTransform({ rotate(sin(t * 0.7f) * 2.2f * seasonAmp, Offset(-8f * d, 30f * d)) }) {
             val bark = if (decor.corners == Corners.Branches) Color(0xFF1A0E0A) else Color(0xFF3A2418)
             val branches = Path().apply {
                 moveTo(-8f * d, 34f * d); cubicTo(40f * d, 12f * d, 82f * d, 50f * d, 152f * d, 22f * d)
@@ -892,12 +960,13 @@ private fun DrawScope.drawCorners(decor: SeasonDecor, t: Float, w: Float, h: Flo
             spots.forEachIndexed { i, s ->
                 val sway = sin(t * 1.2f + i * 0.9f) * 9f
                 val glyph = if (decor.corners == Corners.Branches) Glyph.Leaf else Glyph.Flower
-                drawGlyph(glyph, s * d, (if (glyph == Glyph.Leaf) 9f else 6f) * d, colors[i % colors.size], 0.92f, rotation = i * 47f + sway, t = t)
+                drawGlyph(glyph, s * d, (if (glyph == Glyph.Leaf) 9f else 6f) * d, colors[i % colors.size], 0.92f, rotation = i * 47f + sway * seasonAmp, t = t)
             }
+          }
         }
         Corners.Holly -> mirrored(w) { drawHolly(Offset(26f * d, 30f * d), d, t) }
         Corners.Lights -> {
-            val sag = 24f * d
+            val sag = 24f * d * (1f + 0.07f * sin(t * 0.9f) * seasonAmp)
             val y0 = 14f * d
             val wire = Path().apply { moveTo(0f, y0); quadraticTo(w / 2f, y0 + sag * 2f, w, y0) }
             drawPath(wire, Color(0xFF1A2A1A), style = Stroke(1.5f * d))
@@ -914,7 +983,7 @@ private fun DrawScope.drawCorners(decor: SeasonDecor, t: Float, w: Float, h: Flo
             if (decor.groundGlyph == Glyph.Star) mirrored(w) { drawHolly(Offset(16f * d, 18f * d), d, t) }
         }
         Corners.Bunting -> {
-            val sag = 18f * d
+            val sag = 18f * d * (1f + 0.08f * sin(t * 0.8f) * seasonAmp)
             val y0 = 10f * d
             val wire = Path().apply { moveTo(0f, y0); quadraticTo(w / 2f, y0 + sag * 2f, w, y0) }
             drawPath(wire, Color.White.copy(alpha = 0.4f), style = Stroke(1f * d))
@@ -924,7 +993,7 @@ private fun DrawScope.drawCorners(decor: SeasonDecor, t: Float, w: Float, h: Flo
                 val x = w * s
                 val y = y0 + sag * 2f * 2f * s * (1f - s)
                 val tri = Path().apply { moveTo(-7f * d, 0f); lineTo(7f * d, 0f); lineTo(0f, 14f * d); close() }
-                withTransform({ translate(x, y); rotate(sin(t * 1.6f + i) * 8f, Offset.Zero) }) {
+                withTransform({ translate(x, y); rotate(sin(t * 1.6f + i) * 8f * seasonAmp, Offset.Zero) }) {
                     drawPath(tri, colors[i % colors.size].copy(alpha = 0.9f))
                 }
             }
@@ -934,6 +1003,11 @@ private fun DrawScope.drawCorners(decor: SeasonDecor, t: Float, w: Float, h: Flo
             drawGlyph(Glyph.Snowflake, Offset(24f * d, 30f * d), 16f * d, Color.White, 0.45f, rotation = t * 3f)
             drawGlyph(Glyph.Snowflake, Offset(62f * d, 16f * d), 9f * d, Color.White, 0.35f, rotation = -t * 4f)
             drawGlyph(Glyph.Snowflake, Offset(14f * d, 70f * d), 7f * d, Color.White, 0.3f, rotation = t * 5f)
+            // Frost glints.
+            for (k in 0 until 4) {
+                val flash = sin(t * 1.4f + k * 1.9f).coerceAtLeast(0f).pow(4)
+                drawGlyph(Glyph.Spark, Offset((30f + 22f * k) * d, (48f - 9f * k) * d), 5f * d, Color.White, 0.8f * flash)
+            }
         }
         Corners.Ribbon -> {
             // Thin tricolour ribbon waving along the bottom edge of the header, under the chips.
@@ -945,7 +1019,7 @@ private fun DrawScope.drawCorners(decor: SeasonDecor, t: Float, w: Float, h: Flo
                 var first = true
                 while (x <= w + 4f * d) {
                     val s = x / w
-                    val y = h - 12f * d + sin(s * 7f - t * speed) * 3f * d + k * stripe
+                    val y = h - 12f * d + sin(s * 7f - t * speed) * 3f * d * seasonAmp + k * stripe
                     if (first) { path.moveTo(x, y); first = false } else path.lineTo(x, y)
                     x += 6f * d
                 }
@@ -957,8 +1031,9 @@ private fun DrawScope.drawCorners(decor: SeasonDecor, t: Float, w: Float, h: Flo
 
 private fun DrawScope.drawHolly(c: Offset, d: Float, t: Float) {
     val green = Color(0xFF1E6A3A)
-    drawGlyph(Glyph.Leaf, c + Offset(-9f * d, 0f), 12f * d, green, 1f, rotation = -60f)
-    drawGlyph(Glyph.Leaf, c + Offset(9f * d, 0f), 12f * d, green, 1f, rotation = 60f)
+    val rustle = sin(t * 1.1f) * 4f * seasonAmp
+    drawGlyph(Glyph.Leaf, c + Offset(-9f * d, 0f), 12f * d, green, 1f, rotation = -60f + rustle)
+    drawGlyph(Glyph.Leaf, c + Offset(9f * d, 0f), 12f * d, green, 1f, rotation = 60f - rustle)
     drawGlyph(Glyph.Leaf, c + Offset(0f, -9f * d), 11f * d, Color(0xFF2A7A48), 1f, rotation = 0f)
     val glint = 0.85f + 0.15f * sin(t * 2f)
     listOf(Offset(-3f, 4f), Offset(3f, 4f), Offset(0f, -1f)).forEach { drawCircle(Color(0xFFD32F2F).copy(alpha = glint), 3.2f * d, c + it * d) }
@@ -971,10 +1046,16 @@ private fun DrawScope.drawHolly(c: Offset, d: Float, t: Float) {
  * Small and drawn under the hero text and buttons.
  */
 @Composable
-fun SeasonHeroCorners(modifier: Modifier = Modifier, active: Boolean = true, theme: NflixSeasonTheme = NflixSeason.theme) {
+fun SeasonHeroCorners(modifier: Modifier = Modifier, active: Boolean = true, theme: NflixSeasonTheme? = null) {
+    if (theme != null) SeasonHeroCornersLayer(modifier, active, theme)
+    else SeasonCrossfade(modifier) { layer, m -> SeasonHeroCornersLayer(m, active, layer) }
+}
+
+@Composable
+private fun SeasonHeroCornersLayer(modifier: Modifier, active: Boolean, theme: NflixSeasonTheme) {
     if (!theme.isSeasonal || !NflixSeason.decorations) return
     val decor = theme.decor
-    if (decor.heroGlyphs.isEmpty() && !decor.heroCandles && !decor.cobwebs) return
+    if (decor.heroGlyphs.isEmpty() && !decor.heroCandles && !decor.cobwebs && !decor.lanterns) return
     val clock = rememberSeasonClock(active)
     Canvas(modifier) { drawHeroCorners(theme, clock.value, size.width, size.height) }
 }
@@ -982,11 +1063,28 @@ fun SeasonHeroCorners(modifier: Modifier = Modifier, active: Boolean = true, the
 internal fun DrawScope.drawHeroCorners(theme: NflixSeasonTheme, t: Float, w: Float, h: Float) {
     val decor = theme.decor
     val d = density
-    if (decor.cobwebs) mirrored(w) { drawCobweb(Offset(0f, h * 0.55f), 70f * d) }
+    val amp = seasonAmp * if (decor.sober) 0.5f else 1f
+    if (decor.cobwebs) mirrored(w) { drawCobweb(Offset(0f, h * 0.55f), 70f * d, t) }
+    if (decor.lanterns) mirrored(w) {
+        // Lantern hanging from the cobweb anchor, swinging like a pendulum.
+        val pivot = Offset(44f * d, h * 0.55f + 6f * d)
+        val swing = sin(t * 1.5f) * 9f * amp
+        withTransform({ rotate(swing, pivot) }) {
+            drawLine(Color.White.copy(alpha = 0.25f), pivot, pivot + Offset(0f, 26f * d), 0.8f * d)
+            drawGlyph(Glyph.Lantern, pivot + Offset(0f, 38f * d), 12f * d, Color.White, 0.95f, t = t + 0.6f)
+        }
+    }
     mirrored(w) {
-        drawCircle(Brush.radialGradient(listOf(theme.accent.copy(alpha = 0.22f), Color.Transparent), Offset(30f * d, h - 18f * d), 70f * d), 70f * d, Offset(30f * d, h - 18f * d))
-        decor.heroGlyphs.getOrNull(0)?.let { drawGlyph(it, Offset(26f * d, h - 26f * d), 19f * d, theme.accent, 0.95f, t = t) }
-        decor.heroGlyphs.getOrNull(1)?.let { drawGlyph(it, Offset(60f * d, h - 14f * d), 10f * d, theme.accentSoft, 0.9f, rotation = 12f, t = t + 1.3f) }
+        val pulse = 0.8f + 0.2f * sin(t * 1.1f)
+        drawCircle(Brush.radialGradient(listOf(theme.accent.copy(alpha = 0.22f * pulse), Color.Transparent), Offset(30f * d, h - 18f * d), 70f * d), 70f * d, Offset(30f * d, h - 18f * d))
+        decor.heroGlyphs.getOrNull(0)?.let {
+            val pose = glyphPose(it, t, amp, decor.sober)
+            drawGlyph(it, Offset(26f * d, h - 26f * d + pose.dy * 19f * d), 19f * d * pose.scale, theme.accent, 0.95f, rotation = pose.rotation * 0.5f, t = t)
+        }
+        decor.heroGlyphs.getOrNull(1)?.let {
+            val pose = glyphPose(it, t + 1.3f, amp, decor.sober)
+            drawGlyph(it, Offset(60f * d, h - 14f * d + pose.dy * 10f * d), 10f * d * pose.scale, theme.accentSoft, 0.9f, rotation = 12f + pose.rotation, t = t + 1.3f)
+        }
         if (decor.heroCandles) {
             drawGlyph(Glyph.Candle, Offset(8f * d, h - 14f * d), 8f * d, Color.White, 1f, t = t + 0.4f)
             drawGlyph(Glyph.Candle, Offset(80f * d, h - 9f * d), 6f * d, Color.White, 1f, t = t + 2.1f)
@@ -994,13 +1092,16 @@ internal fun DrawScope.drawHeroCorners(theme: NflixSeasonTheme, t: Float, w: Flo
     }
 }
 
-private fun DrawScope.drawCobweb(origin: Offset, r: Float) {
-    val color = Color.White.copy(alpha = 0.16f)
+private fun DrawScope.drawCobweb(origin: Offset, r: Float, t: Float) = withTransform({ rotate(sin(t * 0.6f) * 1.5f * seasonAmp, origin) }) {
+    val base = Color.White.copy(alpha = 0.16f)
     val stroke = 0.8f * density
     val spokes = 6
     val angles = List(spokes) { -PI.toFloat() / 2f + it * (PI.toFloat() / (spokes - 1)) }
-    angles.forEach { a -> drawLine(color, origin, origin + Offset(cos(a), sin(a)) * r, stroke) }
+    angles.forEach { a -> drawLine(base, origin, origin + Offset(cos(a), sin(a)) * r, stroke) }
+    // Shimmer: a glint travels outwards ring by ring.
+    val glint = wrap(t * 0.35f) * 5f
     for (ring in 1..4) {
+        val color = base.copy(alpha = 0.16f + 0.22f * (1f - abs(glint - ring)).coerceAtLeast(0f))
         val rr = r * ring / 4.5f
         val path = Path()
         angles.forEachIndexed { i, a ->
@@ -1020,12 +1121,13 @@ private fun DrawScope.drawCobweb(origin: Offset, r: Float) {
 fun SeasonPlayButton(label: String, onClick: () -> Unit, modifier: Modifier = Modifier, theme: NflixSeasonTheme = NflixSeason.theme) {
     val decor = theme.decor
     val shape = RoundedCornerShape(12.dp)
-    val clock = rememberSeasonClock(decor.drip)
+    val clock = rememberSeasonClock()
     val content = if (theme.accent.luminance() > 0.3f) Color(0xFF1A0E05) else Color.White
+    val context = androidx.compose.ui.platform.LocalContext.current
     Box(
         modifier
             .height(48.dp)
-            .seasonGlow(1f, shape, theme.accent)
+            .seasonGlow(1f, shape, theme.accent, breathing = true)
             .drawBehind {
                 if (!decor.drip) return@drawBehind
                 val t = clock.value
@@ -1039,7 +1141,23 @@ fun SeasonPlayButton(label: String, onClick: () -> Unit, modifier: Modifier = Mo
             }
             .clip(shape)
             .background(Brush.verticalGradient(listOf(theme.accentSoft, theme.accent, theme.accent.copy(red = theme.accent.red * 0.8f, green = theme.accent.green * 0.8f, blue = theme.accent.blue * 0.8f))))
-            .clickable(onClick = onClick)
+            .drawBehind {
+                // Shimmer: a light band sweeps across every 3.6 s (under the label).
+                val p = wrap(clock.value / 3.6f) * 3f
+                if (p > 1f) return@drawBehind
+                val x = -size.width * 0.4f + p * size.width * 1.8f
+                val band = size.width * 0.22f
+                drawRect(
+                    Brush.linearGradient(
+                        listOf(Color.Transparent, Color.White.copy(alpha = if (decor.sober) 0.12f else 0.26f), Color.Transparent),
+                        Offset(x - band, 0f), Offset(x + band, size.height),
+                    ),
+                )
+            }
+            .clickable {
+                SeasonSound.play(context, theme, SeasonSound.Cue.Play)
+                onClick()
+            }
             .padding(horizontal = 22.dp),
         contentAlignment = Alignment.Center,
     ) {
@@ -1049,45 +1167,44 @@ fun SeasonPlayButton(label: String, onClick: () -> Unit, modifier: Modifier = Mo
             Text(label, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = content, maxLines = 1)
             decor.playGlyph?.let {
                 Spacer(Modifier.width(10.dp))
-                SeasonGlyphIcon(it, theme, Modifier.size(22.dp))
+                AnimatedSeasonGlyph(it, theme, Modifier.size(22.dp))
             }
         }
     }
 }
 
-/** Soft glow around [shape] in [color]; [strength] 0..1 animates it in and out. */
-fun Modifier.seasonGlow(strength: Float, shape: Shape, color: Color): Modifier = drawBehind {
+/**
+ * Soft glow around [shape] in [color]; [strength] 0..1 animates it in and out. [breathing] makes
+ * it pulse slowly on the shared [SeasonClock] (read in the draw phase: no recomposition).
+ */
+fun Modifier.seasonGlow(strength: Float, shape: Shape, color: Color, breathing: Boolean = false): Modifier = drawBehind {
     if (strength <= 0.01f) return@drawBehind
+    val breath = if (breathing) breathOf(SeasonClock.now) else 1f
     val outline = shape.createOutline(size, layoutDirection, this)
     for (i in 4 downTo 1) {
-        drawOutline(outline, color.copy(alpha = 0.09f * strength * (5 - i)), style = Stroke(width = i * 3.dp.toPx()))
+        drawOutline(outline, color.copy(alpha = (0.09f * strength * breath * (5 - i)).coerceIn(0f, 1f)), style = Stroke(width = i * 3.dp.toPx() * (0.85f + 0.15f * breath)))
     }
 }
+
+/** 0.6 → 1.1 slow breathing; deeper with a stronger intensity. */
+internal fun breathOf(t: Float): Float = 0.85f + 0.25f * seasonAmp.coerceAtMost(1.2f) * sin(t * 1.7f)
 
 /** Chip or nav border + glow when [selected]: themed, or nothing for the brand look. */
 fun Modifier.seasonChip(selected: Boolean, shape: Shape, theme: NflixSeasonTheme): Modifier =
     if (!theme.isSeasonal || !selected) this
-    else this.seasonGlow(1f, shape, theme.accent).border(1.5.dp, theme.accent, shape)
+    else this.seasonGlow(1f, shape, theme.accent, breathing = true).border(1.5.dp, theme.accent, shape)
 
 /** A glyph as a small static icon. */
 @Composable
 fun SeasonGlyphIcon(glyph: Glyph, theme: NflixSeasonTheme, modifier: Modifier = Modifier) {
-    Canvas(modifier) {
-        val tint = when (glyph) {
-            Glyph.Bat -> Color.White
-            Glyph.Snowflake, Glyph.Spark, Glyph.Star, Glyph.Sun, Glyph.Note, Glyph.Heart, Glyph.Leaf -> theme.accent
-            Glyph.Flower, Glyph.Petal -> theme.accentSoft
-            else -> theme.accent
-        }
-        drawGlyph(glyph, center, size.minDimension / 2f * 0.86f, tint, 1f, t = 3f)
-    }
+    Canvas(modifier) { drawGlyph(glyph, center, size.minDimension / 2f * 0.86f, glyphTint(glyph, theme), 1f, t = 3f) }
 }
 
 /** Leading glyph of section titles, or nothing for the brand look. */
 @Composable
 fun SeasonSectionIcon(theme: NflixSeasonTheme = NflixSeason.theme) {
     if (!theme.isSeasonal || !NflixSeason.decorations) return
-    SeasonGlyphIcon(theme.decor.sectionGlyph, theme, Modifier.size(22.dp))
+    AnimatedSeasonGlyph(theme.decor.sectionGlyph, theme, Modifier.size(22.dp))
     Spacer(Modifier.width(10.dp))
 }
 
@@ -1095,7 +1212,13 @@ fun SeasonSectionIcon(theme: NflixSeasonTheme = NflixSeason.theme) {
 
 /** Silhouette above the bottom bar: graveyard, snowy firs, city, meadow, dunes… */
 @Composable
-fun SeasonGround(modifier: Modifier = Modifier, active: Boolean = true, theme: NflixSeasonTheme = NflixSeason.theme) {
+fun SeasonGround(modifier: Modifier = Modifier, active: Boolean = true, theme: NflixSeasonTheme? = null) {
+    if (theme != null) SeasonGroundLayer(modifier, active, theme)
+    else SeasonCrossfade(modifier) { layer, m -> SeasonGroundLayer(m, active, layer) }
+}
+
+@Composable
+private fun SeasonGroundLayer(modifier: Modifier, active: Boolean, theme: NflixSeasonTheme) {
     if (!theme.isSeasonal || !NflixSeason.decorations || theme.decor.ground == Ground.None) return
     val clock = rememberSeasonClock(active)
     Canvas(modifier) { drawGround(theme, clock.value, size.width, size.height) }
@@ -1105,13 +1228,16 @@ internal fun DrawScope.drawGround(theme: NflixSeasonTheme, t: Float, w: Float, h
     val decor = theme.decor
     val d = density
     val ink = theme.barSurface
+    val amp = seasonAmp * if (decor.sober) 0.5f else 1f
+    // Parallax: the back layer drifts slowly against the front one.
+    val drift = sin(t * 0.09f) * 8f * d * amp
     // Rim light so the silhouette reads against the content behind it.
     drawRect(Brush.verticalGradient(listOf(Color.Transparent, theme.accent.copy(alpha = 0.18f)), h * 0.2f, h), Offset(0f, h * 0.2f), Size(w, h * 0.8f))
-    fun hill(amp: Float, base: Float, waves: Float, phase: Float) = Path().apply {
+    fun hill(height: Float, base: Float, waves: Float, phase: Float, shift: Float = 0f) = Path().apply {
         moveTo(0f, h)
         var x = 0f
         while (x <= w) {
-            lineTo(x, h * base - sin(x / w * waves * PI.toFloat() + phase) * amp * h)
+            lineTo(x, h * base - sin((x + shift) / w * waves * PI.toFloat() + phase) * height * h)
             x += 8f * d
         }
         lineTo(w, h)
@@ -1120,7 +1246,13 @@ internal fun DrawScope.drawGround(theme: NflixSeasonTheme, t: Float, w: Float, h
     when (decor.ground) {
         Ground.None -> Unit
         Ground.Graveyard -> {
+            drawPath(hill(0.1f, 0.62f, 2f, 1.4f, drift), mixDark(theme.accentDeep).copy(alpha = 0.7f))
             drawPath(hill(0.12f, 0.72f, 3f, 0.4f), ink)
+            // Ground fog drifting between the graves.
+            for (k in 0 until 2) {
+                val fx = wrap(hash(k, 51) + t * 0.012f * amp * (1 + k)) * (w + 160f * d) - 80f * d
+                drawOval(Color.White.copy(alpha = 0.05f), Offset(fx - 70f * d, h * 0.6f), Size(140f * d, h * 0.22f))
+            }
             listOf(0.06f, 0.2f, 0.33f, 0.66f, 0.8f, 0.93f).forEachIndexed { i, fx ->
                 val x = w * fx
                 val base = h * 0.74f
@@ -1141,14 +1273,16 @@ internal fun DrawScope.drawGround(theme: NflixSeasonTheme, t: Float, w: Float, h
             decor.groundGlyph?.let { drawGlyph(it, Offset(w * 0.5f, h * 0.55f), 13f * d, theme.accent, 1f, t = t) }
         }
         Ground.Firs -> {
-            drawPath(hill(0.08f, 0.78f, 2f, 1.2f), Color(0xFFE8F0FF).copy(alpha = 0.22f))
+            drawPath(hill(0.08f, 0.78f, 2f, 1.2f, drift), Color(0xFFE8F0FF).copy(alpha = 0.22f))
             listOf(0.04f, 0.13f, 0.24f, 0.71f, 0.82f, 0.94f).forEachIndexed { i, fx ->
                 val x = w * fx
                 val th = (26f + (i % 3) * 7f) * d
                 val base = h * 0.82f
-                val fir = Path().apply { moveTo(x, base - th); lineTo(x + th * 0.36f, base); lineTo(x - th * 0.36f, base); close() }
+                // Tips sway in the wind.
+                val tip = x + sin(t * 0.8f + i * 1.3f) * 1.6f * d * amp
+                val fir = Path().apply { moveTo(tip, base - th); lineTo(x + th * 0.36f, base); lineTo(x - th * 0.36f, base); close() }
                 drawPath(fir, Color(0xFF0E2A1C))
-                val cap = Path().apply { moveTo(x, base - th); lineTo(x + th * 0.12f, base - th * 0.66f); lineTo(x - th * 0.12f, base - th * 0.66f); close() }
+                val cap = Path().apply { moveTo(tip, base - th); lineTo(tip + th * 0.12f, base - th * 0.66f); lineTo(tip - th * 0.12f, base - th * 0.66f); close() }
                 drawPath(cap, Color.White.copy(alpha = 0.7f))
             }
             decor.groundGlyph?.let { drawGlyph(it, Offset(w * 0.5f, h * 0.5f), 9f * d, theme.accentSoft, 0.8f + 0.2f * sin(t * 2f)) }
@@ -1173,36 +1307,42 @@ internal fun DrawScope.drawGround(theme: NflixSeasonTheme, t: Float, w: Float, h
                 val wx = hash(k, 11) * w
                 val wy = h * (0.55f + hash(k, 12) * 0.35f)
                 val on = sin(t * 0.7f + k * 2.1f) > -0.3f
-                if (on) drawRect(theme.accentSoft.copy(alpha = 0.5f), Offset(wx, wy), Size(2f * d, 2.5f * d))
+                // Lit windows flicker a little, some switch on and off.
+                val flicker = 0.75f + 0.25f * sin(t * 6f + k * 3.7f) * sin(t * 2.3f + k)
+                if (on) drawRect(theme.accentSoft.copy(alpha = 0.5f * flicker), Offset(wx, wy), Size(2f * d, 2.5f * d))
             }
         }
         Ground.Meadow -> {
+            drawPath(hill(0.06f, 0.74f, 2f, 1.9f, drift), Color(0xFF16301E).copy(alpha = 0.55f))
             drawPath(hill(0.06f, 0.82f, 2.5f, 0.3f), Color(0xFF16301E))
             for (k in 0 until 40) {
                 val bx = hash(k, 3) * w
                 val bh = (8f + hash(k, 4) * 10f) * d
-                val sway = sin(t * 1.4f + k * 0.6f) * 3f * d
+                val sway = sin(t * 1.4f + k * 0.6f) * 3f * d * amp
                 drawLine(Color(0xFF2E6A3E), Offset(bx, h), Offset(bx + sway, h - bh), 1.4f * d, StrokeCap.Round)
             }
             decor.groundGlyph?.let { g ->
                 for (k in 0 until 7) {
                     val fx = (k + 0.5f) / 7f
-                    val sway = sin(t * 1.3f + k) * 8f
+                    val sway = sin(t * 1.3f + k) * 8f * amp
                     drawGlyph(g, Offset(w * fx, h * 0.62f + (k % 2) * 5f * d), 7f * d, if (k % 2 == 0) theme.accent else theme.accentSoft, 0.95f, rotation = sway, t = t)
                 }
             }
         }
         Ground.Dunes -> {
-            drawPath(hill(0.1f, 0.75f, 1.6f, 0.8f), Color(0xFF3A2410).copy(alpha = 0.9f))
+            drawPath(hill(0.1f, 0.75f, 1.6f, 0.8f, drift), Color(0xFF3A2410).copy(alpha = 0.9f))
             drawPath(hill(0.07f, 0.88f, 2.2f, 2.4f), Color(0xFF241608))
             val shimmer = 0.5f + 0.5f * sin(t * 1.1f)
-            drawLine(theme.accentSoft.copy(alpha = 0.25f * shimmer), Offset(0f, h * 0.6f), Offset(w, h * 0.6f), 1f * d)
+            drawLine(theme.accentSoft.copy(alpha = 0.25f * shimmer), Offset(0f, h * 0.6f + sin(t * 0.6f) * 2f * d), Offset(w, h * 0.6f - sin(t * 0.6f) * 2f * d), 1f * d)
         }
         Ground.Hills -> {
-            drawPath(hill(0.1f, 0.76f, 2f, 0.9f), mixDark(theme.accentDeep))
+            drawPath(hill(0.1f, 0.76f, 2f, 0.9f, drift), mixDark(theme.accentDeep))
             drawPath(hill(0.06f, 0.88f, 3f, 2f), ink)
             decor.groundGlyph?.let { g ->
-                for (k in 0 until 9) drawGlyph(g, Offset(hash(k, 21) * w, h * (0.8f + hash(k, 22) * 0.12f)), 5f * d, if (k % 2 == 0) theme.accent else theme.accentSoft, 0.8f, rotation = k * 40f)
+                for (k in 0 until 9) drawGlyph(
+                    g, Offset(hash(k, 21) * w, h * (0.8f + hash(k, 22) * 0.12f)), 5f * d, if (k % 2 == 0) theme.accent else theme.accentSoft, 0.8f,
+                    rotation = k * 40f + sin(t * 1.1f + k) * 12f * amp, t = t,
+                )
             }
         }
         Ground.Plain -> {
@@ -1212,7 +1352,7 @@ internal fun DrawScope.drawGround(theme: NflixSeasonTheme, t: Float, w: Float, h
                 val count = if (decor.sober) 5 else 7
                 for (k in 0 until count) {
                     val fx = (k + 0.5f) / count
-                    val sway = if (decor.sober) sin(t * 0.5f + k) * 3f else sin(t * 1.2f + k) * 8f
+                    val sway = (if (decor.sober) sin(t * 0.5f + k) * 3f else sin(t * 1.2f + k) * 8f) * seasonAmp
                     drawGlyph(g, Offset(w * fx, h * 0.72f), 6.5f * d, theme.accent, 0.9f, rotation = sway, t = t)
                 }
             }
@@ -1228,7 +1368,8 @@ private fun mixDark(c: Color) = Color(c.red * 0.55f, c.green * 0.55f, c.blue * 0
 @Composable
 fun SeasonScene(theme: NflixSeasonTheme, modifier: Modifier = Modifier, animated: Boolean = true) {
     val clock = rememberSeasonClock(animated)
-    val families = remember(theme.key) { theme.decor.particles.map { it to motes((it.count / 2).coerceAtLeast(2), theme.key.hashCode()) } }
+    val intensity = NflixSeason.intensity
+    val families = remember(theme.key, intensity) { theme.decor.particles.map { it to motes(intensity.count(it.count / 2, lowEnd = false), theme.key.hashCode()) } }
     Box(modifier.background(Brush.verticalGradient(listOf(theme.heroGrade, theme.night)))) {
         Canvas(Modifier.fillMaxSize()) {
             val t = clock.value
