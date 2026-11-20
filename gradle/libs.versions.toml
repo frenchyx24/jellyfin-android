@@ -59,6 +59,10 @@ libass-media = "0.5.1"
 # Room
 androidx-room = "2.8.5"
 
+# Performance
+androidx-profileinstaller = "1.4.1"
+leakcanary = "2.14"
+
 # Monitoring
 slf4j-timber = "0.0.4"
 timber = "5.0.1"
@@ -69,6 +73,7 @@ kotest = "6.2.7"
 mockk = "1.14.12"
 androidx-test-runner = "1.7.0"
 androidx-test-espresso = "3.7.0"
+robolectric = "4.18.1"
 
 [plugins]
 android-app = { id = "com.android.application", version.ref = "android-plugin" }
@@ -150,6 +155,10 @@ libass-media = { module = "io.github.peerless2012:ass-media", version.ref = "lib
 androidx-room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "androidx-room" }
 androidx-room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "androidx-room" }
 
+# Performance
+androidx-profileinstaller = { module = "androidx.profileinstaller:profileinstaller", version.ref = "androidx-profileinstaller" }
+leakcanary = { module = "com.squareup.leakcanary:leakcanary-android", version.ref = "leakcanary" }
+
 # Monitoring
 slf4j-timber = { module = "io.github.unveloper:slf4j-timber", version.ref = "slf4j-timber" }
 timber = { group = "com.jakewharton.timber", name = "timber", version.ref = "timber" }
@@ -157,6 +166,10 @@ timber = { group = "com.jakewharton.timber", name = "timber", version.ref = "tim
 # Testing
 junit-api = { group = "org.junit.jupiter", name = "junit-jupiter-api", version.ref = "junit" }
 junit-engine = { group = "org.junit.jupiter", name = "junit-jupiter-engine", version.ref = "junit" }
+junit-vintage-engine = { group = "org.junit.vintage", name = "junit-vintage-engine", version.ref = "junit" }
+robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
+compose-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4", version.ref = "compose" }
+compose-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest", version.ref = "compose" }
 kotest-runner = { group = "io.kotest", name = "kotest-runner-junit5-jvm", version.ref = "kotest" }
 kotest-assertions = { group = "io.kotest", name = "kotest-assertions-core-jvm", version.ref = "kotest" }
 kotest-property = { group = "io.kotest", name = "kotest-property-jvm", version.ref = "kotest" }
