@@ -27,7 +27,12 @@ import java.util.concurrent.TimeUnit
 class NflixHttpException(val code: Int, message: String, val body: String? = null) : IOException(message)
 
 /** Lightweight Jellyfin HTTP client: one OkHttp pool, HTTP cache, JSON decoding off the main thread. */
-class NflixApi(cacheDir: File, private val session: NflixSession, private val apiClient: ApiClient) {
+class NflixApi(
+    cacheDir: File,
+    private val session: NflixSession,
+    private val apiClient: ApiClient,
+    pinState: PinStateStore = MemoryPinStateStore(),
+) {
     val baseUrl: String = BuildConfig.NFLIX_SERVER_URL.trimEnd('/')
     private val base: HttpUrl = baseUrl.toHttpUrl()
 
@@ -38,17 +43,40 @@ class NflixApi(cacheDir: File, private val session: NflixSession, private val ap
         explicitNulls = false
     }
 
+    private val pinPolicy = PinPolicy(pinState)
+
+    /** Client without certificate pins; used only when [pinPolicy] disables or bypasses pinning. */
+    private val unpinnedClient: OkHttpClient = OkHttpClient.Builder().build()
+
     val client: OkHttpClient = OkHttpClient.Builder()
         .cache(Cache(File(cacheDir, "nflix-http"), 50L * 1024 * 1024))
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
+        .addInterceptor(
+            NflixHttp.PinFallbackInterceptor(pinPolicy) {
+                base.newBuilder().build().let { unpinnedClient.newBuilder() }
+                    .cache(Cache(File(cacheDir, "nflix-http"), 50L * 1024 * 1024))
+                    .build()
+            },
+        )
+        .addInterceptor(NflixHttp.RetryInterceptor())
         // Pull-to-refresh must hit the network: without this, OkHttp may answer GETs from its
         // disk cache (Jellyfin sends no Cache-Control on most plugin routes), so a swipe
         // appeared to do nothing. This must be an application interceptor: a network
         // interceptor runs after the cache lookup and never sees cache hits.
         .addInterceptor { chain ->
             chain.proceed(chain.request().newBuilder().cacheControl(CacheControl.FORCE_NETWORK).build())
+        }
+        .apply {
+            if (pinPolicy.pinningEnabled()) {
+                val pinner = CertificatePinner.Builder().apply {
+                    PinPolicy.Pins.byHost.forEach { (host, pins) ->
+                        pins.forEach { add(host, it) }
+                    }
+                }.build()
+                certificatePinner(pinner)
+            }
         }
         .build()
 
