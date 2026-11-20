@@ -35,6 +35,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.animation.core.spring
 import androidx.compose.material.icons.rounded.RemoveDone
 import androidx.compose.material.icons.rounded.Report
+import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.DoneAll
 import androidx.compose.material.icons.rounded.RadioButtonUnchecked
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -342,6 +343,7 @@ private fun Actions(item: Item, accent: Color, onChanged: () -> Unit) {
                 }
             }
             if (resumable) ActionIcon(Icons.Rounded.Replay, "Du début") { deps.play(scope, item, fromStart = true) }
+            if (item.type == "Movie" || item.type == "Episode") ActionIcon(Icons.Rounded.Groups, "Soirée", accent = accent) { startParty(deps, scope, item) }
             ActionIcon(Icons.Rounded.Report, "Signaler", accent = accent) { org.jellyfin.mobile.nflix.ui.ItemMenu.report(item) }
             val remoteTrailer = item.trailers.firstNotNullOfOrNull { org.jellyfin.mobile.nflix.ui.TrailerSource.youtubeId(it.url) }
             if ((item.localTrailerCount ?: 0) > 0 || remoteTrailer != null) {

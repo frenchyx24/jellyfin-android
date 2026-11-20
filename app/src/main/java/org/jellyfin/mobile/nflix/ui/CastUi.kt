@@ -194,7 +194,7 @@ fun CastRemoteSheet(manager: CastManager, onDismiss: () -> Unit) {
                 IconButton(onClick = { scope.launch { manager.command(if (s.paused) CastCommand.Resume else CastCommand.Pause) } }, modifier = Modifier.size(64.dp).clip(CircleShape).background(Color.White)) {
                     Icon(if (s.paused) Icons.Rounded.PlayArrow else Icons.Rounded.Pause, if (s.paused) "Reprendre" else "Pause", tint = Color.Black, modifier = Modifier.size(36.dp))
                 }
-                TextButton(onClick = { scope.launch { manager.command(CastCommand.Seek(s.positionTicks + 300_000_000L)) } }) { Text("+30 s") }
+                TextButton(onClick = { scope.launch { manager.command(CastCommand.Seek(s.positionTicks + 100_000_000L)) } }) { Text("+10 s") }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.AutoMirrored.Rounded.VolumeUp, "Volume", tint = Nflix.Muted)

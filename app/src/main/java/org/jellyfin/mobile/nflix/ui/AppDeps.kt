@@ -46,6 +46,9 @@ class AppDeps(
 ) {
     val family: org.jellyfin.mobile.nflix.family.FamilyRepository get() = switcher.repo
 
+    /** Family 1.4: presence, parental control, usage, weekly report, watch party. */
+    val social: org.jellyfin.mobile.nflix.family.FamilySocialRepository by lazy { org.jellyfin.mobile.nflix.family.FamilySocialRepository(api) }
+
     /** Administration tools; the server enforces rights, the app only hides what a member cannot use. */
     val admin: org.jellyfin.mobile.nflix.data.AdminRepository by lazy { org.jellyfin.mobile.nflix.data.AdminRepository(api, jellyfin, horus) }
 
@@ -134,6 +137,13 @@ class AppDeps(
         }
         val selectedId = uuids.getOrNull(startIndex.coerceIn(0, uuids.lastIndex)) ?: uuids.first()
         scope.launch {
+            // Parental control: kid profiles ask the server first (fails open offline).
+            val rating = jellyfin.cachedItem(selectedId.toString())?.officialRating
+            val verdict = social.checkPlayback(selectedId.toString(), rating, java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY))
+            if (!verdict.allowed) {
+                Toasts.show(verdict.reason ?: "Lecture non autorisée sur ce profil.", ToastKind.Warning)
+                return@launch
+            }
             val local = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 val download = downloadDao.getDownloadByItemId(selectedId) ?: return@withContext false
                 if (download.status != DownloadStatus.DOWNLOADED) return@withContext false
