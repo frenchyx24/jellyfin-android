@@ -246,6 +246,7 @@ fun BrowseGrid(
             val origin = "grid-$key/${item.id}"
             val merged = userData[item.id]?.let { item.copy(userData = it) } ?: item
             PosterCard(
+                showQualityBadges = true,
                 item = merged,
                 imageUrl = deps.jellyfin.primary(merged, 300),
                 origin = origin,

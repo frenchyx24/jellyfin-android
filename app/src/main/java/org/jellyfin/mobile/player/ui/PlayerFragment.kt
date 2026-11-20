@@ -24,6 +24,8 @@ import androidx.core.view.setPadding
 import androidx.core.view.updatePadding
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.Player
 import androidx.media3.ui.PlayerView
@@ -153,6 +155,7 @@ class PlayerFragment : Fragment(), BackPressInterceptor {
             playerMenus?.onQueueItemChanged(mediaSource, viewModel.queueManager.hasNext())
             nflixUi.source = mediaSource
             nflixUi.hasNext = viewModel.queueManager.hasNext()
+            if (mediaSource != null) viewModel.applyRememberedTracks()
             nflixUi.revision++
         }
 
@@ -264,7 +267,19 @@ class PlayerFragment : Fragment(), BackPressInterceptor {
         val thumbnails = TrickplayThumbnails(requireContext(), apiClient, imageLoader)
         playerBinding.nflixPlayerUi.apply {
             setViewCompositionStrategy(androidx.compose.ui.platform.ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
-            setContent { NflixPlayerUi(nflixUi, nflixActions, thumbnails) }
+            setContent {
+                NflixPlayerUi(nflixUi, nflixActions, thumbnails)
+                val ask by viewModel.askContinueWatching.collectAsState()
+                if (ask) {
+                    androidx.compose.material3.AlertDialog(
+                        onDismissRequest = { viewModel.stopContinueWatching() },
+                        title = { androidx.compose.material3.Text("Êtes-vous toujours là ?") },
+                        text = { androidx.compose.material3.Text("3 épisodes se sont enchaînés tout seuls. La lecture reprend au prochain épisode, ou s'arrête ici.") },
+                        confirmButton = { androidx.compose.material3.TextButton(onClick = { viewModel.confirmContinueWatching() }) { androidx.compose.material3.Text("Continuer") } },
+                        dismissButton = { androidx.compose.material3.TextButton(onClick = { viewModel.stopContinueWatching() }) { androidx.compose.material3.Text("Arrêter") } },
+                    )
+                }
+            }
         }
     }
 
@@ -293,10 +308,10 @@ class PlayerFragment : Fragment(), BackPressInterceptor {
             nflixUi.resizeMode = mode
         }
         override fun selectAudio(index: Int) {
-            onAudioTrackSelected(index) { nflixUi.revision++ }
+            onAudioTrackSelected(index) { nflixUi.revision++; viewModel.rememberCurrentTracks(viewModel.mediaSourceOrNull?.selectedAudioStream?.language, null) }
         }
         override fun selectSubtitle(index: Int) {
-            onSubtitleSelected(index) { nflixUi.revision++ }
+            onSubtitleSelected(index) { nflixUi.revision++; viewModel.rememberCurrentTracks(null, viewModel.mediaSourceOrNull?.selectedSubtitleStream?.language) }
         }
         override fun setSpeed(speed: Float) {
             if (onSpeedSelected(speed)) nflixUi.speed = speed

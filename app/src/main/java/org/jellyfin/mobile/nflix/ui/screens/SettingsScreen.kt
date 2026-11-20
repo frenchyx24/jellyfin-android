@@ -42,6 +42,10 @@ import androidx.compose.material.icons.rounded.Celebration
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.ClosedCaption
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.DataSaverOn
+import androidx.compose.material.icons.rounded.FormatSize
+import androidx.compose.material.icons.rounded.DarkMode
+import androidx.compose.material.icons.rounded.VideoLibrary
 import androidx.compose.material.icons.rounded.FastForward
 import androidx.compose.material.icons.rounded.Headphones
 import androidx.compose.material.icons.rounded.Memory
@@ -293,6 +297,49 @@ fun SettingsScreen() {
                         SettingLink(Icons.Rounded.ClosedCaption, SettingTints.Amber, "Style des sous-titres", "Taille, couleur et fond, dans les réglages d'Android.", external = true) {
                             runCatching { context.startActivity(Intent(android.provider.Settings.ACTION_CAPTIONING_SETTINGS)) }
                         }
+                    }
+                }
+            }
+
+            item { SectionLabel("Lecture 5.7", Modifier.settleIn(2)) }
+            item {
+                GlassCard(Modifier.fillMaxWidth().settleIn(2)) {
+                    Column(Modifier.padding(horizontal = 18.dp, vertical = 10.dp)) {
+                        var ask by remember { mutableStateOf(org.jellyfin.mobile.nflix.playback.PlaybackPrefs.alwaysAsk) }
+                        PrefSwitch(Icons.Rounded.VideoLibrary, SettingTints.Coral, "« Êtes-vous toujours là ? »", "Après 3 épisodes enchaînés, la lecture se met en pause et demande confirmation.", ask) { ask = it; org.jellyfin.mobile.nflix.playback.PlaybackPrefs.alwaysAsk = it }
+                        var dts by remember { mutableStateOf(org.jellyfin.mobile.nflix.playback.PlaybackPrefs.doubleTapSeek) }
+                        SettingChoice(
+                            Icons.Rounded.FastForward, SettingTints.Mint, "Double appui : avance de",
+                            "Un double appui sur la gauche ou la droite de la vidéo avance ou recule la lecture.",
+                            org.jellyfin.mobile.nflix.playback.PlaybackMemory.DoubleTapSeek.entries.map { it to it.label }, dts,
+                        ) { dts = it; org.jellyfin.mobile.nflix.playback.PlaybackPrefs.doubleTapSeek = it }
+                        Text("Piste audio et sous-titres mémorisées par série, et reprise exacte après un crash : activés.", fontSize = 12.sp, color = Nflix.Muted, lineHeight = 17.sp, modifier = Modifier.padding(top = 4.dp))
+                    }
+                }
+            }
+
+            item { SectionLabel("Affichage", Modifier.settleIn(2)) }
+            item {
+                GlassCard(Modifier.fillMaxWidth().settleIn(2)) {
+                    Column(Modifier.padding(horizontal = 18.dp, vertical = 10.dp)) {
+                        var amoled by remember { mutableStateOf(org.jellyfin.mobile.nflix.playback.PlaybackPrefs.amoledBlack) }
+                        PrefSwitch(Icons.Rounded.DarkMode, SettingTints.Violet, "Noir AMOLED", "Fonds vraiment noirs, économes sur les écrans OLED.", amoled) { amoled = it; org.jellyfin.mobile.nflix.playback.PlaybackPrefs.amoledBlack = it }
+                        var ts by remember { mutableStateOf(org.jellyfin.mobile.nflix.playback.PlaybackPrefs.textScale) }
+                        SettingChoice(
+                            Icons.Rounded.FormatSize, SettingTints.Sky, "Taille du texte",
+                            "${(ts * 100).toInt()} % de la taille normale.",
+                            listOf(0.85f to "Petit", 1f to "Normal", 1.15f to "Grand", 1.35f to "Très grand"), ts,
+                        ) { ts = it; org.jellyfin.mobile.nflix.playback.PlaybackPrefs.textScale = it }
+                    }
+                }
+            }
+
+            item { SectionLabel("Données", Modifier.settleIn(2)) }
+            item {
+                GlassCard(Modifier.fillMaxWidth().settleIn(2)) {
+                    Column(Modifier.padding(horizontal = 18.dp, vertical = 10.dp)) {
+                        var ds by remember { mutableStateOf(org.jellyfin.mobile.nflix.playback.PlaybackPrefs.dataSaver) }
+                        PrefSwitch(Icons.Rounded.DataSaverOn, SettingTints.Mint, "Économiseur de données", "Les images sont téléchargées en plus petit, les aperçus et vidéos en fond sont coupés.", ds) { ds = it; org.jellyfin.mobile.nflix.playback.PlaybackPrefs.dataSaver = it }
                     }
                 }
             }

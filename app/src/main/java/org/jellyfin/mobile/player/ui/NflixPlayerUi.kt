@@ -268,7 +268,17 @@ fun NflixPlayerUi(state: NflixPlayerUiState, actions: NflixPlayerActions, thumbn
         }
     }
 
-    Box(Modifier.fillMaxSize()) {
+    Box(
+        Modifier.fillMaxSize().pointerInput(Unit) {
+            detectTapGestures(onDoubleTap = { offset ->
+                // Nflix 5.7: configurable double-tap seek (left = back, right = forward).
+                val seconds = org.jellyfin.mobile.nflix.playback.PlaybackPrefs.doubleTapSeek.seconds
+                val delta = if (offset.x < size.width / 2) -seconds * 1000L else seconds * 1000L
+                actions.player()?.let { p -> p.seekTo((p.currentPosition + delta).coerceIn(0L, p.duration.takeIf { it > 0 } ?: Long.MAX_VALUE)) }
+                actions.showControls()
+            })
+        },
+    ) {
         AnimatedVisibility(pauseShown && source != null, enter = fadeIn(tween(700)), exit = fadeOut(tween(250))) {
             if (source != null) PauseScreen(source, position, duration, actions)
         }
