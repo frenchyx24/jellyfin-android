@@ -9,7 +9,8 @@ object Changelog {
             "Famille : photos et GIF dans les messages, accusés de lecture, notifications groupées et nuits silencieuses.",
             "Défis, soirées film, lien d'invitation et QR code, groupes d'amis, listes partagées ou publiques, mur des amis.",
             "Recommandez un titre à un ami, avatars générés, vos stats et Nflix Wrapped.",
-            "Widget « Reprendre », sauvegarde des réglages, dialogues renforcés, filtres avancés et « Surprends-moi ».",
+            "Widget « Reprendre », sauvegarde des réglages, dialogues renforcés, filtres avancés (décennie, note) et « Surprends-moi ».",
+            "Pages studio, tri « Plus regardés », couleurs du thème saisonnier partout, démarrage mesuré et plus fluide.",
         )),
         Entry("5.8.2", "Nflix 5.8.2", listOf(
             "Correction du plantage au lancement (épinglage de certificat).",
