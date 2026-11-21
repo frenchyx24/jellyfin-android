@@ -20,6 +20,8 @@ data class UserData(
     @SerialName("Played") val played: Boolean = false,
     @SerialName("IsFavorite") val favorite: Boolean = false,
     @SerialName("UnplayedItemCount") val unplayed: Int? = null,
+    @SerialName("LastPlayedDate") val lastPlayedDate: String? = null,
+    @SerialName("PlayCount") val playCount: Int = 0,
 )
 
 @Immutable

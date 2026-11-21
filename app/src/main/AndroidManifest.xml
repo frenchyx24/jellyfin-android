@@ -26,6 +26,11 @@
 
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Implied by the Wi-Fi / Bluetooth permissions; Nflix works without them (all flavors). -->
+    <uses-feature android:name="android.hardware.wifi" android:required="false" />
+    <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+
     <queries>
         <intent>
             <action android:name="android.intent.action.VIEW" />
@@ -122,6 +127,18 @@
             android:exported="true"
             android:grantUriPermissions="true"
             android:readPermission="android.permission.MEDIA_CONTENT_CONTROL" />
+
+        <receiver
+            android:name="org.jellyfin.mobile.nflix.widget.ResumeWidget"
+            android:exported="false"
+            android:label="Nflix · Reprendre">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_resume_info" />
+        </receiver>
 
         <receiver
             android:name="org.jellyfin.mobile.downloads.DownloadBroadcastReceiver"

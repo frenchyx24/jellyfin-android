@@ -64,6 +64,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.material3.FilterChip
 import androidx.compose.material.icons.rounded.Lightbulb
 import androidx.compose.material.icons.rounded.Report
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -95,6 +96,9 @@ object ItemMenu {
     /** Item being reported to Mira (problem or improvement), shown by [ItemMenuHost]. */
     var reporting by mutableStateOf<Pair<Item, String>?>(null)
         private set
+
+    /** Application context for share intents, set by the host composable. */
+    @Volatile var appContext: android.content.Context? = null
 
     fun report(item: Item, kind: String = "incident") { target = null; reporting = item to kind }
     fun endReport() { reporting = null }
@@ -213,6 +217,14 @@ fun ItemMenuHost() {
                     })
                 }
                 if (item.type != "Playlist") {
+                    add(MenuAction(Icons.Rounded.Share, "Partager le lien") {
+                        val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(android.content.Intent.EXTRA_TEXT, org.jellyfin.mobile.nflix.ShareLink.forItem(item.id, item.name))
+                        }
+                        ItemMenu.appContext?.startActivity(android.content.Intent.createChooser(intent, "Partager « ${item.name} »"))
+                        ItemMenu.message = "Lien prêt à partager"
+                    })
                     add(MenuAction(Icons.Rounded.Report, "Signaler un problème") { ItemMenu.report(item, "incident") })
                     add(MenuAction(Icons.Rounded.Lightbulb, "Proposer une amélioration") { ItemMenu.report(item, "improvement") })
                 }
@@ -298,6 +310,7 @@ private fun reportLabel(item: Item): String = when (item.type) {
 private fun ReportDialog(item: Item, initialKind: String, onDismiss: () -> Unit) {
     val deps = LocalDeps.current
     val context = LocalContext.current.applicationContext
+    ItemMenu.appContext = context
     val scope = rememberCoroutineScope()
     val repo = remember(deps.api, context) { org.jellyfin.mobile.nflix.data.SupportRepository(deps.api, context) }
     var kind by remember { mutableStateOf(initialKind) }

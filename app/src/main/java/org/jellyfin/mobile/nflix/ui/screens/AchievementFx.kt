@@ -75,6 +75,9 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import org.jellyfin.mobile.nflix.data.AchievementBadge
 import org.jellyfin.mobile.nflix.ui.Nflix
+import org.jellyfin.mobile.nflix.ui.NflixSeason
+import org.jellyfin.mobile.nflix.ui.seasonConfettiColors
+import org.jellyfin.mobile.nflix.ui.SeasonGlyphBurst
 import java.time.Duration
 import java.time.OffsetDateTime
 import kotlin.math.PI
@@ -487,7 +490,7 @@ internal fun AchievementCelebration(badges: List<AchievementBadge>, onOpen: (Ach
     LaunchedEffect(hero.id) {
         if (!reduced) reveal.animateTo(1f, tween(520, delayMillis = 260, easing = FastOutSlowInEasing))
     }
-    val confettiColors = remember(color) { listOf(color, Nflix.Red, Nflix.Warning, Color.White, Nflix.Success, Nflix.Info) }
+    val confettiColors = remember(color, NflixSeason.theme.key) { seasonConfettiColors(listOf(color, Nflix.Red, Nflix.Warning, Color.White, Nflix.Success, Nflix.Info)) }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Box(
             Modifier.fillMaxSize()
@@ -536,6 +539,8 @@ internal fun AchievementCelebration(badges: List<AchievementBadge>, onOpen: (Ach
                 }
             }
             AchievementConfetti(trigger = 1, colors = confettiColors, modifier = Modifier.fillMaxSize(), enabled = !reduced, originY = 0.34f)
+            // Season theme: a burst of the theme's own glyphs on top of the paper confetti.
+            SeasonGlyphBurst(trigger = 1, modifier = Modifier.fillMaxSize(), originY = 0.34f)
         }
     }
 }

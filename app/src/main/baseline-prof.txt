@@ -1,0 +1,19 @@
+# Startup and first-screen paths (hand-written baseline profile, compiled by profileinstaller).
+HSPLorg/jellyfin/mobile/MainActivity;->**(**)**
+HSPLorg/jellyfin/mobile/app/**;->**(**)**
+HSPLorg/jellyfin/mobile/nflix/NflixAppFragment;->**(**)**
+HSPLorg/jellyfin/mobile/nflix/NflixSession;->**(**)**
+HSPLorg/jellyfin/mobile/nflix/data/**;->**(**)**
+HSPLorg/jellyfin/mobile/nflix/ui/NflixRoot*;->**(**)**
+HSPLorg/jellyfin/mobile/nflix/ui/Theme*;->**(**)**
+HSPLorg/jellyfin/mobile/nflix/ui/Components*;->**(**)**
+HSPLorg/jellyfin/mobile/nflix/ui/screens/HomeScreen*;->**(**)**
+HSPLorg/jellyfin/mobile/nflix/ui/screens/VideoHomeScreen*;->**(**)**
+HSPLorg/jellyfin/mobile/nflix/ui/screens/DetailScreen*;->**(**)**
+HSPLorg/jellyfin/mobile/player/PlayerViewModel;->**(**)**
+Lorg/jellyfin/mobile/nflix/**;
+HSPLandroidx/compose/runtime/**;->**(**)**
+HSPLandroidx/compose/ui/**;->**(**)**
+HSPLandroidx/compose/foundation/lazy/**;->**(**)**
+HSPLkotlinx/serialization/json/**;->**(**)**
+HSPLokhttp3/**;->**(**)**

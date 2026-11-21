@@ -19,6 +19,7 @@ enum class LibrarySort(val label: String, val sortBy: String, val order: String)
     Rating("Note", "CommunityRating,SortName", "Descending"),
     Played("Vu récemment", "DatePlayed,SortName", "Descending"),
     Random("Aléatoire", "Random", "Ascending"),
+    Popular("Plus regardés", "PlayCount,CommunityRating,SortName", "Descending"),
 }
 
 enum class LibraryFilter(val label: String) { All("Tout"), Unplayed("Non vus"), Favorites("Favoris"), Resumable("En cours") }
@@ -307,14 +308,19 @@ class JellyfinRepository(private val api: NflixApi) {
         x.await() to y.await()
     }
 
+    private fun cap(width: Int): Int =
+        if (org.jellyfin.mobile.nflix.playback.PlaybackPrefs.dataSaver) minOf(width, 240) else width
+
     fun primary(item: Item, width: Int = 400): String? = when {
-        item.imageTags["Primary"] != null -> api.imageUrl(item.id, "Primary", item.imageTags["Primary"], width)
+        item.imageTags["Primary"] != null -> api.imageUrl(item.id, "Primary", item.imageTags["Primary"], cap(width))
         item.albumId != null && item.albumPrimaryTag != null -> api.imageUrl(item.albumId, "Primary", item.albumPrimaryTag, width)
         item.seriesId != null && item.seriesPrimaryTag != null -> api.imageUrl(item.seriesId, "Primary", item.seriesPrimaryTag, width)
         else -> null
     }
 
     fun backdrop(item: Item, width: Int = 1280): String? = when {
+        // Data saver: no big backdrops.
+        org.jellyfin.mobile.nflix.playback.PlaybackPrefs.dataSaver -> null
         item.backdropTags.isNotEmpty() -> api.imageUrl(item.id, "Backdrop", item.backdropTags.first(), width, 0)
         item.parentBackdropItemId != null && item.parentBackdropTags.isNotEmpty() ->
             api.imageUrl(item.parentBackdropItemId, "Backdrop", item.parentBackdropTags.first(), width, 0)

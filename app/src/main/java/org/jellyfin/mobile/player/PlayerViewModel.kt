@@ -141,6 +141,9 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application),
     private var playSpeed = 1f
 
     private var progressUpdateJob: Job? = null
+    private var partySyncJob: Job? = null
+    private var usageMs = 0L
+    private val social by lazy { org.jellyfin.mobile.nflix.family.FamilySocialRepository(get<org.jellyfin.mobile.nflix.data.NflixApi>()) }
     private var chapterMarkingUpdateJob: Job? = null
     private var skipMediaSegmentUpdateJob: Job? = null
     private var fallbackRetryJob: Job? = null
@@ -167,6 +170,56 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application),
 
     private var displayPreferences = DisplayPreferences()
     private var autoPlayNextEpisodeEnabled: Boolean = false
+
+    // Nflix 5.7: playback memory — "Êtes-vous toujours là ?", per-series tracks, exact resume.
+    private val continueWatching = org.jellyfin.mobile.nflix.playback.PlaybackMemory.ContinueWatching()
+    val askContinueWatching = kotlinx.coroutines.flow.MutableStateFlow(false)
+    private val trackStore = org.jellyfin.mobile.nflix.playback.PlaybackPrefs.trackStore
+    private val resumeStore = org.jellyfin.mobile.nflix.playback.PlaybackPrefs.resumeStore
+    private var lastResumeSaveMs = 0L
+
+    fun confirmContinueWatching() {
+        continueWatching.confirm()
+        askContinueWatching.value = false
+        viewModelScope.launch {
+            if (queueManager.next()) playerOrNull?.playWhenReady = true else releasePlayer()
+        }
+    }
+
+    fun stopContinueWatching() {
+        continueWatching.stop()
+        askContinueWatching.value = false
+        releasePlayer()
+    }
+
+    /** Remember the chosen tracks (as languages) for the series of the current item. */
+    fun rememberCurrentTracks(audioLanguage: String?, subtitleLanguage: String?) {
+        val seriesId = (mediaSourceOrNull as? RemoteJellyfinMediaSource)?.item?.seriesId?.toString() ?: return
+        if (audioLanguage == null && subtitleLanguage == null) return
+        val previous = trackStore.get(seriesId) ?: org.jellyfin.mobile.nflix.playback.PlaybackMemory.TrackChoice(null, null)
+        trackStore.put(seriesId, org.jellyfin.mobile.nflix.playback.PlaybackMemory.TrackChoice(audioLanguage ?: previous.audioLanguage, subtitleLanguage ?: previous.subtitleLanguage))
+    }
+
+    /** Apply the remembered tracks of this series as language preferences when they exist. */
+    fun applyRememberedTracks() {
+        val seriesId = (mediaSourceOrNull as? RemoteJellyfinMediaSource)?.item?.seriesId?.toString() ?: return
+        val choice = trackStore.get(seriesId) ?: return
+        val player = playerOrNull ?: return
+        var builder = player.trackSelectionParameters.buildUpon()
+        if (choice.audioLanguage != null) builder = builder.setPreferredAudioLanguage(choice.audioLanguage)
+        if (choice.subtitleLanguage != null) builder = builder.setPreferredTextLanguage(choice.subtitleLanguage)
+        player.trackSelectionParameters = builder.build()
+    }
+
+    private fun saveResumePosition() {
+        val source = mediaSourceOrNull as? RemoteJellyfinMediaSource ?: return
+        val player = playerOrNull ?: return
+        val now = System.currentTimeMillis()
+        if (now - lastResumeSaveMs < 5_000) return
+        lastResumeSaveMs = now
+        val pos = player.currentPosition
+        if (pos > 5_000) resumeStore.put(source.itemId.toString(), pos)
+    }
 
     init {
         ProcessLifecycleOwner.get().lifecycle.addObserver(lifecycleObserver)
@@ -289,15 +342,32 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application),
             setHandleAudioBecomingNoisy(true)
         }.build().apply {
             addListener(this@PlayerViewModel)
+            addListener(object : Player.Listener {
+                // Dialogue boost: louder speech on quiet mixes (LoudnessEnhancer on the player session).
+                override fun onAudioSessionIdChanged(audioSessionId: Int) = applyDialogueBoost(audioSessionId)
+            })
             applyDefaultAudioAttributes(C.AUDIO_CONTENT_TYPE_MOVIE)
             if (appPreferences.exoPlayerDirectPlayAss) get<AssHandler>().init(this)
         }
+    }
+
+    private var loudness: android.media.audiofx.LoudnessEnhancer? = null
+
+    fun applyDialogueBoost(sessionId: Int = playerOrNull?.audioSessionId ?: 0) {
+        runCatching { loudness?.release() }
+        loudness = null
+        if (sessionId == 0 || !org.jellyfin.mobile.nflix.playback.PlaybackPrefs.dialogueBoost) return
+        loudness = runCatching {
+            android.media.audiofx.LoudnessEnhancer(sessionId).apply { setTargetGain(org.jellyfin.mobile.nflix.playback.PlaybackPrefs.DIALOGUE_GAIN_MB); enabled = true }
+        }.onFailure { Timber.w(it, "Dialogue boost unavailable") }.getOrNull()
     }
 
     /**
      * Release the current ExoPlayer and stop/release the current MediaSession
      */
     private fun releasePlayer() {
+        runCatching { loudness?.release() }
+        loudness = null
         notificationHelper.dismissNotification()
         mediaSession.isActive = false
         mediaSession.release()
@@ -318,6 +388,12 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application),
 
         val startTime = jellyfinMediaSource.startTime
         if (startTime > Duration.ZERO) player.seekTo(startTime.inWholeMilliseconds)
+        else run {
+            // Nflix 5.7: exact resume after a crash or a call — the server position is zero but
+            // the locally saved one is not.
+            val local = resumeStore.get(jellyfinMediaSource.itemId.toString())
+            if (local != null && local > 5_000) player.seekTo(local)
+        }
 
         applyMediaSegments(jellyfinMediaSource)
 
@@ -338,11 +414,49 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application),
             while (true) {
                 delay(Constants.PLAYER_TIME_UPDATE_RATE)
                 playerOrNull?.reportPlaybackState()
+                if (playerOrNull?.isPlaying == true) accountUsage(Constants.PLAYER_TIME_UPDATE_RATE)
+            }
+        }
+        startPartySync()
+    }
+
+    /** Family usage: whole minutes go to the server (daily limit, weekly report). */
+    private fun accountUsage(ms: Long) {
+        usageMs += ms
+        val chunks = org.jellyfin.mobile.nflix.family.UsageMeter.chunks(usageMs)
+        if (chunks.isEmpty()) return
+        usageMs -= chunks.sum() * 60_000L
+        viewModelScope.launch(Dispatchers.IO) { chunks.forEach { social.reportUsage(it) } }
+    }
+
+    /** Watch party: the host pushes its position every 3 s, followers seek when drift exceeds 2 s. */
+    private fun startPartySync() {
+        partySyncJob?.cancel()
+        val partyId = org.jellyfin.mobile.nflix.family.PartySession.partyId ?: return
+        partySyncJob = viewModelScope.launch {
+            while (true) {
+                val player = playerOrNull
+                if (player != null) {
+                    runCatching {
+                        val party = withContext(Dispatchers.IO) { social.party(partyId) }
+                        val host = org.jellyfin.mobile.nflix.family.PartySync.isHost(party, org.jellyfin.mobile.nflix.family.PartySession.myUserId)
+                        val latest = if (host) {
+                            withContext(Dispatchers.IO) { social.pushState(partyId, player.currentPosition * 10_000, !player.isPlaying) }
+                        } else {
+                            org.jellyfin.mobile.nflix.family.PartySync.seekTarget(player.currentPosition, party)?.let { player.seekTo(it) }
+                            if (party.paused == player.isPlaying) player.playWhenReady = !party.paused
+                            party
+                        }
+                        org.jellyfin.mobile.nflix.family.PartySession.last.value = latest
+                    }.onFailure { Timber.w(it, "Party sync failed") }
+                }
+                delay(3_000)
             }
         }
     }
 
     private fun stopProgressUpdates() {
+        partySyncJob?.cancel()
         progressUpdateJob?.cancel()
     }
 
@@ -445,6 +559,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application),
 
     private suspend fun Player.reportPlaybackState() {
         val mediaSource = mediaSourceOrNull as? RemoteJellyfinMediaSource ?: return
+        saveResumePosition()
         val playbackPosition = currentPosition.milliseconds
         if (playbackState != Player.STATE_ENDED) {
             val stream = AudioManager.STREAM_MUSIC
@@ -779,10 +894,16 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application),
                 }
                 Player.STATE_ENDED -> {
                     reportPlaybackStop()
+                    (mediaSourceOrNull as? RemoteJellyfinMediaSource)?.let { resumeStore.clear(it.itemId.toString()) }
                     // Nflix: an episode always chains into the next one, even when the server
                     // preference is off; the player only closes when the queue is exhausted.
                     val shouldAdvance = autoPlayNextEpisodeEnabled || queueManager.hasNext()
-                    if (!shouldAdvance || !queueManager.next()) {
+                    continueWatching.enabled = org.jellyfin.mobile.nflix.playback.PlaybackPrefs.alwaysAsk
+                    if (shouldAdvance && queueManager.hasNext() && continueWatching.advance()) {
+                        // "Êtes-vous toujours là ?" after 3 chained episodes: pause and ask.
+                        playerOrNull?.playWhenReady = false
+                        askContinueWatching.value = true
+                    } else if (!shouldAdvance || !queueManager.next()) {
                         releasePlayer()
                     }
                 }

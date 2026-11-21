@@ -47,6 +47,15 @@ class AlertPrefs(context: Context) {
 
     fun isEnabled(kind: AlertKind): Boolean = masterEnabled && prefs.getBoolean("kind_${kind.wire}", true)
 
+    /** Night do-not-disturb: chat notifications are held from 22 h to 8 h. */
+    var quietNights: Boolean
+        get() = prefs.getBoolean("quiet_nights", true)
+        set(value) { prefs.edit { putBoolean("quiet_nights", value) }; _version.value++ }
+
+    fun chatCursor(conversationId: String): Long = prefs.getLong("chat_$conversationId", -1)
+
+    fun setChatCursor(conversationId: String, id: Long) = prefs.edit { putLong("chat_$conversationId", id) }
+
     fun kindSwitch(kind: AlertKind): Boolean = prefs.getBoolean("kind_${kind.wire}", true)
 
     fun setEnabled(kind: AlertKind, enabled: Boolean) {
@@ -83,7 +92,10 @@ class AlertPrefs(context: Context) {
         get() = prefs.getLong(KEY_LAST_RUN, 0)
         set(value) = prefs.edit { putLong(KEY_LAST_RUN, value) }
 
-    fun clearAccount() = prefs.edit { remove(KEY_POSTED); remove(KEY_BADGES); remove(KEY_LAST_RUN); remove(KEY_BADGE_CURSOR) }
+    fun clearAccount() = prefs.edit {
+        remove(KEY_POSTED); remove(KEY_BADGES); remove(KEY_LAST_RUN); remove(KEY_BADGE_CURSOR)
+        prefs.all.keys.filter { it.startsWith("chat_") }.forEach { remove(it) }
+    }
 
     private companion object {
         const val KEY_MASTER = "master"
@@ -108,6 +120,8 @@ object NflixAlerts {
     fun intId(id: Long): Int =
         if (id in 1..Int.MAX_VALUE.toLong()) id.toInt()
         else ((id * -7046029254386353131L) ushr 33).toInt().let { if (it == 0) 1 else -it }
+
+    private const val CHAT_SUMMARY_ID = 0x4ff1a5
 
     fun createChannel(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
@@ -142,11 +156,28 @@ object NflixAlerts {
             .setColor(0xFFE50914.toInt())
             .setCategory(NotificationCompat.CATEGORY_RECOMMENDATION)
             .setOnlyAlertOnce(true)
+            .setGroup("nflix_" + alert.kind)
             .setContentIntent(open)
             .setAutoCancel(true)
             .build()
         @Suppress("MissingPermission")
-        return runCatching { NotificationManagerCompat.from(context).notify(tag, intId(alert.id), notification) }
+        return runCatching {
+            val manager = NotificationManagerCompat.from(context)
+            manager.notify(tag, intId(alert.id), notification)
+            if (alert.kind == AlertKind.Chat.wire) {
+                // Group summary so several conversations collapse into one "Messages Famille" stack.
+                val summary = NotificationCompat.Builder(context, CHANNEL)
+                    .setSmallIcon(R.drawable.ic_notification)
+                    .setContentTitle("Messages Famille")
+                    .setColor(0xFFE50914.toInt())
+                    .setGroup("nflix_" + alert.kind)
+                    .setGroupSummary(true)
+                    .setOnlyAlertOnce(true)
+                    .setAutoCancel(true)
+                    .build()
+                manager.notify(tag, CHAT_SUMMARY_ID, summary)
+            }
+        }
             .onFailure { Timber.w(it, "Alert notification refused") }
             .isSuccess
     }

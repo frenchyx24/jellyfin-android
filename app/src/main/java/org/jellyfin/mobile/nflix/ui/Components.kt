@@ -161,10 +161,17 @@ fun PosterCard(
     subtitle: String? = item.year?.toString(),
     typeLabel: String? = null,
     onLongClick: (() -> Unit)? = null,
+    showQualityBadges: Boolean = false,
 ) {
     Column(modifier.width(width).pressable(onClick, onLongClick ?: { ItemMenu.show(item) })) {
         Box(Modifier.fillMaxWidth().aspectRatio(aspect).clip(RoundedCornerShape(8.dp)).border(1.dp, Nflix.Outline, RoundedCornerShape(8.dp))) {
             NImage(imageUrl, Modifier.fillMaxSize().sharedPoster(origin), description = item.name)
+            if (showQualityBadges) {
+                val qb = org.jellyfin.mobile.nflix.data.QualityBadges.of(item)
+                if (qb.isNotEmpty()) Row(Modifier.align(Alignment.BottomStart).padding(6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    qb.forEach { Badge(it, Color.Black.copy(alpha = 0.78f)) }
+                }
+            }
             if (typeLabel != null) Badge(typeLabel, Color.Black.copy(alpha = 0.78f), Modifier.align(Alignment.TopStart).padding(6.dp))
             Row(Modifier.align(Alignment.TopEnd).padding(6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 if (favorite) Icon(Icons.Rounded.Favorite, null, tint = Nflix.Red, modifier = Modifier.size(16.dp))

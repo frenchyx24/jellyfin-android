@@ -22,12 +22,18 @@ import org.jellyfin.sdk.api.client.util.AuthorizationHeaderBuilder
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
+import timber.log.Timber
 import java.util.concurrent.TimeUnit
 
 class NflixHttpException(val code: Int, message: String, val body: String? = null) : IOException(message)
 
 /** Lightweight Jellyfin HTTP client: one OkHttp pool, HTTP cache, JSON decoding off the main thread. */
-class NflixApi(cacheDir: File, private val session: NflixSession, private val apiClient: ApiClient) {
+class NflixApi(
+    cacheDir: File,
+    private val session: NflixSession,
+    private val apiClient: ApiClient,
+    pinState: PinStateStore = MemoryPinStateStore(),
+) {
     val baseUrl: String = BuildConfig.NFLIX_SERVER_URL.trimEnd('/')
     private val base: HttpUrl = baseUrl.toHttpUrl()
 
@@ -38,17 +44,39 @@ class NflixApi(cacheDir: File, private val session: NflixSession, private val ap
         explicitNulls = false
     }
 
+    private val pinPolicy = PinPolicy(pinState)
+
+    /** Client without certificate pins; used only when [pinPolicy] disables or bypasses pinning. */
+    private val unpinnedClient: OkHttpClient = OkHttpClient.Builder().build()
+
     val client: OkHttpClient = OkHttpClient.Builder()
         .cache(Cache(File(cacheDir, "nflix-http"), 50L * 1024 * 1024))
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
+        .addInterceptor(
+            NflixHttp.PinFallbackInterceptor(pinPolicy) {
+                base.newBuilder().build().let { unpinnedClient.newBuilder() }
+                    .cache(Cache(File(cacheDir, "nflix-http"), 50L * 1024 * 1024))
+                    .build()
+            },
+        )
+        .addInterceptor(NflixHttp.RetryInterceptor())
         // Pull-to-refresh must hit the network: without this, OkHttp may answer GETs from its
         // disk cache (Jellyfin sends no Cache-Control on most plugin routes), so a swipe
         // appeared to do nothing. This must be an application interceptor: a network
         // interceptor runs after the cache lookup and never sees cache hits.
         .addInterceptor { chain ->
             chain.proceed(chain.request().newBuilder().cacheControl(CacheControl.FORCE_NETWORK).build())
+        }
+        .apply {
+            if (pinPolicy.pinningEnabled()) {
+                // A bad pin must never stop the app: without a pinner, system trust still applies.
+                runCatching { PinPolicy.Pins.pinner() }
+                    .onFailure { Timber.e(it, "Nflix certificate pins rejected, pinning disabled") }
+                    .getOrNull()
+                    ?.let(::certificatePinner)
+            }
         }
         .build()
 
@@ -175,7 +203,20 @@ class NflixApi(cacheDir: File, private val session: NflixSession, private val ap
         }
     }
 
+    /** Raw authenticated GET (chat images), size capped while streaming. */
+    suspend fun getBytes(path: String, maxBytes: Int = 4 * 1024 * 1024): ByteArray = withContext(Dispatchers.IO) {
+        val target = url(path, emptyMap())
+        val request = Request.Builder().url(target).header("Authorization", authorization()).get().build()
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) throw NflixHttpException(response.code, "HTTP ${response.code} ${target.encodedPath}")
+            val body = response.body ?: return@use ByteArray(0)
+            if (body.contentLength() > maxBytes) throw IOException("Image trop lourde")
+            body.byteStream().use { readCapped(it, maxBytes) } ?: throw IOException("Image trop lourde")
+        }
+    }
+
     /** Sends raw bytes (image uploads); the media type is sent verbatim. */
+
     suspend fun sendBytes(method: String, path: String, bytes: ByteArray, mediaType: String, query: Map<String, Any?> = emptyMap()): JsonElement? = withContext(Dispatchers.IO) {
         val target = url(path, query)
         val request = Request.Builder().url(target)
@@ -227,3 +268,18 @@ class TtlCache<V : Any>(private val ttlMs: Long) {
 }
 
 internal fun JsonElement?.obj(): JsonObject? = runCatching { this?.jsonObject }.getOrNull()
+
+/** Reads at most [maxBytes] from [input]; null when the stream is longer. */
+fun readCapped(input: java.io.InputStream, maxBytes: Int): ByteArray? {
+    val out = java.io.ByteArrayOutputStream()
+    val buffer = ByteArray(16 * 1024)
+    var total = 0
+    while (true) {
+        val n = input.read(buffer)
+        if (n < 0) break
+        total += n
+        if (total > maxBytes) return null
+        out.write(buffer, 0, n)
+    }
+    return out.toByteArray()
+}

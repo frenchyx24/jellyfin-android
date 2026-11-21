@@ -366,7 +366,11 @@ fun SearchScreen() {
             (VideoCatalog.normalize(t.artist) + "|" + title) !in localTracks && OnlineLibrary.itemId(t.id) == null
         }.map { it.toItem() }
     }
-    val display = remember(combined, ytItems) { combined + ytItems }
+    var minutes by rememberSaveable { mutableStateOf(0) }
+    val display = remember(combined, ytItems, minutes) {
+        val all = combined + ytItems
+        if (minutes <= 0) all else org.jellyfin.mobile.nflix.playback.PlaybackMemory.MinutesFilter.filter(all, minutes)
+    }
     val requestable = remember(horus, localTitles) { horus.filter { VideoCatalog.normalize(it.title) !in localTitles } }
 
     val busy = parsed.text.length >= 2 && (state is SearchState.Loading || done?.query != parsed.text)
@@ -449,6 +453,15 @@ fun SearchScreen() {
             LazyRow(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(SearchFilter.entries.filter { f -> f == SearchFilter.All || display.any(f::matches) || requestable.any(f::matches) }, key = { it.name }) { option ->
                     FilterPill(option.label, display.count(option::matches) + requestable.count(option::matches), option == filter) { filter = option }
+                }
+            }
+        }
+        // "J'ai X minutes": keeps only items whose runtime fits the chosen budget.
+        val videoCount = remember(display) { display.count { it.type == "Movie" || it.type == "Episode" } }
+        AnimatedVisibility(videoCount > 0, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
+            LazyRow(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(listOf(0 to "Toute durée", 30 to "J'ai 30 min", 60 to "J'ai 1 h", 90 to "J'ai 1 h 30", 120 to "J'ai 2 h"), key = { it.first }) { (m, label) ->
+                    FilterPill(label, display.count { (it.type == "Movie" || it.type == "Episode") && org.jellyfin.mobile.nflix.playback.PlaybackMemory.MinutesFilter.fits(org.jellyfin.mobile.nflix.playback.PlaybackMemory.MinutesFilter.runtimeMinutes(it.runTimeTicks), m) }, m == minutes) { minutes = m }
                 }
             }
         }
@@ -860,6 +873,7 @@ private fun SearchCard(
     androidx.compose.foundation.layout.Box(modifier.width(width)) {
         PosterCard(
             item, item.ytThumb ?: deps.jellyfin.primary(item, 300), "search/${item.id}", { onOpen(item) },
+            showQualityBadges = true,
             modifier = Modifier.appear(),
             width = width,
             aspect = if (square) 1f else 2f / 3f,

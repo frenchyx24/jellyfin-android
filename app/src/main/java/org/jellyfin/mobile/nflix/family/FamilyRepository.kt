@@ -3,6 +3,9 @@ package org.jellyfin.mobile.nflix.family
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -74,12 +77,52 @@ class FamilyRepository(private val api: NflixApi) {
     }
 
     suspend fun messages(conversationId: String, before: Long? = null): List<MessageInfo> =
-        call { api.get("NflixFamily/Conversations/$conversationId/Messages", ListSerializer(MessageInfo.serializer()), mapOf("before" to before)) }
+        call { api.get("NflixFamily/Conversations/${PathId.check(conversationId)}/Messages", ListSerializer(MessageInfo.serializer()), mapOf("before" to before)) }
 
-    suspend fun send(conversationId: String, text: String) =
-        call { api.send("POST", "NflixFamily/Conversations/$conversationId/Messages", body = buildJsonObject { put("Text", text) }) }
+    suspend fun send(conversationId: String, text: String, replyToId: Long = 0) =
+        call { api.send("POST", "NflixFamily/Conversations/${PathId.check(conversationId)}/Messages", body = buildJsonObject {
+            put("Text", text)
+            if (replyToId != 0L) put("ReplyToId", replyToId)
+        }) }
 
-    suspend fun markRead(conversationId: String) = call { api.send("POST", "NflixFamily/Conversations/$conversationId/Read") }
+    // 5.8 social: reactions, polls, typing
+
+    private val allowedEmojis = listOf("\uD83D\uDC4D", "\uD83D\uDE02", "\uD83D\uDE2E", "\uD83D\uDE22", "\uD83D\uDE21", "\uD83C\uDF89", "\u2764\uFE0F", "\uD83D\uDE31")
+
+    suspend fun react(conversationId: String, messageId: Long, emoji: String): MessageInfo {
+        require(emoji in allowedEmojis) { "Réaction non autorisée" }
+        return call {
+            val el = api.send("POST", "NflixFamily/Conversations/${PathId.check(conversationId)}/Messages/$messageId/React", body = buildJsonObject { put("Emoji", emoji) })
+            api.json.decodeFromJsonElement(MessageInfo.serializer(), el ?: JsonObject(emptyMap()))
+        }
+    }
+
+    suspend fun polls(conversationId: String): List<PollInfo> =
+        call { api.get("NflixFamily/Conversations/${PathId.check(conversationId)}/Polls", ListSerializer(PollInfo.serializer())) }
+
+    suspend fun createPoll(conversationId: String, question: String, options: List<String>, multiple: Boolean): PollInfo =
+        call {
+            val el = api.send("POST", "NflixFamily/Conversations/${PathId.check(conversationId)}/Polls", body = buildJsonObject {
+                put("Question", question)
+                putJsonArray("Options") { options.forEach { add(JsonPrimitive(it)) } }
+                put("Multiple", multiple)
+            })
+            api.json.decodeFromJsonElement(PollInfo.serializer(), el ?: JsonObject(emptyMap()))
+        }
+
+    suspend fun vote(conversationId: String, pollId: Long, option: Int): PollInfo =
+        call {
+            val el = api.send("POST", "NflixFamily/Polls/$pollId/Vote?conversationId=${PathId.check(conversationId)}", body = buildJsonObject { put("Option", option) })
+            api.json.decodeFromJsonElement(PollInfo.serializer(), el ?: JsonObject(emptyMap()))
+        }
+
+    suspend fun typing(conversationId: String): List<String> = call {
+        val el = api.send("POST", "NflixFamily/Conversations/${PathId.check(conversationId)}/Typing")
+        val arr = (el as? JsonObject)?.get("Typing") as? JsonArray
+        arr?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }.orEmpty()
+    }
+
+    suspend fun markRead(conversationId: String) = call { api.send("POST", "NflixFamily/Conversations/${PathId.check(conversationId)}/Read") }
 
     suspend fun activity(): List<ActivityInfo> = call { api.get("NflixFamily/Activity", ListSerializer(ActivityInfo.serializer())) }
 

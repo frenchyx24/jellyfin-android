@@ -36,7 +36,7 @@ object Nflix {
     val Info = Color(0xFF6CB6FF)
 }
 
-private fun nflixColors(season: NflixSeasonTheme) = darkColorScheme(
+private fun nflixColors(season: NflixSeasonTheme, amoled: Boolean = false) = darkColorScheme(
     primary = Nflix.Red,
     onPrimary = Color.White,
     primaryContainer = Nflix.RedDeep,
@@ -45,9 +45,9 @@ private fun nflixColors(season: NflixSeasonTheme) = darkColorScheme(
     onSecondary = Color.White,
     secondaryContainer = season.accentDeep.copy(alpha = 0.45f).compositeOver(season.surface),
     onSecondaryContainer = Nflix.Text,
-    background = Nflix.Night,
+    background = if (amoled) Color.Black else Nflix.Night,
     onBackground = Nflix.Text,
-    surface = Nflix.Surface,
+    surface = if (amoled) Color.Black else Nflix.Surface,
     onSurface = Nflix.Text,
     surfaceVariant = Nflix.SurfaceHigh,
     onSurfaceVariant = Nflix.Muted,
@@ -77,8 +77,11 @@ private val NflixType = Typography(
 
 @Composable
 fun NflixTheme(content: @Composable () -> Unit) {
+    // One decoration clock and one theme crossfade for the whole app.
+    SeasonThemeDriver()
+    SeasonClockHost()
     val season = NflixSeason.theme
-    val colors = nflixColors(season)
+    val colors = nflixColors(season, org.jellyfin.mobile.nflix.playback.PlaybackPrefs.amoledBlack)
     val shapes = Shapes(
         extraSmall = season.chipShape,
         small = season.chipShape,
@@ -86,7 +89,27 @@ fun NflixTheme(content: @Composable () -> Unit) {
         large = RoundedCornerShape(season.cardRadius + 6.dp),
         extraLarge = RoundedCornerShape(season.cardRadius + 14.dp),
     )
-    MaterialTheme(colorScheme = colors, typography = NflixType, shapes = shapes) {
+    val scale = org.jellyfin.mobile.nflix.playback.PlaybackPrefs.textScale
+    val typography = if (scale == 1f) NflixType else NflixType.let { t ->
+        Typography(
+            displayLarge = t.displayLarge.copy(fontSize = t.displayLarge.fontSize * scale),
+            displayMedium = t.displayMedium.copy(fontSize = t.displayMedium.fontSize * scale),
+            displaySmall = t.displaySmall.copy(fontSize = t.displaySmall.fontSize * scale),
+            headlineLarge = t.headlineLarge.copy(fontSize = t.headlineLarge.fontSize * scale),
+            headlineMedium = t.headlineMedium.copy(fontSize = t.headlineMedium.fontSize * scale),
+            headlineSmall = t.headlineSmall.copy(fontSize = t.headlineSmall.fontSize * scale),
+            titleLarge = t.titleLarge.copy(fontSize = t.titleLarge.fontSize * scale),
+            titleMedium = t.titleMedium.copy(fontSize = t.titleMedium.fontSize * scale),
+            titleSmall = t.titleSmall.copy(fontSize = t.titleSmall.fontSize * scale),
+            bodyLarge = t.bodyLarge.copy(fontSize = t.bodyLarge.fontSize * scale),
+            bodyMedium = t.bodyMedium.copy(fontSize = t.bodyMedium.fontSize * scale),
+            bodySmall = t.bodySmall.copy(fontSize = t.bodySmall.fontSize * scale),
+            labelLarge = t.labelLarge.copy(fontSize = t.labelLarge.fontSize * scale),
+            labelMedium = t.labelMedium.copy(fontSize = t.labelMedium.fontSize * scale),
+            labelSmall = t.labelSmall.copy(fontSize = t.labelSmall.fontSize * scale),
+        )
+    }
+    MaterialTheme(colorScheme = colors, typography = typography, shapes = shapes) {
         // Text drawn outside a Surface otherwise inherits black content color and vanishes on the black background.
         CompositionLocalProvider(LocalContentColor provides Nflix.Text, content = content)
     }

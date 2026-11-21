@@ -2,6 +2,8 @@ package org.jellyfin.mobile.app
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.jellyfin.mobile.data.KeystoreTokenCipher
+import org.jellyfin.mobile.data.TokenCodec
 import org.jellyfin.mobile.data.dao.ServerDao
 import org.jellyfin.mobile.data.dao.UserDao
 import org.jellyfin.mobile.data.entity.ServerEntity
@@ -18,6 +20,7 @@ class ApiClientController(
     private val apiClient: ApiClient,
     private val serverDao: ServerDao,
     private val userDao: UserDao,
+    private val tokenCodec: TokenCodec = TokenCodec(KeystoreTokenCipher()),
 ) {
     private val baseDeviceInfo: DeviceInfo
         get() = jellyfin.options.deviceInfo!!
@@ -34,7 +37,7 @@ class ApiClientController(
 
     suspend fun setupUser(serverId: Long, userId: UUID, accessToken: String) {
         appPreferences.currentUserId = withContext(Dispatchers.IO) {
-            userDao.upsert(serverId, userId, accessToken)
+            userDao.upsert(serverId, userId, tokenCodec.encode(accessToken))
         }
         configureApiClientUser(userId, accessToken)
     }
@@ -59,7 +62,7 @@ class ApiClientController(
 
     suspend fun loadSavedUser(): UserEntity? = withContext(Dispatchers.IO) {
         val userId = appPreferences.currentUserId ?: return@withContext null
-        userDao.getUser(userId)
+        userDao.getUser(userId)?.let(::withDecodedToken)
     }
 
     suspend fun loadSavedServerUser(): ServerUser? {
@@ -69,21 +72,34 @@ class ApiClientController(
             userDao.getServerUser(serverId, userId)
         }
 
-        configureApiClientServer(serverUser?.server)
+        val user = withContext(Dispatchers.IO) {
+            serverUser?.let { it.copy(user = withDecodedToken(it.user)) }
+        }
+        configureApiClientServer(user?.server)
 
-        if (serverUser?.user?.accessToken != null) {
-            configureApiClientUser(serverUser.user.userId, serverUser.user.accessToken)
+        if (user?.user?.accessToken != null) {
+            configureApiClientUser(user.user.userId, user.user.accessToken)
         } else {
             resetApiClientUser()
         }
 
-        return serverUser
+        return user
     }
 
     suspend fun loadPreviouslyUsedServers(): List<ServerEntity> = withContext(Dispatchers.IO) {
         serverDao.getAllServers().filterNot { server ->
             server.id == appPreferences.currentServerId
         }
+    }
+
+    /**
+     * Decrypts the stored access token, re-sealing legacy plaintext in place.
+     * An unreadable token (broken keystore) becomes null: the user is signed out, never crashed.
+     */
+    private fun withDecodedToken(user: UserEntity): UserEntity {
+        val stored = user.accessToken ?: return user
+        val token = tokenCodec.read(stored) { replacement -> userDao.update(user.id, replacement) }
+        return user.copy(accessToken = token)
     }
 
     private fun configureApiClientServer(server: ServerEntity?) {
@@ -107,10 +123,11 @@ class ApiClientController(
 
     fun getApiClient(server: Long, user: Long): ApiClient {
         val serverUser = userDao.getServerUser(server, user) ?: error("Invalid server user combination (server=$server, user=$user)")
+        val token = withDecodedToken(serverUser.user).accessToken
 
         return jellyfin.createApi(
             baseUrl = serverUser.server.hostname,
-            accessToken = serverUser.user.accessToken,
+            accessToken = token,
             deviceInfo = baseDeviceInfo.copy(id = baseDeviceInfo.id + serverUser.user.userId),
         )
     }

@@ -27,7 +27,7 @@ sealed class Route(val key: String) {
     data class Playlist(val id: String) : Route("playlist/$id")
     data class Reader(val id: String) : Route("reader/$id")
     data class HorusDetail(val type: HorusType, val id: String) : Route("horus/${type.api}/$id")
-    data class Browse(val viewId: String, val title: String, val types: String?, val genre: String? = null) : Route("browse/$viewId/$genre")
+    data class Browse(val viewId: String, val title: String, val types: String?, val genre: String? = null, val studioId: String? = null) : Route("browse/$viewId/$genre/$studioId")
     data object Search : Route("search")
     data object NowPlaying : Route("nowplaying")
     data object Notices : Route("notices")
@@ -47,8 +47,11 @@ sealed class Route(val key: String) {
     data object SyncAccounts : Route("sync-accounts")
     data object Settings : Route("settings")
     data object Family : Route("family")
+    data object Wrapped : Route("wrapped")
     data class FamilyChat(val id: String, val title: String) : Route("family-chat/$id")
     data object SeasonalSettings : Route("seasonal-settings")
+    /** Annual preview of the themes of the coming 12 months. */
+    data object SeasonalCalendar : Route("seasonal-calendar")
     /** YouTube Music artist page (search by artist name). */
     data class YtArtist(val name: String) : Route("ytartist/${java.net.URLEncoder.encode(name, "UTF-8")}")
     /** YouTube Music album page (MPREb browse id). */

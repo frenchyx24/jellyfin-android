@@ -147,6 +147,10 @@ android {
         isCoreLibraryDesugaringEnabled = true
     }
 
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
+
     lint {
         lintConfig = file("$rootDir/android-lint.xml")
         abortOnError = false
@@ -188,6 +192,8 @@ dependencies {
     // Kotlin
     implementation(libs.bundles.coroutines)
     implementation(libs.kotlin.serialization.json)
+    // QR codes for Family invite links (pure Java, no Play Services)
+    implementation("com.google.zxing:core:3.5.3")
 
     // Core
     implementation(libs.bundles.koin)
@@ -244,6 +250,10 @@ dependencies {
     implementation(libs.bundles.androidx.room)
     ksp(libs.androidx.room.compiler)
 
+    // Performance: baseline profile installer (src/main/baseline-prof.txt), leak detection in debug only
+    implementation(libs.androidx.profileinstaller)
+    debugImplementation(libs.leakcanary)
+
     // Monitoring
     implementation(libs.slf4j.timber)
     implementation(libs.timber)
@@ -253,6 +263,11 @@ dependencies {
     testRuntimeOnly(libs.junit.engine)
     testImplementation(libs.bundles.kotest)
     testImplementation(libs.mockk)
+    // Robolectric Compose UI tests (JUnit4, run on the JUnit Platform through the vintage engine)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.compose.ui.test.junit4)
+    testRuntimeOnly(libs.junit.vintage.engine)
+    debugImplementation(libs.compose.ui.test.manifest)
     androidTestImplementation(libs.bundles.androidx.test)
 
     // Formatting rules for detekt
