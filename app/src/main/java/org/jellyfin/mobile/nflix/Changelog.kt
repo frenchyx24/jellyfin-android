@@ -5,6 +5,12 @@ object Changelog {
     data class Entry(val version: String, val title: String, val lines: List<String>)
 
     val entries: List<Entry> = listOf(
+        Entry("5.9.0", "Nflix 5.9.0", listOf(
+            "Famille : photos et GIF dans les messages, accusés de lecture, notifications groupées et nuits silencieuses.",
+            "Défis, soirées film, lien d'invitation et QR code, groupes d'amis, listes partagées ou publiques, mur des amis.",
+            "Recommandez un titre à un ami, avatars générés, vos stats et Nflix Wrapped.",
+            "Widget « Reprendre », sauvegarde des réglages, dialogues renforcés, filtres avancés et « Surprends-moi ».",
+        )),
         Entry("5.8.2", "Nflix 5.8.2", listOf(
             "Correction du plantage au lancement (épinglage de certificat).",
         )),

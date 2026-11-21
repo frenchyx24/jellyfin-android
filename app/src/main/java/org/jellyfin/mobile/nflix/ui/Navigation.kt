@@ -27,7 +27,7 @@ sealed class Route(val key: String) {
     data class Playlist(val id: String) : Route("playlist/$id")
     data class Reader(val id: String) : Route("reader/$id")
     data class HorusDetail(val type: HorusType, val id: String) : Route("horus/${type.api}/$id")
-    data class Browse(val viewId: String, val title: String, val types: String?, val genre: String? = null) : Route("browse/$viewId/$genre")
+    data class Browse(val viewId: String, val title: String, val types: String?, val genre: String? = null, val studioId: String? = null) : Route("browse/$viewId/$genre/$studioId")
     data object Search : Route("search")
     data object NowPlaying : Route("nowplaying")
     data object Notices : Route("notices")

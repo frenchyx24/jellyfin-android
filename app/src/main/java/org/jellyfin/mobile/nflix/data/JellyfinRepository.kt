@@ -19,6 +19,7 @@ enum class LibrarySort(val label: String, val sortBy: String, val order: String)
     Rating("Note", "CommunityRating,SortName", "Descending"),
     Played("Vu récemment", "DatePlayed,SortName", "Descending"),
     Random("Aléatoire", "Random", "Ascending"),
+    Popular("Plus regardés", "PlayCount,CommunityRating,SortName", "Descending"),
 }
 
 enum class LibraryFilter(val label: String) { All("Tout"), Unplayed("Non vus"), Favorites("Favoris"), Resumable("En cours") }

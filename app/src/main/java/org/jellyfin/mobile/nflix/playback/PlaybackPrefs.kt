@@ -12,7 +12,16 @@ import org.jellyfin.mobile.nflix.playback.PlaybackMemory.TrackChoice
 object PlaybackPrefs {
     private lateinit var prefs: SharedPreferences
 
+    lateinit var appContext: Context
+        private set
+
+    /** Widgets and receivers may run before the Application finished init: initialise lazily. */
+    fun ensure(context: Context) {
+        if (!::prefs.isInitialized) init(context)
+    }
+
     fun init(context: Context) {
+        appContext = context.applicationContext
         prefs = context.getSharedPreferences("nflix_playback", Context.MODE_PRIVATE)
     }
 
@@ -59,4 +68,21 @@ object PlaybackPrefs {
     var dataSaver: Boolean
         get() = prefs.getBoolean("data_saver", false)
         set(value) = prefs.edit { putBoolean("data_saver", value) }
+
+    const val DIALOGUE_GAIN_MB = 600
+
+    var dialogueBoost: Boolean
+        get() = prefs.getBoolean("dialogue_boost", false)
+        set(value) = prefs.edit { putBoolean("dialogue_boost", value) }
+
+    /** Shortcut / widget: last started title. */
+    fun rememberLast(id: String, name: String) = prefs.edit { putString("last_id", id); putString("last_name", name) }
+
+    val lastId: String? get() = if (::prefs.isInitialized) prefs.getString("last_id", null) else null
+
+    val lastName: String? get() = if (::prefs.isInitialized) prefs.getString("last_name", null) else null
+
+    var lastSeenChangelog: String?
+        get() = prefs.getString("last_changelog", null)
+        set(value) = prefs.edit { putString("last_changelog", value) }
 }

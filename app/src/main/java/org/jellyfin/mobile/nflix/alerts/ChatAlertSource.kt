@@ -24,7 +24,8 @@ class ChatAlertSource(private val api: () -> NflixApi?) : LocalAlertSource {
                 val seen = cursor(c.id)
                 store(c.id, last.id)
                 if (seen < 0 || last.id <= seen || last.mine || c.unread == 0) return@mapNotNull null
-                val body = if (c.unread > 1) "${c.unread} nouveaux messages · ${last.senderName} : ${last.text}" else "${last.senderName} : ${last.text}"
+                val text = if (last.imageId != null) "📷 Photo" else last.text
+                val body = if (c.unread > 1) "${c.unread} nouveaux messages · ${last.senderName} : $text" else "${last.senderName} : $text"
                 NflixAlert(id = -(0x40000000L + (c.id.hashCode().toLong() and 0x3fffffff)), kind = AlertKind.Chat.wire, title = c.title.ifBlank { "Famille" }, body = body.take(300))
             }.take(5)
     }

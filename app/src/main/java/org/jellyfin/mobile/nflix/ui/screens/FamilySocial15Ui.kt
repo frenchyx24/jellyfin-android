@@ -73,7 +73,11 @@ fun ChatImage(imageId: String) {
         value = runCatching {
             val bytes = deps.social15.image(imageId)
             withContext(Dispatchers.Default) {
-                val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = 1 }
+                val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+                var sample = 1
+                while (maxOf(bounds.outWidth, bounds.outHeight) / sample > 1080) sample *= 2
+                val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
                 android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)?.asImageBitmap()
             }
         }.getOrNull()
@@ -104,7 +108,9 @@ fun GeneratedAvatarArt(seed: String, initials: String, size: Int) {
 fun qrBitmap(text: String, px: Int = 512): android.graphics.Bitmap {
     val m = com.google.zxing.qrcode.QRCodeWriter().encode(text, com.google.zxing.BarcodeFormat.QR_CODE, px, px)
     val bmp = android.graphics.Bitmap.createBitmap(px, px, android.graphics.Bitmap.Config.RGB_565)
-    for (x in 0 until px) for (y in 0 until px) bmp.setPixel(x, y, if (m[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
+    val pixels = IntArray(px * px)
+    for (y in 0 until px) for (x in 0 until px) pixels[y * px + x] = if (m[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE
+    bmp.setPixels(pixels, 0, px, 0, 0, px, px)
     return bmp
 }
 
@@ -328,7 +334,7 @@ object FamilyNightFormat {
             else -> date
         }
         var start = date.atTime(hour, 0).atZone(now.zone)
-        if (start.isBefore(now)) start = start.plusDays(1)
+        if (start.isBefore(now)) start = if (day == 2) start.plusWeeks(1) else start.plusDays(1)
         return start.withZoneSameInstant(java.time.ZoneOffset.UTC).toOffsetDateTime().toString()
     }
 

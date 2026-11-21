@@ -55,14 +55,23 @@ data class WallItem(@SerialName("UserName") val userName: String = "", @SerialNa
 @Serializable
 data class WallInfo(@SerialName("OptedIn") val optedIn: Boolean = false, @SerialName("Entries") val entries: List<WallItem> = emptyList())
 
+/** Server ids placed in URL paths: only letters, digits and dashes (unit-tested). */
+object PathId {
+    private val SAFE = Regex("^[A-Za-z0-9-]+$")
+
+    fun isValid(id: String) = SAFE.matches(id)
+
+    fun check(id: String): String = id.takeIf(::isValid) ?: throw FamilyException("Identifiant invalide.")
+}
+
 /** Links and texts shared between people (unit-tested). */
 object SocialLinks {
     fun inviteLink(server: String, token: String) = "${server.trimEnd('/')}/web/#/nflix-family?invite=$token"
 
     /** Accepts the full link or the bare 32-hex token. */
     fun parseInvite(text: String): String? {
-        val t = text.trim().substringAfter("invite=", text.trim()).take(64)
-        return t.lowercase().takeIf { it.length == 32 && it.all { c -> c in '0'..'9' || c in 'a'..'f' } }
+        val t = text.trim().substringAfter("invite=", text.trim()).lowercase().takeWhile { it in '0'..'9' || it in 'a'..'f' }
+        return t.takeIf { it.length == 32 }
     }
 
     fun publicListLink(server: String, token: String) = "${server.trimEnd('/')}/web/#/nflix-list?token=$token"
@@ -98,10 +107,10 @@ class FamilySocial15Repository(private val api: NflixApi) {
     private fun <T> decode(s: kotlinx.serialization.KSerializer<T>, e: JsonElement?) = api.json.decodeFromJsonElement(s, e ?: JsonObject(emptyMap()))
 
     suspend fun sendImage(conversationId: String, bytes: ByteArray): MessageInfo = call {
-        decode(MessageInfo.serializer(), api.sendBytes("POST", "NflixFamily/Conversations/$conversationId/Images", bytes, "application/octet-stream"))
+        decode(MessageInfo.serializer(), api.sendBytes("POST", "NflixFamily/Conversations/${PathId.check(conversationId)}/Images", bytes, "application/octet-stream"))
     }
 
-    suspend fun image(imageId: String): ByteArray = call { api.getBytes("NflixFamily/Images/$imageId") }
+    suspend fun image(imageId: String): ByteArray = call { api.getBytes("NflixFamily/Images/${PathId.check(imageId)}") }
 
     suspend fun challenges(): List<ChallengeInfo> = runCatching { api.get("NflixFamily/Challenges", ListSerializer(ChallengeInfo.serializer())) }.getOrDefault(emptyList())
 
@@ -111,16 +120,16 @@ class FamilySocial15Repository(private val api: NflixApi) {
         api.send("POST", "NflixFamily/Nights", body = buildJsonObject { put("Title", title); put("StartUtc", startUtcIso); itemId?.let { put("ItemId", it) } })
     }
 
-    suspend fun toggleGoing(id: String) = call { api.send("POST", "NflixFamily/Nights/$id/Going") }
+    suspend fun toggleGoing(id: String) = call { api.send("POST", "NflixFamily/Nights/${PathId.check(id)}/Going") }
 
-    suspend fun cancelNight(id: String) = call { api.send("DELETE", "NflixFamily/Nights/$id") }
+    suspend fun cancelNight(id: String) = call { api.send("DELETE", "NflixFamily/Nights/${PathId.check(id)}") }
 
     suspend fun createInviteLink(): String = call {
         api.send("POST", "NflixFamily/InviteLinks")?.jsonObject?.get("Token")?.jsonPrimitive?.content ?: throw FamilyException("Lien indisponible.")
     }
 
     suspend fun joinByLink(token: String): String = call {
-        api.send("POST", "NflixFamily/InviteLinks/$token/Join")?.jsonObject?.get("FamilyName")?.jsonPrimitive?.content.orEmpty()
+        api.send("POST", "NflixFamily/InviteLinks/${PathId.check(token)}/Join")?.jsonObject?.get("FamilyName")?.jsonPrimitive?.content.orEmpty()
     }
 
     suspend fun groups(): List<GroupInfo> = runCatching { api.get("NflixFamily/Groups", ListSerializer(GroupInfo.serializer())) }.getOrDefault(emptyList())
@@ -141,7 +150,7 @@ class FamilySocial15Repository(private val api: NflixApi) {
         }))
     }
 
-    suspend fun publicList(token: String): ListInfo = call { api.get("NflixFamily/Lists/Public/$token", ListInfo.serializer()) }
+    suspend fun publicList(token: String): ListInfo = call { api.get("NflixFamily/Lists/Public/${PathId.check(token)}", ListInfo.serializer()) }
 
     suspend fun wall(): WallInfo = runCatching { api.get("NflixFamily/Wall", WallInfo.serializer()) }.getOrDefault(WallInfo())
 

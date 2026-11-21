@@ -147,7 +147,10 @@ class AppDeps(
                 return@launch
             }
             // Opt-in friends wall (the server ignores it when the user did not opt in).
-            jellyfin.cachedItem(selectedId.toString())?.let { launch { social15.watched(it.id, it.seriesName ?: it.name) } }
+            jellyfin.cachedItem(selectedId.toString())?.let {
+                launch { social15.watched(it.id, it.seriesName ?: it.name) }
+                org.jellyfin.mobile.nflix.widget.ResumeWidget.onTitleStarted(org.jellyfin.mobile.nflix.playback.PlaybackPrefs.appContext, it.seriesId ?: it.id, it.seriesName ?: it.name)
+            }
             val local = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 val download = downloadDao.getDownloadByItemId(selectedId) ?: return@withContext false
                 if (download.status != DownloadStatus.DOWNLOADED) return@withContext false

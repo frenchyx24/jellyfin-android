@@ -32,10 +32,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Sort
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Casino
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.VideoLibrary
 import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -64,6 +67,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import org.jellyfin.mobile.nflix.data.Item
+import org.jellyfin.mobile.nflix.data.AdvancedFilter
 import org.jellyfin.mobile.nflix.data.LibraryFilter
 import org.jellyfin.mobile.nflix.data.LibrarySort
 import org.jellyfin.mobile.nflix.ui.ContentBottomPadding
@@ -102,7 +106,7 @@ fun BrowseScreen(route: Route.Browse) {
             IconButton(onClick = { navigator.back() }) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Retour") }
             Text(route.genre ?: route.title, style = MaterialTheme.typography.headlineSmall)
         }
-        BrowseGrid(viewId = route.viewId.takeIf { it != "all" }, types = route.types, key = route.key, genre = route.genre)
+        BrowseGrid(viewId = route.viewId.takeIf { it != "all" }, types = route.types, key = route.key, genre = route.genre, studioId = route.studioId)
     }
 }
 
@@ -151,6 +155,7 @@ fun BrowseGrid(
     header: (LazyGridScope.() -> Unit)? = null,
     onItemClick: ((Item, String) -> Unit)? = null,
     personId: String? = null,
+    studioId: String? = null,
 ) {
     val deps = LocalDeps.current
     val navigator = LocalNavigator.current
@@ -158,11 +163,16 @@ fun BrowseGrid(
     var filter by rememberSaveable(key) { mutableStateOf(initialFilter) }
     var selectedGenre by rememberSaveable(key) { mutableStateOf(genre) }
     var sortMenu by remember { mutableStateOf(false) }
-    val items = remember(key, sort, filter, selectedGenre) { mutableStateListOf<Item>() }
-    var total by remember(key, sort, filter, selectedGenre) { mutableIntStateOf(-1) }
-    var loading by remember(key, sort, filter, selectedGenre) { mutableStateOf(false) }
-    var loadError by remember(key, sort, filter, selectedGenre) { mutableStateOf<String?>(null) }
-    var requestVersion by remember(key, sort, filter, selectedGenre) { mutableLongStateOf(0L) }
+    var decade by rememberSaveable(key) { mutableStateOf<Int?>(null) }
+    var minRating by rememberSaveable(key) { mutableStateOf<Int?>(null) }
+    var filterMenu by remember { mutableStateOf(false) }
+    val advanced = remember(decade, minRating, studioId) { AdvancedFilter(decade, minRating, studioId) }
+    val video = !square && types?.contains("Music") != true && types != "Playlist"
+    val items = remember(key, sort, filter, selectedGenre, advanced) { mutableStateListOf<Item>() }
+    var total by remember(key, sort, filter, selectedGenre, advanced) { mutableIntStateOf(-1) }
+    var loading by remember(key, sort, filter, selectedGenre, advanced) { mutableStateOf(false) }
+    var loadError by remember(key, sort, filter, selectedGenre, advanced) { mutableStateOf<String?>(null) }
+    var requestVersion by remember(key, sort, filter, selectedGenre, advanced) { mutableLongStateOf(0L) }
     val genres = rememberLoad("genres", viewId) { deps.jellyfin.genres(viewId) }.value.orEmpty()
     val grid = rememberLazyGridState()
     val scope = rememberCoroutineScope()
@@ -175,7 +185,7 @@ fun BrowseGrid(
         val request = ++requestVersion
         val start = items.size
         try {
-            val page = deps.jellyfin.items(parentId = viewId, includeTypes = types, sort = sort, filter = filter, start = start, limit = PAGE, genre = selectedGenre, personId = personId)
+            val page = deps.jellyfin.items(parentId = viewId, includeTypes = types, sort = sort, filter = filter, start = start, limit = PAGE, genre = selectedGenre, personId = personId, extra = advanced.query())
             if (request == requestVersion) {
                 total = page.total
                 val existing = items.asSequence().map { it.id }.toHashSet()
@@ -190,7 +200,7 @@ fun BrowseGrid(
         }
     }
 
-    LaunchedEffect(key, sort, filter, selectedGenre) {
+    LaunchedEffect(key, sort, filter, selectedGenre, advanced) {
         items.clear()
         total = -1
         loadError = null
@@ -198,7 +208,7 @@ fun BrowseGrid(
         requestVersion++
         loadMore()
     }
-    LaunchedEffect(grid, key, sort, filter, selectedGenre, items.size, total, loadError, loading) {
+    LaunchedEffect(grid, key, sort, filter, selectedGenre, advanced, items.size, total, loadError, loading) {
         snapshotFlow { grid.layoutInfo.visibleItemsInfo.lastOrNull()?.index }
             .distinctUntilChanged()
             .filter { it != null }
@@ -223,6 +233,45 @@ fun BrowseGrid(
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(countLabel, style = MaterialTheme.typography.labelMedium, color = Nflix.Muted, modifier = Modifier.weight(1f))
+                    if (video) {
+                        NChip("Surprends-moi", false, Icons.Rounded.Casino) {
+                            scope.launch {
+                                val pick = runCatching {
+                                    deps.jellyfin.items(parentId = viewId, includeTypes = types, sort = LibrarySort.Random, filter = LibraryFilter.Unplayed, limit = 1, genre = selectedGenre, personId = personId, extra = advanced.query(), force = true).items.firstOrNull()
+                                }.getOrNull()
+                                if (pick != null) navigator.open(Route.Item(pick.id, "surprise-$key"))
+                                else org.jellyfin.mobile.nflix.ui.Toasts.show("Aucun titre non vu avec ces filtres.", org.jellyfin.mobile.nflix.ui.ToastKind.Warning)
+                            }
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        Box {
+                            NChip(if (advanced.active) "Filtres · ${advanced.count}" else "Filtres", advanced.active, Icons.Rounded.Tune) { filterMenu = true }
+                            DropdownMenu(expanded = filterMenu, onDismissRequest = { filterMenu = false }) {
+                                Text("Décennie", style = MaterialTheme.typography.labelMedium, color = Nflix.Muted, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+                                AdvancedFilter.DECADES.forEach { d ->
+                                    DropdownMenuItem(
+                                        text = { Text(AdvancedFilter.decadeLabel(d)) },
+                                        leadingIcon = { if (d == decade) Icon(Icons.Rounded.Check, null, tint = Nflix.Red) },
+                                        onClick = { decade = if (decade == d) null else d },
+                                    )
+                                }
+                                HorizontalDivider()
+                                Text("Note minimale", style = MaterialTheme.typography.labelMedium, color = Nflix.Muted, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+                                AdvancedFilter.RATINGS.forEach { r ->
+                                    DropdownMenuItem(
+                                        text = { Text(AdvancedFilter.ratingLabel(r)) },
+                                        leadingIcon = { if (r == minRating) Icon(Icons.Rounded.Check, null, tint = Nflix.Red) },
+                                        onClick = { minRating = if (minRating == r) null else r },
+                                    )
+                                }
+                                if (advanced.active) {
+                                    HorizontalDivider()
+                                    DropdownMenuItem(text = { Text("Effacer les filtres") }, onClick = { decade = null; minRating = null; filterMenu = false })
+                                }
+                            }
+                        }
+                        Spacer(Modifier.width(8.dp))
+                    }
                     Box {
                         NChip(sort.label, false, Icons.AutoMirrored.Rounded.Sort) { sortMenu = true }
                         DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {

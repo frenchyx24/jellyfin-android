@@ -501,7 +501,7 @@ private fun NoFamily(refresh: () -> Unit) {
     var joinOpen by remember { mutableStateOf(false) }
     Column(Modifier.padding(horizontal = 14.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Column(Modifier.fillMaxWidth().padding(vertical = 10.dp).appear(0), horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(Modifier.size(84.dp).clip(RoundedCornerShape(26.dp)).background(Brush.linearGradient(listOf(Nflix.Red, Color(0xFF5A0610)))), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(84.dp).clip(RoundedCornerShape(26.dp)).background(Brush.linearGradient(listOf(Nflix.Red, Nflix.RedDeep))), contentAlignment = Alignment.Center) {
                 Icon(Icons.Rounded.Groups, null, tint = Color.White, modifier = Modifier.size(46.dp))
             }
             Spacer(Modifier.height(12.dp))
@@ -791,7 +791,7 @@ fun PinDialog(member: FamilyMemberInfo, error: String?, busy: Boolean, onDismiss
     }
     androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
         Column(
-            Modifier.clip(RoundedCornerShape(28.dp)).background(Color(0xFF141417)).padding(24.dp),
+            Modifier.clip(RoundedCornerShape(28.dp)).background(Nflix.Surface).padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             MemberAvatar(member, 72)
@@ -1059,7 +1059,7 @@ private fun MessagesTab(outerReload: Int) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     if (c.kind == "family") {
-                        Box(Modifier.size(44.dp).clip(CircleShape).background(Brush.linearGradient(listOf(Nflix.Red, Color(0xFF6B0A10)))), contentAlignment = Alignment.Center) {
+                        Box(Modifier.size(44.dp).clip(CircleShape).background(Brush.linearGradient(listOf(Nflix.Red, Nflix.RedDeep))), contentAlignment = Alignment.Center) {
                             Text(FamilyFormat.initials(c.title), color = Color.White, fontWeight = FontWeight.Bold)
                         }
                     } else {
@@ -1135,7 +1135,7 @@ fun FamilyChatScreen(conversationId: String, title: String) {
                 Modifier.fillMaxWidth().background(Nflix.Surface).statusBarsPadding().padding(start = 64.dp, end = 16.dp, top = 10.dp, bottom = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Box(Modifier.size(40.dp).clip(CircleShape).background(Brush.linearGradient(listOf(Nflix.Red, Color(0xFF6B0A10)))), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(40.dp).clip(CircleShape).background(Brush.linearGradient(listOf(Nflix.Red, Nflix.RedDeep))), contentAlignment = Alignment.Center) {
                     Text(FamilyFormat.initials(title), color = Color.White, fontWeight = FontWeight.Bold)
                 }
                 Spacer(Modifier.width(12.dp))
@@ -1217,7 +1217,7 @@ fun FamilyChatScreen(conversationId: String, title: String) {
                 val picker = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()) { uri ->
                     if (uri != null) scope.launch {
                         sending = true
-                        val bytes = runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } } }.getOrNull()
+                        val bytes = runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { context.contentResolver.openInputStream(uri)?.use { org.jellyfin.mobile.nflix.data.readCapped(it, 3 * 1024 * 1024) } } }.getOrNull()
                         if (bytes == null || bytes.size > 3 * 1024 * 1024) {
                             org.jellyfin.mobile.nflix.ui.Toasts.show("Image trop lourde (3 Mo max).", org.jellyfin.mobile.nflix.ui.ToastKind.Warning)
                         } else if (attempt { deps.social15.sendImage(conversationId, bytes) }) {
@@ -1303,7 +1303,7 @@ private fun Bubble(m: MessageInfo, grouped: Boolean, conversationId: String = ""
                     })
                 }
                 .clip(shape)
-                .background(if (m.mine) Brush.linearGradient(listOf(Nflix.Red, Color(0xFFB20710))) else Brush.linearGradient(listOf(Nflix.SurfaceHigh, Nflix.SurfaceHigh)))
+                .background(if (m.mine) Brush.linearGradient(listOf(Nflix.Red, Nflix.RedDeep)) else Brush.linearGradient(listOf(Nflix.SurfaceHigh, Nflix.SurfaceHigh)))
                 .padding(horizontal = 12.dp, vertical = 7.dp),
         ) {
             if (!m.mine && !grouped) Text(m.senderName, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Nflix.Info)
@@ -1355,7 +1355,7 @@ fun WhoIsWatchingScreen(me: FamilyMe, onDone: () -> Unit) {
     LaunchedEffect(Unit) { title.animateTo(1f, tween(450)) }
     Box(
         Modifier.fillMaxSize()
-            .background(Brush.radialGradient(listOf(Color(0xFF3A0508), Color.Black), radius = 1400f))
+            .background(Brush.radialGradient(listOf(Nflix.RedDeep.copy(alpha = .55f), Nflix.Night), radius = 1400f))
             .clickable(enabled = false) {},
         contentAlignment = Alignment.Center,
     ) {

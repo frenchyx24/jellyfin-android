@@ -36,6 +36,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.material.icons.rounded.RemoveDone
 import androidx.compose.material.icons.rounded.Report
 import androidx.compose.material.icons.rounded.Groups
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.DoneAll
 import androidx.compose.material.icons.rounded.RadioButtonUnchecked
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -345,7 +346,7 @@ private fun Actions(item: Item, accent: Color, onChanged: () -> Unit) {
             if (resumable) ActionIcon(Icons.Rounded.Replay, "Du début") { deps.play(scope, item, fromStart = true) }
             if (item.type == "Movie" || item.type == "Episode") ActionIcon(Icons.Rounded.Groups, "Soirée", accent = accent) { startParty(deps, scope, item) }
             var shareOpen by remember { mutableStateOf(false) }
-            ActionIcon(Icons.Rounded.Groups, "Recommander", accent = accent) { shareOpen = true }
+            ActionIcon(Icons.Rounded.Share, "Recommander", accent = accent) { shareOpen = true }
             if (shareOpen) ShareTitleDialog(item) { shareOpen = false }
             ActionIcon(Icons.Rounded.Report, "Signaler", accent = accent) { org.jellyfin.mobile.nflix.ui.ItemMenu.report(item) }
             val remoteTrailer = item.trailers.firstNotNullOfOrNull { org.jellyfin.mobile.nflix.ui.TrailerSource.youtubeId(it.url) }
@@ -413,8 +414,17 @@ private fun Overview(item: Item, modifier: Modifier = Modifier) {
             Spacer(Modifier.height(10.dp))
             Text("Réalisation : $directors", style = MaterialTheme.typography.bodySmall, color = Nflix.Muted)
         }
-        val studio = item.studios.firstOrNull()?.name
-        if (studio != null) Text("Studio : $studio", style = MaterialTheme.typography.bodySmall, color = Nflix.Muted)
+        val studio = item.studios.firstOrNull()
+        if (studio != null) {
+            Text(
+                "Studio : ${studio.name}  ›",
+                style = MaterialTheme.typography.bodySmall,
+                color = Nflix.Muted,
+                modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable(enabled = studio.id.isNotBlank()) {
+                    navigator.open(Route.Browse("all", studio.name, "Movie,Series", studioId = studio.id))
+                }.padding(vertical = 4.dp),
+            )
+        }
     }
 }
 

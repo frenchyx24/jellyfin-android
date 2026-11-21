@@ -349,6 +349,9 @@ fun SettingsScreen() {
                     Column(Modifier.padding(horizontal = 18.dp, vertical = 10.dp)) {
                         var ds by remember { mutableStateOf(org.jellyfin.mobile.nflix.playback.PlaybackPrefs.dataSaver) }
                         PrefSwitch(Icons.Rounded.DataSaverOn, SettingTints.Mint, "Économiseur de données", "Les images sont téléchargées en plus petit, les aperçus et vidéos en fond sont coupés.", ds) { ds = it; org.jellyfin.mobile.nflix.playback.PlaybackPrefs.dataSaver = it }
+                        var boost by remember { mutableStateOf(org.jellyfin.mobile.nflix.playback.PlaybackPrefs.dialogueBoost) }
+                        PrefSwitch(Icons.Rounded.MusicNote, SettingTints.Rose, "Dialogues renforcés", "Voix plus audibles sur les films mixés trop bas.", boost) { boost = it; org.jellyfin.mobile.nflix.playback.PlaybackPrefs.dialogueBoost = it }
+                        SettingsBackupRow()
                     }
                 }
             }

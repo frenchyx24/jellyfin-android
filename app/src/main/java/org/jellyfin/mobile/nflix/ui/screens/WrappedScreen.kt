@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.jellyfin.mobile.nflix.data.Item
 import org.jellyfin.mobile.nflix.ui.LocalDeps
+import org.jellyfin.mobile.nflix.ui.Nflix
 
 /** Yearly personal stats ("Nflix Wrapped"), computed on the phone from played titles. */
 object WrappedStats {
@@ -82,10 +83,16 @@ fun WrappedScreen() {
         }.getOrDefault(emptyList())
         value = WrappedStats.compute(items.map(WrappedStats::entry), year)
     }
-    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFF3A0508), Color.Black)))) {
+    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Nflix.RedDeep.copy(alpha = .55f), Nflix.Night)))) {
         val r = result
         if (r == null) {
-            CircularProgressIndicator(Modifier.padding(80.dp))
+            CircularProgressIndicator(Modifier.padding(80.dp), color = Nflix.Red)
+        } else if (r.titles == 0) {
+            Column(Modifier.fillMaxSize().statusBarsPadding().padding(24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Nflix Wrapped $year", fontSize = 30.sp, fontWeight = FontWeight.Black, color = Color.White, modifier = Modifier.padding(start = 40.dp))
+                Text("Rien encore cette année", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 40.dp))
+                Text("Regardez quelques films ou épisodes : vos stats apparaîtront ici.", color = Color.White.copy(alpha = .8f), fontSize = 14.sp)
+            }
         } else {
             Column(Modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text("Nflix Wrapped $year", fontSize = 30.sp, fontWeight = FontWeight.Black, color = Color.White, modifier = Modifier.padding(start = 40.dp))

@@ -342,15 +342,32 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application),
             setHandleAudioBecomingNoisy(true)
         }.build().apply {
             addListener(this@PlayerViewModel)
+            addListener(object : Player.Listener {
+                // Dialogue boost: louder speech on quiet mixes (LoudnessEnhancer on the player session).
+                override fun onAudioSessionIdChanged(audioSessionId: Int) = applyDialogueBoost(audioSessionId)
+            })
             applyDefaultAudioAttributes(C.AUDIO_CONTENT_TYPE_MOVIE)
             if (appPreferences.exoPlayerDirectPlayAss) get<AssHandler>().init(this)
         }
+    }
+
+    private var loudness: android.media.audiofx.LoudnessEnhancer? = null
+
+    fun applyDialogueBoost(sessionId: Int = playerOrNull?.audioSessionId ?: 0) {
+        runCatching { loudness?.release() }
+        loudness = null
+        if (sessionId == 0 || !org.jellyfin.mobile.nflix.playback.PlaybackPrefs.dialogueBoost) return
+        loudness = runCatching {
+            android.media.audiofx.LoudnessEnhancer(sessionId).apply { setTargetGain(org.jellyfin.mobile.nflix.playback.PlaybackPrefs.DIALOGUE_GAIN_MB); enabled = true }
+        }.onFailure { Timber.w(it, "Dialogue boost unavailable") }.getOrNull()
     }
 
     /**
      * Release the current ExoPlayer and stop/release the current MediaSession
      */
     private fun releasePlayer() {
+        runCatching { loudness?.release() }
+        loudness = null
         notificationHelper.dismissNotification()
         mediaSession.isActive = false
         mediaSession.release()

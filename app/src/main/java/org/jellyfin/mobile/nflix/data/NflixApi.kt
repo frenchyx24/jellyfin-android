@@ -203,18 +203,19 @@ class NflixApi(
         }
     }
 
-    /** Sends raw bytes (image uploads); the media type is sent verbatim. */
-    /** Raw authenticated GET (chat images), size capped. */
+    /** Raw authenticated GET (chat images), size capped while streaming. */
     suspend fun getBytes(path: String, maxBytes: Int = 4 * 1024 * 1024): ByteArray = withContext(Dispatchers.IO) {
         val target = url(path, emptyMap())
         val request = Request.Builder().url(target).header("Authorization", authorization()).get().build()
         client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) throw NflixHttpException(response.code, "HTTP ${response.code} ${target.encodedPath}")
-            val bytes = response.body?.bytes() ?: ByteArray(0)
-            require(bytes.size <= maxBytes) { "Image trop lourde" }
-            bytes
+            val body = response.body ?: return@use ByteArray(0)
+            if (body.contentLength() > maxBytes) throw IOException("Image trop lourde")
+            body.byteStream().use { readCapped(it, maxBytes) } ?: throw IOException("Image trop lourde")
         }
     }
+
+    /** Sends raw bytes (image uploads); the media type is sent verbatim. */
 
     suspend fun sendBytes(method: String, path: String, bytes: ByteArray, mediaType: String, query: Map<String, Any?> = emptyMap()): JsonElement? = withContext(Dispatchers.IO) {
         val target = url(path, query)
@@ -267,3 +268,18 @@ class TtlCache<V : Any>(private val ttlMs: Long) {
 }
 
 internal fun JsonElement?.obj(): JsonObject? = runCatching { this?.jsonObject }.getOrNull()
+
+/** Reads at most [maxBytes] from [input]; null when the stream is longer. */
+fun readCapped(input: java.io.InputStream, maxBytes: Int): ByteArray? {
+    val out = java.io.ByteArrayOutputStream()
+    val buffer = ByteArray(16 * 1024)
+    var total = 0
+    while (true) {
+        val n = input.read(buffer)
+        if (n < 0) break
+        total += n
+        if (total > maxBytes) return null
+        out.write(buffer, 0, n)
+    }
+    return out.toByteArray()
+}
