@@ -239,7 +239,7 @@ fun SyncAccountsScreen() {
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text("Importer depuis un lien", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                Text("Collez le lien de partage d'une playlist ou d'un album Deezer, Spotify ou YouTube Music. Aucun compte nécessaire.", style = MaterialTheme.typography.bodySmall, color = Nflix.Muted)
+                Text("Collez le lien de partage d'une playlist ou d'un album Deezer, Spotify ou Nflix Musique. Aucun compte nécessaire.", style = MaterialTheme.typography.bodySmall, color = Nflix.Muted)
                 androidx.compose.material3.OutlinedTextField(
                     value = link, onValueChange = { link = it }, singleLine = true,
                     placeholder = { Text("https://…") }, modifier = Modifier.fillMaxWidth(),
