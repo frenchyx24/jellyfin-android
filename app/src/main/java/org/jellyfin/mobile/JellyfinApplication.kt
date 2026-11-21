@@ -24,6 +24,7 @@ class JellyfinApplication : Application() {
         // Keep the last uncaught exception on disk so a crash leaves a trace.
         CrashLog.install(this)
         org.jellyfin.mobile.nflix.playback.PlaybackPrefs.init(this)
+        org.jellyfin.mobile.nflix.perf.PerfWatch.startAnrWatch(this)
 
         if (BuildConfig.DEBUG) {
             // Enable WebView debugging

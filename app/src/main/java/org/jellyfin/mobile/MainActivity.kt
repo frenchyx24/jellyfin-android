@@ -113,6 +113,7 @@ class MainActivity : AppCompatActivity() {
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
         )
         super.onCreate(savedInstanceState)
+        if (savedInstanceState == null) org.jellyfin.mobile.nflix.perf.PerfWatch.measureColdStart(this)
         setContentView(R.layout.activity_main)
 
         // Nflix update prompt, drawn above every screen

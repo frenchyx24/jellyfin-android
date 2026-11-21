@@ -409,7 +409,8 @@ fun SettingsScreen() {
                 }
             }
             item {
-                Text("Nflix ${BuildConfig.VERSION_NAME}", color = Nflix.Muted.copy(alpha = .6f), fontSize = 11.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(top = 8.dp).settleIn(6))
+                val coldStart = remember { org.jellyfin.mobile.nflix.perf.PerfWatch.medianColdStart(context) }
+                Text("Nflix ${BuildConfig.VERSION_NAME}" + (coldStart?.let { " · démarrage $it ms" } ?: ""), color = Nflix.Muted.copy(alpha = .6f), fontSize = 11.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(top = 8.dp).settleIn(6))
             }
         }
         BackButton()
