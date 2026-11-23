@@ -205,10 +205,13 @@ fun HomeScreen() {
                 }
                 data is Load.Failed -> item(key = "home-error") { EmptyState(Icons.Rounded.Info, "Accueil indisponible", data.message) }
                 home != null -> {
-                    // Distributor logos + rows sit right after "Nouveautés" (or at the end).
-                    val distributorsAfter = home.rows.firstOrNull { it.key == "fresh" }?.key ?: home.rows.lastOrNull()?.key
+                    // Top of home: Reprendre → À suivre → Plateformes → Top 10, then the other rows unchanged.
+                    val leading = home.rows.filter { it.key == "resume" || it.key == "nextup" }
+                    val top = home.rows.filter { it.key == "top" }
+                    val ordered = leading + top + home.rows.filter { it.key != "resume" && it.key != "nextup" && it.key != "top" }
+                    val distributorsAfter = leading.lastOrNull()?.key
                     if (distributorsAfter == null) distributorSection(home.distributors)
-                    home.rows.forEach { row ->
+                    ordered.forEach { row ->
                         rowSection(
                             key = row.key,
                             title = row.title,
