@@ -30,6 +30,9 @@ class FamilyRepository(private val api: NflixApi) {
 
     suspend fun me(): FamilyMe = call { api.get("NflixFamily/Me", FamilyMe.serializer()) }.also { FamilyBadges.update(it) }
 
+    /** The signed-in account's own Mira picture, so the family picker shows it without an extra call. */
+    suspend fun refreshAvatars() = MiraAvatars.load(api)
+
     suspend fun createFamily(name: String) = call { api.send("POST", "NflixFamily/Families", body = buildJsonObject { put("Name", name) }) }
 
     suspend fun renameFamily(name: String) = call { api.send("PATCH", "NflixFamily/Families", body = buildJsonObject { put("Name", name) }) }
@@ -47,17 +50,23 @@ class FamilyRepository(private val api: NflixApi) {
 
     suspend fun memberAction(userId: String, action: String) = call { api.send("POST", "NflixFamily/Members/$userId/$action") }
 
-    suspend fun updateProfile(userId: String, displayName: String? = null, color: String? = null, isKid: Boolean? = null, pin: String? = null, clearPin: Boolean = false) = call {
+    suspend fun updateProfile(userId: String, displayName: String? = null, color: String? = null, useUserImage: Boolean? = null, isKid: Boolean? = null, pin: String? = null, clearPin: Boolean = false) = call {
         api.send(
             "PATCH", "NflixFamily/Members/$userId/profile",
             body = buildJsonObject {
                 displayName?.let { put("DisplayName", it) }
                 color?.let { put("AvatarColor", it) }
+                useUserImage?.let { put("UseUserImage", it) }
                 isKid?.let { put("IsKid", it) }
                 pin?.let { put("Pin", it) }
                 if (clearPin) put("ClearPin", true)
             },
         )
+    }
+
+    /** Replaces the Jellyfin profile picture of [userId] (PNG or JPEG bytes); the family picker follows it. */
+    suspend fun uploadPicture(userId: String, bytes: ByteArray, mediaType: String) = call {
+        api.sendBytes("POST", "Users/$userId/Images/Primary", bytes, mediaType)
     }
 
     suspend fun leave() = call { api.send("POST", "NflixFamily/Leave") }

@@ -710,9 +710,10 @@ private fun CategoryPill(label: String, featured: Boolean = false, onClick: () -
 private fun Avatar() {
     val deps = LocalDeps.current
     val name = deps.session.miraName ?: deps.session.userName
-    val miraAvatar = org.jellyfin.mobile.nflix.MiraProfile.safeAvatar(deps.session.miraAvatar)
-    org.jellyfin.mobile.nflix.ui.AvatarImage(
-        miraAvatar,
+    // The Mira Connect photo of the account from the Auth plugin (falls back on the session token's picture).
+    org.jellyfin.mobile.nflix.ui.ProfilePicture(
+        deps.session.userId,
+        org.jellyfin.mobile.nflix.MiraProfile.safeAvatar(deps.session.miraAvatar),
         Modifier.size(32.dp).clip(RoundedCornerShape(8.dp)).background(Nflix.Red),
     ) {
         Text(org.jellyfin.mobile.nflix.MiraProfile.initials(name), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = Color.White)

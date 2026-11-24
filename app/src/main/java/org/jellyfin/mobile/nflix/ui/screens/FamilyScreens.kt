@@ -114,6 +114,7 @@ import org.jellyfin.mobile.nflix.ui.ContentBottomPadding
 import org.jellyfin.mobile.nflix.ui.LocalDeps
 import org.jellyfin.mobile.nflix.ui.LocalNavigator
 import org.jellyfin.mobile.nflix.ui.Nflix
+import org.jellyfin.mobile.nflix.ui.ProfilePicture
 import org.jellyfin.mobile.nflix.ui.Route
 import org.jellyfin.mobile.nflix.ui.ToastKind
 import org.jellyfin.mobile.nflix.ui.Toasts
@@ -612,11 +613,13 @@ private fun AddProfileTile(index: Int, onClick: () -> Unit) {
 @Composable
 private fun MemberAvatar(member: FamilyMemberInfo, size: Int) {
     val deps = LocalDeps.current
-    val image = if (member.useUserImage && member.hasImage) deps.api.userImageUrl(member.userId, null) else null
+    // Mira Connect photo first (also for other members, once they signed in through Mira), then the
+    // Jellyfin photo, then the colour and initials.
+    val image = if (member.hasImage) deps.api.userImageUrl(member.userId, null) else null
     val base = parseColor(member.avatarColor)
     val dark = Color(base.red * 0.6f, base.green * 0.6f, base.blue * 0.6f, 1f)
     Box(Modifier.size(size.dp).clip(RoundedCornerShape((size * 0.22f).dp)).background(Brush.linearGradient(listOf(base, dark))), contentAlignment = Alignment.Center) {
-        AvatarImage(image, Modifier.size(size.dp)) {
+        ProfilePicture(member.userId, image, Modifier.size(size.dp)) {
             GeneratedAvatarArt(member.userId, FamilyFormat.initials(member.displayName), size)
         }
     }
@@ -706,12 +709,50 @@ private fun ProfileEditDialog(member: FamilyMemberInfo, isHead: Boolean, isMe: B
     var kid by remember { mutableStateOf(member.isKid) }
     var pin by remember { mutableStateOf("") }
     var clearPin by remember { mutableStateOf(false) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var hasImage by remember { mutableStateOf(member.hasImage) }
+    var uploading by remember { mutableStateOf(false) }
+    val canEditPicture = isMe || isHead
+    val picturePicker = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        uploading = true
+        scope.launch {
+            val bytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { context.contentResolver.openInputStream(uri)?.use { org.jellyfin.mobile.nflix.data.readCapped(it, 6 * 1024 * 1024) } }.getOrNull()
+            }
+            val type = context.contentResolver.getType(uri)?.takeIf { it.startsWith("image/") && it != "image/gif" } ?: "image/jpeg"
+            uploading = false
+            if (bytes == null) {
+                org.jellyfin.mobile.nflix.ui.Toasts.show("Image illisible.", org.jellyfin.mobile.nflix.ui.ToastKind.Warning)
+            } else if (attempt { deps.family.uploadPicture(member.userId, bytes, type); deps.family.updateProfile(member.userId, useUserImage = true) }) {
+                hasImage = true
+                org.jellyfin.mobile.nflix.ui.Toasts.show("Photo de profil enregistrée.")
+                onDone()
+            }
+        }
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Profil de ${member.userName}") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedTextField(name, { name = it.take(40) }, label = { Text("Nom affiché") }, singleLine = true)
+                if (canEditPicture) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        MemberAvatar(member.copy(hasImage = hasImage), 52)
+                        Column(Modifier.weight(1f)) {
+                            Text(if (hasImage) "Photo de profil" else "Aucune photo", style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                if (hasImage) "La photo du compte Jellyfin. Choisissez-en une autre pour la remplacer." else "Ajoutez une photo pour remplacer la couleur et l'initiale.",
+                                style = MaterialTheme.typography.bodySmall, color = Nflix.Muted,
+                            )
+                        }
+                        OutlinedButton(
+                            onClick = { picturePicker.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                            enabled = !uploading,
+                        ) { Text(if (uploading) "Envoi…" else if (hasImage) "Changer" else "Ajouter") }
+                    }
+                }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     ProfileColors.forEach { hex ->
                         Box(
@@ -761,6 +802,7 @@ private fun ProfileEditDialog(member: FamilyMemberInfo, isHead: Boolean, isMe: B
                             member.userId,
                             displayName = name.trim().takeIf { it != member.displayName },
                             color = color.takeIf { !it.equals(member.avatarColor, true) },
+                            useUserImage = true.takeIf { hasImage && !member.useUserImage },
                             isKid = kid.takeIf { isHead && !member.isHead && it != member.isKid },
                             pin = pin.takeIf { it.isNotEmpty() },
                             clearPin = clearPin,
@@ -816,7 +858,7 @@ private fun UserSearch(actionLabel: String, onPick: (FamilyUser) -> Unit) {
 private fun UserBubble(userId: String, name: String, hasImage: Boolean, size: Int = 36) {
     val deps = LocalDeps.current
     Box(Modifier.size(size.dp).clip(CircleShape).background(Nflix.SurfaceHigh), contentAlignment = Alignment.Center) {
-        AvatarImage(if (hasImage) deps.api.userImageUrl(userId, null) else null, Modifier.size(size.dp)) {
+        ProfilePicture(userId, if (hasImage) deps.api.userImageUrl(userId, null) else null, Modifier.size(size.dp)) {
             GeneratedAvatarArt(userId, FamilyFormat.initials(name), size)
         }
     }

@@ -79,6 +79,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.jellyfin.mobile.nflix.MiraAccountBridge
 import org.jellyfin.mobile.nflix.MiraProfile
+import org.jellyfin.mobile.nflix.family.MiraAvatars
 import org.jellyfin.mobile.nflix.ui.screens.AchievementsScreen
 import org.jellyfin.mobile.nflix.ui.screens.AlbumScreen
 import org.jellyfin.mobile.nflix.ui.screens.ArtistScreen
@@ -132,6 +133,12 @@ fun NflixRoot(deps: AppDeps, navigator: Navigator, backEnabled: Boolean = true) 
     LaunchedEffect(Unit) {
         deps.music.connect()
         deps.plugins.refreshConfigs()
+    }
+    // Mira Connect pictures of every account (the Nflix Auth plugin keeps them): shown on every avatar.
+    // Keyed on the account, so a profile switch reloads the map and its own picture.
+    LaunchedEffect(deps.session.userId) {
+        MiraAvatars.remember(deps.session.userId, deps.session.miraAvatar)
+        MiraAvatars.load(deps.api, force = true)
     }
     LaunchedEffect(Unit) {
         // Secondary startup work waits for the first frame plus a beat, so it never competes with the home load.

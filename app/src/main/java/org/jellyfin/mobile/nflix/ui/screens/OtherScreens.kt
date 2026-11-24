@@ -189,6 +189,7 @@ fun ProfileScreen() {
                     displayName = deps.session.miraName?.takeIf { it.isNotBlank() } ?: me?.name ?: deps.session.userName,
                     email = deps.session.miraEmail?.takeIf { it.isNotBlank() },
                     avatar = org.jellyfin.mobile.nflix.MiraProfile.safeAvatar(deps.session.miraAvatar),
+                    userId = deps.session.userId,
                     plan = plan,
                     viaMira = deps.session.lastMethod == "mira",
                     serverHost = serverHost,

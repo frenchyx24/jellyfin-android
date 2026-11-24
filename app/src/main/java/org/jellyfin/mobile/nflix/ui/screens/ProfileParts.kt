@@ -108,6 +108,7 @@ internal fun ProfileHeader(
     displayName: String?,
     email: String?,
     avatar: String?,
+    userId: String? = null,
     plan: MiraPlan,
     viaMira: Boolean,
     serverHost: String,
@@ -123,7 +124,7 @@ internal fun ProfileHeader(
             Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(64.dp).border(2.dp, ringColor.copy(alpha = 0.8f), CircleShape).padding(3.dp), contentAlignment = Alignment.Center) {
                     Box(Modifier.size(58.dp).clip(CircleShape).background(Nflix.SurfaceHigh), contentAlignment = Alignment.Center) {
-                        org.jellyfin.mobile.nflix.ui.AvatarImage(avatar, Modifier.size(58.dp).clip(CircleShape)) {
+                        org.jellyfin.mobile.nflix.ui.ProfilePicture(userId, avatar, Modifier.size(58.dp).clip(CircleShape)) {
                             Text(initials, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = ringColor)
                         }
                     }

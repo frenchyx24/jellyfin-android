@@ -490,7 +490,9 @@ private fun PickerTile(
 @Composable
 internal fun ProfilePic(member: FamilyMemberInfo, size: Dp, corner: Dp, shine: Boolean = false) {
     val deps = LocalDeps.current
-    val image = if (member.useUserImage && member.hasImage) deps.api.userImageUrl(member.userId, null) else null
+    // Mira Connect photo first (also for other members, once they signed in through Mira), then the
+    // Jellyfin photo, then the colour and initials.
+    val image = if (member.hasImage) deps.api.userImageUrl(member.userId, null) else null
     val c = profileColor(member.avatarColor)
     val light = lerp(c, Color.White, .3f)
     val dark = lerp(c, Color.Black, .45f)
@@ -527,7 +529,7 @@ internal fun ProfilePic(member: FamilyMemberInfo, size: Dp, corner: Dp, shine: B
             },
         contentAlignment = Alignment.Center,
     ) {
-        AvatarImage(image, Modifier.fillMaxSize()) {
+        org.jellyfin.mobile.nflix.ui.ProfilePicture(member.userId, image, Modifier.fillMaxSize()) {
             Text(initial, color = Color.White, fontSize = fontSize, fontWeight = FontWeight.Black, lineHeight = fontSize)
         }
     }

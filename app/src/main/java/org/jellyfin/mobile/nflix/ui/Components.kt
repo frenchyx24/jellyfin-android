@@ -46,6 +46,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -90,6 +91,17 @@ fun NImage(
             AsyncImage(model = request, contentDescription = description, contentScale = contentScale, modifier = Modifier.fillMaxSize())
         }
     }
+}
+
+/**
+ * Picture of a profile: the Mira Connect photo first (same as the web), then the Jellyfin user picture.
+ * [userId] may be dashed or compact; the caller passes null for a user with no Jellyfin picture.
+ */
+@Composable
+fun ProfilePicture(userId: String?, jellyfinPicture: String?, modifier: Modifier = Modifier, fallback: @Composable () -> Unit = {}) {
+    val avatars by org.jellyfin.mobile.nflix.family.MiraAvatars.pictures.collectAsState()
+    val mira = org.jellyfin.mobile.nflix.family.MiraAvatars.norm(userId)?.let { avatars[it] }
+    AvatarImage(mira ?: jellyfinPicture, modifier, fallback)
 }
 
 /** User photo: HTTPS URL or inline data URI (decoded once), drawn over [fallback]. */
