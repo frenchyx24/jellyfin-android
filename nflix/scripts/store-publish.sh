@@ -64,8 +64,8 @@ MINSDK="$(printf '%s\n' "$INFO" | sed -n 3p)"
 # Refuse network errors and malformed manifests, rather than interpreting either as an empty channel.
 CHANNELS=("${SLUG%-beta}" "${SLUG%-beta}-beta")
 if [ "${NFLIX_PROMOTION:-0}" = 1 ]; then
-  [ "$SLUG" = nflix ] || { echo 'Refused: promotion applies only to Nflix stable.' >&2; exit 1; }
-  CHANNELS=(nflix)
+  [ "$SLUG" = nflix ] || [ "$SLUG" = nflix-tv ] || { echo 'Refused: promotion applies only to Nflix stable.' >&2; exit 1; }
+  CHANNELS=("$SLUG")
 fi
 for CHANNEL in "${CHANNELS[@]}"; do
   STATUS="$(curl -sS -A "$UA" -o "$STAGE/current.json" -w '%{http_code}' "$MIRA_STORE_URL/$CHANNEL/manifest.json")"
