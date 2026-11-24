@@ -49,6 +49,11 @@ public sealed class NflixAuthController : ControllerBase
 
     private static PluginConfiguration Config => Plugin.Instance?.Configuration ?? new PluginConfiguration();
 
+    /// <summary>Profile pictures collected from Mira Connect, for the web interface (same photo as the app).</summary>
+    [HttpGet("Avatars")]
+    [Authorize]
+    public IActionResult GetAvatars() => Ok(MiraAvatars.All());
+
     /// <summary>Public client configuration consumed by the Android app.</summary>
     [HttpGet("Config")]
     [AllowAnonymous]
@@ -106,6 +111,7 @@ public sealed class NflixAuthController : ControllerBase
                 DeviceName = request.DeviceName,
                 RemoteEndPoint = remote
             }).ConfigureAwait(false);
+            if (!string.IsNullOrEmpty(identity.Avatar)) MiraAvatars.Save(user.Id.ToString("N"), identity.Avatar);
             _logger.LogInformation("Nflix Auth: {User} signed in with Mira Connect on {Device}", user.Username, request.DeviceName);
             return Ok(result);
         }

@@ -6,7 +6,7 @@ using System.Text.Json;
 namespace Jellyfin.Plugin.NflixAuth;
 
 /// <summary>Validated identity extracted from a Mira Connect ID token.</summary>
-public sealed record MiraIdentity(string Username, IReadOnlyList<string> Groups);
+public sealed record MiraIdentity(string Username, IReadOnlyList<string> Groups, string? Avatar);
 
 /// <summary>Minimal RS256 OIDC ID token validator backed by the issuer JWKS.</summary>
 public sealed class OidcValidator
@@ -69,8 +69,50 @@ public sealed class OidcValidator
         var groups = claims.TryGetProperty("groups", out var g) && g.ValueKind == JsonValueKind.Array
             ? g.EnumerateArray().Select(x => x.GetString() ?? string.Empty).Where(x => x.Length > 0).ToList()
             : new List<string>();
-        return new MiraIdentity(username, groups);
+        return new MiraIdentity(username, groups, AvatarFrom(claims));
     }
+
+    /// <summary>
+    /// Mira Connect profile picture carried by the token: the Authentik "attributes.avatar" claim, then the
+    /// standard "picture" claim. Only an HTTPS URL without credentials or a small inline JPEG/PNG/WebP is kept,
+    /// so a token can never point the browser at an arbitrary scheme.
+    /// </summary>
+    private static string? AvatarFrom(JsonElement claims)
+    {
+        if (claims.TryGetProperty("attributes", out var attributes) && attributes.ValueKind == JsonValueKind.Object
+            && attributes.TryGetProperty("avatar", out var attr) && attr.ValueKind == JsonValueKind.String)
+        {
+            var value = SafeAvatar(attr.GetString());
+            if (value is not null) return value;
+        }
+        return claims.TryGetProperty("picture", out var picture) && picture.ValueKind == JsonValueKind.String
+            ? SafeAvatar(picture.GetString())
+            : null;
+    }
+
+    private static string? SafeAvatar(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length > 300_000) return null;
+        if (value.StartsWith("data:", StringComparison.Ordinal))
+        {
+            var match = InlineAvatar.Match(value);
+            if (!match.Success) return null;
+            try
+            {
+                return Convert.FromBase64String(match.Groups[2].Value).Length <= 200 * 1024 ? value : null;
+            }
+            catch (FormatException)
+            {
+                return null;
+            }
+        }
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps) return null;
+        return uri.UserInfo.Length == 0 && uri.Host.Length > 0 && value.Length <= 2048 ? value : null;
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex InlineAvatar = new(
+        "^data:image/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$",
+        System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
     /// <summary>
     /// Issuers whose ID tokens open a Nflix session: the Nflix app's own OIDC client (browser sign-in) and the

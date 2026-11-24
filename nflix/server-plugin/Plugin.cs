@@ -56,6 +56,7 @@ public sealed class Plugin : BasePlugin<PluginConfiguration>
         StoreDirectory = Path.Combine(paths.DataPath, "mira-store");
         StudiosDirectory = Path.Combine(paths.DataPath, "nflix-studios");
         AnnouncementsDirectory = Path.Combine(paths.DataPath, "nflix-announcements");
+        MiraAvatars.Init(Path.Combine(paths.DataPath, "nflix-avatars", "avatars.json"));
         if (string.IsNullOrEmpty(Configuration.PublishToken))
         {
             Configuration.PublishToken = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
