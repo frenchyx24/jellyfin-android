@@ -35,6 +35,7 @@ public sealed class NflixAuthController : ControllerBase
 {
     private readonly ISessionManager _sessionManager;
     private readonly IUserManager _userManager;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly OidcValidator _validator;
     private readonly ILogger<NflixAuthController> _logger;
 
@@ -44,6 +45,7 @@ public sealed class NflixAuthController : ControllerBase
         _sessionManager = sessionManager;
         _userManager = userManager;
         _validator = new OidcValidator(httpClientFactory);
+        _httpClientFactory = httpClientFactory;
         _logger = logger;
     }
 
@@ -52,7 +54,25 @@ public sealed class NflixAuthController : ControllerBase
     /// <summary>Profile pictures collected from Mira Connect, for the web interface (same photo as the app).</summary>
     [HttpGet("Avatars")]
     [Authorize]
-    public IActionResult GetAvatars() => Ok(MiraAvatars.All());
+    public async Task<IActionResult> GetAvatars()
+    {
+        var sync = MiraDirectory.EnsureFresh(_userManager, _httpClientFactory, _logger);
+        if (!MiraDirectory.Ready) await Task.WhenAny(sync, Task.Delay(TimeSpan.FromSeconds(15))).ConfigureAwait(false);
+        // Pictures received at sign-in, overridden by the Mira directory (always the latest picture).
+        var all = new Dictionary<string, string>(MiraAvatars.All(), StringComparer.OrdinalIgnoreCase);
+        foreach (var (id, url) in MiraDirectory.Urls()) all[id] = url;
+        return Ok(all);
+    }
+
+    /// <summary>Mira profile picture of one account (anonymous, like Jellyfin user pictures).</summary>
+    [HttpGet("Avatars/{id}/Image")]
+    [AllowAnonymous]
+    public IActionResult GetAvatarImage([FromRoute] string id)
+    {
+        if (MiraDirectory.Image(id.ToLowerInvariant()) is not { } image) return NotFound();
+        Response.Headers.CacheControl = "public, max-age=604800, immutable";
+        return PhysicalFile(image.Path, image.ContentType);
+    }
 
     /// <summary>Public client configuration consumed by the Android app.</summary>
     [HttpGet("Config")]

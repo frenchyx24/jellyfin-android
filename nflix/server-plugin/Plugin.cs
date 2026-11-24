@@ -44,6 +44,18 @@ public sealed class PluginConfiguration : BasePluginConfiguration
 
     /// <summary>Gets or sets the GIPHY API key used to suggest animated distributor logos (server side only).</summary>
     public string GiphyApiKey { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the Authentik address on the local network, read for Mira profile pictures.</summary>
+    public string DirectoryUrl { get; set; } = "http://192.168.1.17:30140";
+
+    /// <summary>Gets or sets the host name Authentik expects on that address.</summary>
+    public string DirectoryHost { get; set; } = "auth.miracloud.fr";
+
+    /// <summary>Gets or sets the file holding the Authentik service account token. Empty: data/authentik-groups.token.</summary>
+    public string DirectoryTokenFile { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the public address of this server, used in picture links.</summary>
+    public string PublicUrl { get; set; } = "https://nflix.miracloud.fr";
 }
 
 /// <summary>Nflix Auth plugin: exchanges a Mira Connect ID token for a Jellyfin session.</summary>
@@ -57,6 +69,7 @@ public sealed class Plugin : BasePlugin<PluginConfiguration>
         StudiosDirectory = Path.Combine(paths.DataPath, "nflix-studios");
         AnnouncementsDirectory = Path.Combine(paths.DataPath, "nflix-announcements");
         MiraAvatars.Init(Path.Combine(paths.DataPath, "nflix-avatars", "avatars.json"));
+        MiraDirectory.Init(Path.Combine(paths.DataPath, "nflix-avatars"));
         if (string.IsNullOrEmpty(Configuration.PublishToken))
         {
             Configuration.PublishToken = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));

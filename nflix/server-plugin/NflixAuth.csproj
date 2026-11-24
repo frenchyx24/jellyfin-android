@@ -4,9 +4,9 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
-    <Version>1.7.0</Version>
-    <AssemblyVersion>1.7.0.0</AssemblyVersion>
-    <FileVersion>1.7.0.0</FileVersion>
+    <Version>1.8.1</Version>
+    <AssemblyVersion>1.8.1.0</AssemblyVersion>
+    <FileVersion>1.8.1.0</FileVersion>
     <AssemblyName>Jellyfin.Plugin.NflixAuth</AssemblyName>
     <RootNamespace>Jellyfin.Plugin.NflixAuth</RootNamespace>
   </PropertyGroup>
