@@ -774,69 +774,6 @@ private fun ProfileEditDialog(member: FamilyMemberInfo, isHead: Boolean, isMe: B
     )
 }
 
-/** Numeric PIN pad (4 to 8 digits) with the profile avatar, dots and a shake on a wrong code. */
-@Composable
-fun PinDialog(member: FamilyMemberInfo, error: String?, busy: Boolean, onDismiss: () -> Unit, onSubmit: (String) -> Unit) {
-    var pin by remember { mutableStateOf("") }
-    val shake = remember { Animatable(0f) }
-    LaunchedEffect(error) {
-        if (error != null) {
-            pin = ""
-            repeat(3) {
-                shake.animateTo(14f, tween(45))
-                shake.animateTo(-14f, tween(45))
-            }
-            shake.animateTo(0f, tween(45))
-        }
-    }
-    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
-        Column(
-            Modifier.clip(RoundedCornerShape(28.dp)).background(Nflix.Surface).padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            MemberAvatar(member, 72)
-            Spacer(Modifier.height(10.dp))
-            Text(member.displayName, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-            Text("Saisissez le code PIN", color = Nflix.Muted, fontSize = 13.sp)
-            Spacer(Modifier.height(14.dp))
-            Row(Modifier.graphicsLayer { translationX = shake.value }, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                repeat(maxOf(4, pin.length)) { i ->
-                    val filled = i < pin.length
-                    Box(Modifier.size(14.dp).clip(CircleShape).background(if (filled) Color.White else Color.Transparent).border(2.dp, if (filled) Color.White else Nflix.Muted, CircleShape))
-                }
-            }
-            Text(error ?: " ", color = Color(0xFFFF7B82), fontSize = 12.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 8.dp).height(18.dp))
-            Spacer(Modifier.height(6.dp))
-            listOf(listOf("1", "2", "3"), listOf("4", "5", "6"), listOf("7", "8", "9"), listOf("<", "0", "ok")).forEach { row ->
-                Row(horizontalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.padding(vertical = 6.dp)) {
-                    row.forEach { key ->
-                        val enabled = !busy && (key != "ok" || pin.length >= 4)
-                        Box(
-                            Modifier.size(64.dp).clip(CircleShape)
-                                .background(if (key == "ok") Nflix.Red.copy(alpha = if (enabled) 1f else .35f) else Color.White.copy(alpha = .08f))
-                                .clickable(enabled = enabled) {
-                                    when (key) {
-                                        "<" -> pin = pin.dropLast(1)
-                                        "ok" -> onSubmit(pin)
-                                        else -> if (pin.length < 8) pin += key
-                                    }
-                                },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            when (key) {
-                                "<" -> Icon(Icons.AutoMirrored.Rounded.Backspace, "Effacer", tint = Color.White)
-                                "ok" -> if (busy) CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(22.dp))
-                                else Icon(Icons.AutoMirrored.Rounded.Send, "Valider", tint = Color.White)
-                                else -> Text(key, fontSize = 24.sp, color = Color.White)
-                            }
-                        }
-                    }
-                }
-            }
-            TextButton(onClick = onDismiss) { Text("Annuler", color = Nflix.Muted) }
-        }
-    }
-}
 
 @Composable
 private fun UserSearchDialog(title: String, actionLabel: String, onDismiss: () -> Unit, onPick: (FamilyUser) -> Unit) {
@@ -1336,63 +1273,6 @@ private fun Bubble(m: MessageInfo, grouped: Boolean, conversationId: String = ""
             }
             val receipt = if (m.mine && m.readByNames.isNotEmpty()) " · Lu par " + m.readByNames.take(3).joinToString(", ") + (if (m.readByNames.size > 3) "…" else "") else ""
             Text(FamilyFormat.clock(m.sentUtc) + receipt, fontSize = 10.sp, color = Color.White.copy(alpha = .7f), modifier = Modifier.align(Alignment.End))
-        }
-    }
-}
-
-// ------------------------------------------------------------------ "Qui regarde ?"
-
-/** Full-screen profile picker for family heads ("Qui regarde ?"). */
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-fun WhoIsWatchingScreen(me: FamilyMe, onDone: () -> Unit) {
-    val deps = LocalDeps.current
-    val scope = rememberCoroutineScope()
-    var pinFor by remember { mutableStateOf<FamilyMemberInfo?>(null) }
-    var pinError by remember { mutableStateOf<String?>(null) }
-    val members = me.family?.members.orEmpty()
-    val title = remember { Animatable(0f) }
-    LaunchedEffect(Unit) { title.animateTo(1f, tween(450)) }
-    Box(
-        Modifier.fillMaxSize()
-            .background(Brush.radialGradient(listOf(Nflix.RedDeep.copy(alpha = .55f), Nflix.Night), radius = 1400f))
-            .clickable(enabled = false) {},
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
-            Text("Qui regarde ?", fontSize = 32.sp, fontWeight = FontWeight.SemiBold, color = Color.White,
-                modifier = Modifier.graphicsLayer { alpha = title.value; translationY = (1f - title.value) * 30f })
-            Spacer(Modifier.height(32.dp))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(20.dp, Alignment.CenterHorizontally), verticalArrangement = Arrangement.spacedBy(22.dp)) {
-                members.forEachIndexed { index, member ->
-                    val isMe = ProfileSwitchLogic.sameUser(member.userId, me.userId)
-                    ProfileTile(member, isMe = false, index = index + 1, size = 104, light = true, onClick = {
-                        when {
-                            deps.switcher.busy -> Unit
-                            isMe -> onDone()
-                            member.hasPin -> { pinError = null; pinFor = member }
-                            else -> scope.launch { attempt { deps.switcher.switchTo(member, null) } }
-                        }
-                    }, onEdit = null)
-                }
-            }
-            Spacer(Modifier.height(28.dp))
-            if (deps.switcher.busy) CircularProgressIndicator(color = Nflix.Red)
-            TextButton(onClick = onDone) { Text("Continuer avec mon profil", color = Nflix.Muted) }
-            TextButton(onClick = { deps.switcher.store.pickerEnabled = false; onDone() }) { Text("Ne plus demander au démarrage", color = Nflix.Muted, fontSize = 12.sp) }
-        }
-    }
-    pinFor?.let { member ->
-        PinDialog(member, error = pinError, busy = deps.switcher.busy, onDismiss = { pinFor = null }) { pin ->
-            scope.launch {
-                pinError = null
-                try {
-                    deps.switcher.switchTo(member, pin)
-                    pinFor = null
-                } catch (e: FamilyException) {
-                    pinError = e.message ?: "Code PIN incorrect."
-                }
-            }
         }
     }
 }
