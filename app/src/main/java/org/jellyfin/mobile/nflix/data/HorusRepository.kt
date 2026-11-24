@@ -109,6 +109,17 @@ class HorusRepository(private val api: NflixApi) {
         parts.flatten()
     }
 
+    /**
+     * Catalogue search for the Horus tab's bar: movies and series only, available titles left out
+     * (they are on Nflix already), in Horus' own order. Spaces stay `%20` (Seerr refuses `+`).
+     */
+    suspend fun searchCatalog(query: String): List<HorusMedia> =
+        pageOf("s/catalog/$query", "search", mapOf("query" to query, "page" to 1, "language" to "fr")).let { page ->
+        page.results
+            .filter { it.type in setOf(HorusType.Movie, HorusType.Tv) && it.jellyfinId == null && it.status != HorusStatus.Available }
+            .distinctBy { "${it.type.api}-${it.id}" }
+    }
+
     suspend fun details(type: HorusType, id: String, force: Boolean = false): HorusMedia = details.getOrLoad("${type.api}/$id", force) {
         val path = when (type) {
             HorusType.Movie -> "movie/$id"

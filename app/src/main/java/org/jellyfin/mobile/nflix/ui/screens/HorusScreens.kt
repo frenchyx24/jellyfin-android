@@ -134,7 +134,7 @@ fun HorusScreen() {
         OutlinedTextField(
             value = query,
             onValueChange = { query = it },
-            placeholder = { Text("Film, série, album, livre…") },
+            placeholder = { Text("Chercher un film ou une série à demander…") },
             leadingIcon = { Icon(Icons.Rounded.Search, null) },
             trailingIcon = { if (query.isNotEmpty()) IconButton(onClick = { query = "" }) { Icon(Icons.Rounded.Close, "Effacer") } },
             singleLine = true,
@@ -321,7 +321,7 @@ private fun HorusSearchResults(query: String, type: HorusType?) {
     val navigator = LocalNavigator.current
     val results = rememberLoad("horus-search", query, type) {
         delay(350) // debounce typing
-        if (type == null) deps.horus.searchEverything(query) else deps.horus.search(query, type).results
+        if (type == null) deps.horus.searchCatalog(query) else deps.horus.search(query, type).results
     }
     when (results) {
         Load.Loading -> Box(Modifier.fillMaxWidth().padding(40.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Nflix.Red) }

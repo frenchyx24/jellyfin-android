@@ -164,9 +164,6 @@ private enum class SearchFilter(val label: String) {
     }
 }
 
-/** Requestable titles join the matching row; they are not labelled by their source. */
-private val requestRows = mapOf("movies" to HorusType.Movie, "series" to HorusType.Tv, "albums" to HorusType.Music, "books" to HorusType.Book)
-
 private enum class RequestState { Sending, Sent, Failed }
 
 /** Rows shown in "Tout": anime first-class, kept out of Films/Séries. */
@@ -730,19 +727,17 @@ private fun SearchResults(
                 }
                 jump?.let { item(key = "jump-${it.target.id}") { JumpCard(it, onOpen) } }
                 best?.takeIf { it.id != jump?.series?.id }?.let { item(key = "best-${it.id}") { BestMatch(it, onOpen) } }
+                if (requestable.isNotEmpty()) {
+                    rowSection("horus", "Sur Horus — à demander", requestable, ::hitKey) { media ->
+                        RequestCard(media, requests[requestKey(media)], { onDetails(media) }, { onRequest(media) })
+                    }
+                }
                 if (genre != null && genreItems.isNotEmpty()) {
                     rowSection("genre", "Genre · $genre", genreItems, { "g-${it.id}" }) { hit -> SearchCard(hit, onOpen) }
                 }
                 sections.forEach { (key, title, predicate) ->
-                    val local: List<Any> = items.filter { predicate(it) && it.id != best?.id }
-                    val extra: List<Any> = requestRows[key]?.let { type -> requestable.filter { it.type == type } }.orEmpty()
-                    rowSection(key, title, local + extra, ::hitKey) { hit ->
-                        when (hit) {
-                            is Item -> SearchCard(hit, onOpen, onYtLongPress = onYtLongPress)
-                            is HorusMedia -> RequestCard(hit, requests[requestKey(hit)], { onDetails(hit) }, { onRequest(hit) })
-                            else -> Unit
-                        }
-                    }
+                    val local = items.filter { predicate(it) && it.id != best?.id }
+                    rowSection(key, title, local, { it.id }) { hit -> SearchCard(hit, onOpen, onYtLongPress = onYtLongPress) }
                 }
                 if (ytAlbums.isNotEmpty()) {
                     item(key = "online-albums") {
