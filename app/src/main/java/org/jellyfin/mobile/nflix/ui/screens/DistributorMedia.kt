@@ -18,7 +18,13 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.database.StandaloneDatabaseProvider
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
+import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
 import com.airbnb.lottie.compose.LottieAnimation
 import com.airbnb.lottie.compose.LottieCompositionSpec
@@ -26,6 +32,30 @@ import com.airbnb.lottie.compose.LottieConstants
 import com.airbnb.lottie.compose.animateLottieCompositionAsState
 import com.airbnb.lottie.compose.rememberLottieComposition
 import org.jellyfin.mobile.nflix.ui.rememberAmbientMotionAllowed
+
+/**
+ * Disk cache of the distributor logo clips (LRU, 150 MB), so a clip is downloaded once and then
+ * played from disk on every later home visit. One instance per process: SimpleCache locks its folder.
+ */
+@UnstableApi
+private object LogoClipCache {
+    @Volatile private var cache: SimpleCache? = null
+
+    fun factory(context: android.content.Context): CacheDataSource.Factory {
+        val app = context.applicationContext
+        val instance = cache ?: synchronized(this) {
+            cache ?: SimpleCache(
+                java.io.File(app.cacheDir, "logo-clips"),
+                LeastRecentlyUsedCacheEvictor(150L * 1024 * 1024),
+                StandaloneDatabaseProvider(app),
+            ).also { cache = it }
+        }
+        return CacheDataSource.Factory()
+            .setCache(instance)
+            .setUpstreamDataSourceFactory(DefaultDataSource.Factory(app))
+            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+    }
+}
 
 /**
  * Muted, looping clip used as a distributor logo. The player exists only while the logo is
@@ -38,7 +68,9 @@ internal fun LoopingVideo(url: String, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val motion = rememberAmbientMotionAllowed()
     val player = remember(url) {
-        ExoPlayer.Builder(context).build().apply {
+        ExoPlayer.Builder(context)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(LogoClipCache.factory(context)))
+            .build().apply {
             volume = 0f
             repeatMode = Player.REPEAT_MODE_ALL
             trackSelectionParameters = trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true).build()
