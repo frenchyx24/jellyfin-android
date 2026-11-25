@@ -56,6 +56,11 @@ class AlertPrefs(context: Context) {
 
     fun setChatCursor(conversationId: String, id: Long) = prefs.edit { putLong("chat_$conversationId", id) }
 
+    /** Horus requests already known as available; null before the first check. */
+    fun horusSeen(): Set<String>? = prefs.getStringSet("horus_seen", null)?.toSet()
+
+    fun setHorusSeen(keys: Set<String>) = prefs.edit { putStringSet("horus_seen", keys) }
+
     fun kindSwitch(kind: AlertKind): Boolean = prefs.getBoolean("kind_${kind.wire}", true)
 
     fun setEnabled(kind: AlertKind, enabled: Boolean) {
