@@ -129,6 +129,8 @@ fun HorusRequestsScreen() {
     var filter by rememberSaveable { mutableStateOf(RequestFilter.All) }
     val scope = rememberCoroutineScope()
 
+    LiveTorrentPoller(requests.orEmpty())
+
     // Live refresh: every 15 s while something downloads, every minute otherwise. Stops with the screen.
     LaunchedEffect(refreshTick) {
         while (true) {
@@ -242,8 +244,6 @@ private fun RequestCard(request: HorusRequest, onCancel: () -> Unit) {
             StageTrack(stage)
 
             if (request.downloading) {
-                val downloaded = request.downloads.sumOf { it.size - it.sizeLeft.coerceIn(0, it.size) }
-                val total = request.downloads.sumOf { it.size }
                 val eta = request.downloads.mapNotNull { parseEta(it) }.maxOrNull()
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Row(verticalAlignment = Alignment.Bottom) {
@@ -251,7 +251,6 @@ private fun RequestCard(request: HorusRequest, onCancel: () -> Unit) {
                         Spacer(Modifier.width(8.dp))
                         Text(
                             listOfNotNull(
-                                if (total > 0) "${formatBytes(downloaded)} sur ${formatBytes(total)}" else null,
                                 eta?.let { "reste ${formatDuration(it)}" },
                             ).joinToString(" · "),
                             style = MaterialTheme.typography.bodySmall, color = Nflix.Muted, modifier = Modifier.padding(bottom = 3.dp),
@@ -378,7 +377,6 @@ private fun DownloadRow(download: HorusDownload) {
         Text(
             listOfNotNull(
                 statusLabel(download.status),
-                if (download.size > 0) "${formatBytes(download.size - download.sizeLeft.coerceIn(0, download.size))} / ${formatBytes(download.size)}" else null,
                 parseEta(download)?.let { "reste ${formatDuration(it)}" },
             ).joinToString(" · "),
             style = MaterialTheme.typography.labelSmall, color = Nflix.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis,
@@ -415,6 +413,20 @@ internal fun formatDuration(duration: Duration): String {
         minutes < 60 -> "$minutes min"
         minutes < 24 * 60 -> "${minutes / 60} h ${(minutes % 60).toString().padStart(2, '0')}"
         else -> "${minutes / (24 * 60)} j ${(minutes / 60) % 24} h"
+    }
+}
+
+/** Polls qBittorrent (through Butler) every 2 s for the downloads on screen; stops with the screen. */
+@Composable
+internal fun LiveTorrentPoller(requests: List<HorusRequest>) {
+    val deps = LocalDeps.current
+    val hashes = remember(requests) { requests.flatMap { r -> r.downloads.mapNotNull { it.downloadId } }.distinct() }
+    LaunchedEffect(hashes) {
+        if (hashes.isEmpty()) return@LaunchedEffect
+        while (true) {
+            org.jellyfin.mobile.nflix.data.LiveTorrents.refresh(deps.api, hashes)
+            delay(2_000)
+        }
     }
 }
 

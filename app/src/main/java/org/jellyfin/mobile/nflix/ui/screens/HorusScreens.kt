@@ -175,6 +175,7 @@ private fun HorusDiscover(tab: HorusTab) {
         if (refreshing && data !is Load.Loading && requestsLoad !is Load.Loading) refreshing = false
     }
     val allRequests = requestsLoad.value.orEmpty()
+    LiveTorrentPoller(allRequests)
     // Quick requests made here stay marked until Horus' own list confirms (or drops) them.
     LaunchedEffect(requestsLoad) {
         if (requestsLoad !is Load.Ready) return@LaunchedEffect

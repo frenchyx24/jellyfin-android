@@ -81,9 +81,28 @@ data class HorusDownload(
     val season: Int?,
     val episode: Int?,
     val episodeTitle: String?,
+    /** Torrent hash (Seerr downloadId): live progress is read from qBittorrent through Butler. */
+    val downloadId: String? = null,
 ) {
-    /** 0..1, or null when the client does not report a size yet. */
-    val progress: Float? get() = if (size > 0) ((size - sizeLeft).coerceIn(0, size).toFloat() / size) else null
+    /** 0..1: live qBittorrent value first, else the Radarr/Sonarr figure; null when unknown. */
+    val progress: Float?
+        get() = downloadId?.lowercase()?.let { LiveTorrents.progress[it] }
+            ?: if (size > 0) ((size - sizeLeft).coerceIn(0, size).toFloat() / size) else null
+}
+
+/** Live torrent progress keyed by lower-case hash, refreshed every 2 s while downloads are shown. */
+object LiveTorrents {
+    val progress = androidx.compose.runtime.mutableStateMapOf<String, Float>()
+
+    suspend fun refresh(api: NflixApi, hashes: Collection<String>) {
+        val wanted = hashes.map { it.lowercase() }.filter { it.matches(Regex("[0-9a-f]{40}")) }.distinct().take(50)
+        if (wanted.isEmpty()) return
+        val body = runCatching { api.getJson("NflixButler/Downloads/Progress", mapOf("hashes" to wanted.joinToString("|"))) }.getOrNull() as? JsonObject ?: return
+        body.forEach { (hash, value) ->
+            val p = ((value as? JsonObject)?.get("progress") as? JsonPrimitive)?.contentOrNull?.toFloatOrNull() ?: return@forEach
+            progress[hash.lowercase()] = p.coerceIn(0f, 1f)
+        }
+    }
 }
 
 @Immutable
@@ -104,12 +123,14 @@ data class HorusRequest(
 ) {
     val downloading: Boolean get() = downloads.isNotEmpty()
 
-    /** Overall progress across every queued file, weighted by size. */
+    /** Overall progress across every queued file (live qBittorrent values when known), weighted by size. */
     val progress: Float?
         get() {
-            val total = downloads.sumOf { it.size }
-            if (total <= 0) return null
-            return downloads.sumOf { it.size - it.sizeLeft.coerceIn(0, it.size) }.toFloat() / total
+            val known = downloads.mapNotNull { d -> d.progress?.let { d to it } }
+            if (known.isEmpty()) return null
+            val total = known.sumOf { it.first.size }
+            return if (total > 0) known.sumOf { (d, p) -> (d.size * p).toDouble() }.toFloat() / total
+            else known.map { it.second }.average().toFloat()
         }
 
     val statusLabel: String
@@ -240,6 +261,7 @@ internal object HorusParser {
             season = episode?.int("seasonNumber"),
             episode = episode?.int("episodeNumber"),
             episodeTitle = episode?.str("title"),
+            downloadId = item.str("downloadId"),
         )
     }?.sortedWith(compareBy({ it.season ?: 0 }, { it.episode ?: 0 })).orEmpty()
 
