@@ -194,6 +194,21 @@ object NflixAlerts {
         WorkManager.getInstance(context.applicationContext).enqueueUniquePeriodicWork(WORK, ExistingPeriodicWorkPolicy.UPDATE, request)
     }
 
+    /**
+     * Extra passes after a Horus request (2, 6, 15, 30 and 60 min): a title is often ready within
+     * minutes, sooner than the 15 min periodic run that Android may also delay.
+     */
+    fun followUp(context: Context) {
+        val manager = WorkManager.getInstance(context.applicationContext)
+        listOf(2L, 6L, 15L, 30L, 60L).forEach { minutes ->
+            val request = OneTimeWorkRequestBuilder<NflixAlertWorker>()
+                .setInitialDelay(minutes, TimeUnit.MINUTES)
+                .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+                .build()
+            manager.enqueueUniqueWork("$WORK_NOW-horus-$minutes", ExistingWorkPolicy.REPLACE, request)
+        }
+    }
+
     /** One immediate pass, e.g. right after the user allowed notifications. */
     fun runNow(context: Context) {
         val request = OneTimeWorkRequestBuilder<NflixAlertWorker>()

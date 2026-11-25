@@ -101,7 +101,7 @@ val applicationModule = module {
     single { NflixApi(androidApplication().cacheDir, get(), get()) }
     single { JellyfinRepository(get()) }
     single { PluginRepository(androidApplication(), get(), get()) { get<org.jellyfin.mobile.nflix.NflixSession>().miraGroups } }
-    single { HorusRepository(get()) }
+    single { HorusRepository(get()).also { repo -> val app = androidApplication(); repo.afterRequest = { org.jellyfin.mobile.nflix.alerts.NflixAlerts.followUp(app) } } }
     single { org.jellyfin.mobile.nflix.alerts.AlertsClient(org.jellyfin.mobile.nflix.alerts.AlertsClient.defaultHttp()) }
     single { org.jellyfin.mobile.nflix.alerts.AlertsRepository(get(), get()) }
     single { org.jellyfin.mobile.nflix.alerts.AlertPrefs(androidApplication()) }

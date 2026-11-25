@@ -22,6 +22,9 @@ class HorusException(message: String) : Exception(message)
  * the Jellyfin session is enough, no Horus password is needed (Quick Connect based SSO).
  */
 class HorusRepository(private val api: NflixApi) {
+    /** Called after every successful request (schedules the availability checks). */
+    var afterRequest: (() -> Unit)? = null
+
     private val cache = TtlCache<HorusPage>(5 * 60_000L)
     private val details = TtlCache<HorusMedia>(5 * 60_000L)
     private val sessionLock = Mutex()
@@ -169,6 +172,7 @@ class HorusRepository(private val api: NflixApi) {
         details.invalidate("${media.type.api}/${media.id}")
         cachedRequests = null
         requestsAt = 0L
+        runCatching { afterRequest?.invoke() }
     }
 
     /**

@@ -15,7 +15,7 @@ class HorusAlertSource(private val horus: () -> HorusRepository?, private val us
         val repo = horus() ?: return emptyList()
         if (repo.userName == null) repo.userName = userName()
         val requests = repo.myRequests(force = true)
-        return plan(requests, prefs.horusSeen(), prefs::setHorusSeen)
+        return plan(requests, prefs.horusSeen(), System.currentTimeMillis(), prefs::setHorusSeen)
     }
 
     companion object {
@@ -25,13 +25,20 @@ class HorusAlertSource(private val horus: () -> HorusRepository?, private val us
             request.media.jellyfinId != null && (request.media.status == HorusStatus.Available ||
                 (request.media.status == HorusStatus.Partial && request.type == HorusType.Tv))
 
-        /** [seen] null = first run: remember every available request without posting. */
-        fun plan(requests: List<HorusRequest>, seen: Set<String>?, store: (Set<String>) -> Unit): List<NflixAlert> {
+        private fun epochMs(iso: String): Long? = runCatching { java.time.Instant.parse(iso).toEpochMilli() }.getOrNull()
+
+        /**
+         * [seen] null = first run: only requests that became available in the last 24 h are posted,
+         * older ones are just remembered.
+         */
+        fun plan(requests: List<HorusRequest>, seen: Set<String>?, nowMs: Long, store: (Set<String>) -> Unit): List<NflixAlert> {
             val ready = requests.filter(::isReady)
             val keys = ready.map(::key).toSet()
             store(((seen ?: emptySet()) + keys).toList().takeLast(400).toSet())
-            if (seen == null) return emptyList()
-            return ready.filter { key(it) !in seen }.distinctBy(::key).take(5).map { r ->
+            return ready.filter { r ->
+                if (seen != null) key(r) !in seen
+                else epochMs(r.updatedAt)?.let { nowMs - it in 0..86_400_000L } == true
+            }.distinctBy(::key).take(5).map { r ->
                 val name = r.media.title.ifBlank { "Votre demande" }
                 NflixAlert(
                     id = -(0x20000000L + (key(r).hashCode().toLong() and 0x1fffffff)),
