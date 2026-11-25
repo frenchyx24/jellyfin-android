@@ -43,3 +43,17 @@ class HorusAlertSourceTest : FunSpec({
         HorusAlertSource.isReady(request("6", HorusStatus.Available, null)) shouldBe false
     }
 })
+
+class LiveTorrentsTest : FunSpec({
+    test("season pack episodes get their own file progress") {
+        val hash = "a".repeat(40)
+        org.jellyfin.mobile.nflix.data.LiveTorrents.progress[hash] = 0.48f
+        org.jellyfin.mobile.nflix.data.LiveTorrents.files[hash] = listOf(
+            "Show.S01E01.1080p.mkv" to 1f, "Show.S01E02.1080p.mkv" to 0.2f, "Show.S01E10.1080p.mkv" to 0f,
+        )
+        org.jellyfin.mobile.nflix.data.LiveTorrents.of(hash, 1, 1) shouldBe 1f
+        org.jellyfin.mobile.nflix.data.LiveTorrents.of(hash, 1, 2) shouldBe 0.2f
+        org.jellyfin.mobile.nflix.data.LiveTorrents.of(hash, 1, 3) shouldBe 0.48f
+        org.jellyfin.mobile.nflix.data.LiveTorrents.of(hash, null, null) shouldBe 0.48f
+    }
+})

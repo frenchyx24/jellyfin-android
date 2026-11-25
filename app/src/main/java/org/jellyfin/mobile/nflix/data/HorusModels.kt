@@ -86,13 +86,30 @@ data class HorusDownload(
 ) {
     /** 0..1: live qBittorrent value first, else the Radarr/Sonarr figure; null when unknown. */
     val progress: Float?
-        get() = downloadId?.lowercase()?.let { LiveTorrents.progress[it] }
+        get() = downloadId?.lowercase()?.let { hash -> LiveTorrents.of(hash, season, episode) }
             ?: if (size > 0) ((size - sizeLeft).coerceIn(0, size).toFloat() / size) else null
 }
 
 /** Live torrent progress keyed by lower-case hash, refreshed every 2 s while downloads are shown. */
 object LiveTorrents {
     val progress = androidx.compose.runtime.mutableStateMapOf<String, Float>()
+
+    /** Per-file progress of each torrent: (lower-case file name, progress). */
+    val files = androidx.compose.runtime.mutableStateMapOf<String, List<Pair<String, Float>>>()
+
+    /** Episode file of a season pack when it can be told apart, else the whole torrent. */
+    fun of(hash: String, season: Int?, episode: Int?): Float? {
+        if (season != null && episode != null) {
+            val list = files[hash].orEmpty()
+            if (list.size > 1) {
+                val pattern = Regex("""(?i)s0*${season}\s*[ex]0*${episode}(?!\d)|\b0*${season}x0*${episode}(?!\d)""")
+                list.filter { pattern.containsMatchIn(it.first) }.takeIf { it.isNotEmpty() }?.let { hits ->
+                    return hits.map { it.second }.average().toFloat()
+                }
+            }
+        }
+        return progress[hash]
+    }
 
     suspend fun refresh(api: NflixApi, hashes: Collection<String>) {
         val wanted = hashes.map { it.lowercase() }.filter { it.matches(Regex("[0-9a-f]{40}")) }.distinct().take(50)
@@ -101,6 +118,13 @@ object LiveTorrents {
         body.forEach { (hash, value) ->
             val p = ((value as? JsonObject)?.get("progress") as? JsonPrimitive)?.contentOrNull?.toFloatOrNull() ?: return@forEach
             progress[hash.lowercase()] = p.coerceIn(0f, 1f)
+            val list = ((value as? JsonObject)?.get("files") as? JsonArray)?.mapNotNull { f ->
+                val o = f as? JsonObject ?: return@mapNotNull null
+                val name = (o["name"] as? JsonPrimitive)?.contentOrNull ?: return@mapNotNull null
+                val fp = (o["progress"] as? JsonPrimitive)?.contentOrNull?.toFloatOrNull() ?: return@mapNotNull null
+                name to fp.coerceIn(0f, 1f)
+            }
+            if (list != null) files[hash.lowercase()] = list
         }
     }
 }
@@ -126,6 +150,12 @@ data class HorusRequest(
     /** Overall progress across every queued file (live qBittorrent values when known), weighted by size. */
     val progress: Float?
         get() {
+            // One value per torrent (a season pack counts once), straight from qBittorrent when known.
+            val hashes = downloads.mapNotNull { it.downloadId?.lowercase() }.distinct()
+            if (hashes.isNotEmpty() && hashes.size == downloads.size.coerceAtMost(hashes.size)) {
+                val live = hashes.mapNotNull { LiveTorrents.progress[it] }
+                if (live.size == hashes.size) return live.average().toFloat()
+            }
             val known = downloads.mapNotNull { d -> d.progress?.let { d to it } }
             if (known.isEmpty()) return null
             val total = known.sumOf { it.first.size }

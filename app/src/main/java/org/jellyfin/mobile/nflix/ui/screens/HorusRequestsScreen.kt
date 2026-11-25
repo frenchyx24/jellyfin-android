@@ -375,7 +375,7 @@ private fun DownloadRow(download: HorusDownload) {
         }
         Spacer(Modifier.height(4.dp))
         Text(
-            listOfNotNull(
+            if ((download.progress ?: 0f) >= 0.999f) "Terminé" else listOfNotNull(
                 statusLabel(download.status),
                 parseEta(download)?.let { "reste ${formatDuration(it)}" },
             ).joinToString(" · "),
