@@ -48,7 +48,7 @@ sealed class Route(val key: String) {
     data object Settings : Route("settings")
     data object Family : Route("family")
     data object Wrapped : Route("wrapped")
-    data class FamilyChat(val id: String, val title: String) : Route("family-chat/$id")
+    data class FamilyChat(val id: String, val title: String, val peer: String? = null) : Route("family-chat/$id")
     data object SeasonalSettings : Route("seasonal-settings")
     /** Annual preview of the themes of the coming 12 months. */
     data object SeasonalCalendar : Route("seasonal-calendar")

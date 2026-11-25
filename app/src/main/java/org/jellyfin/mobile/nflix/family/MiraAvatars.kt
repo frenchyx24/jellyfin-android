@@ -22,6 +22,7 @@ object MiraAvatars {
     val pictures: StateFlow<Map<String, String>> = _pictures.asStateFlow()
 
     @Volatile private var loading = false
+    @Volatile private var lastLoad = 0L
 
     /** True once the server answered at least once: a success with no picture replaces the map, a failure keeps it. */
     @Volatile private var loaded = false
@@ -36,7 +37,10 @@ object MiraAvatars {
 
     /** Fetches the map from the server once ([force] reloads it, e.g. after switching profile). */
     suspend fun load(api: NflixApi, force: Boolean = false) {
-        if (loading || (!force && loaded)) return
+        val now = System.currentTimeMillis()
+        // A forced refresh (screens with avatars) runs at most once a minute.
+        if (loading || (loaded && (!force || now - lastLoad < 60_000))) return
+        lastLoad = now
         loading = true
         try {
             val body = api.getJson("NflixAuth/Avatars") as? JsonObject ?: return

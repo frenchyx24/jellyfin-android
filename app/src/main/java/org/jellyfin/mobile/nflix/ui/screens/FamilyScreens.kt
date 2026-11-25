@@ -956,7 +956,7 @@ private fun FriendsTab(refreshMe: () -> Unit, outerReload: Int, canInvite: Boole
                     scope.launch {
                         attempt {
                             val c = deps.family.openConversation(f.userId)
-                            navigator.open(Route.FamilyChat(c.id, c.title))
+                            navigator.open(Route.FamilyChat(c.id, c.title, c.peerUserId))
                         }
                     }
                 }) { Text("Écrire") }
@@ -1019,6 +1019,7 @@ private fun FriendRow(userId: String, name: String, hasImage: Boolean, actions: 
 @Composable
 private fun MessagesTab(outerReload: Int) {
     val deps = LocalDeps.current
+    LaunchedEffect(outerReload) { org.jellyfin.mobile.nflix.family.MiraAvatars.load(deps.api, force = true) }
     val navigator = LocalNavigator.current
     var list by remember { mutableStateOf<List<ConversationInfo>?>(null) }
     LaunchedEffect(outerReload) {
@@ -1034,7 +1035,7 @@ private fun MessagesTab(outerReload: Int) {
             current.isEmpty() -> item { EmptyState(Icons.Rounded.Forum, "Aucune conversation", "Rejoignez une famille ou ajoutez des amis pour discuter.") }
             else -> itemsIndexed(current, key = { _, c -> c.id }) { index, c ->
                 Row(
-                    Modifier.fillMaxWidth().appear(index).clip(RoundedCornerShape(18.dp)).background(Nflix.Surface).clickable { navigator.open(Route.FamilyChat(c.id, c.title)) }.padding(12.dp),
+                    Modifier.fillMaxWidth().appear(index).clip(RoundedCornerShape(18.dp)).background(Nflix.Surface).clickable { navigator.open(Route.FamilyChat(c.id, c.title, c.peerUserId)) }.padding(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     if (c.kind == "family") {
@@ -1064,7 +1065,9 @@ private fun MessagesTab(outerReload: Int) {
 
 /** One conversation. New messages are fetched every 5 s while the screen is open. */
 @Composable
-fun FamilyChatScreen(conversationId: String, title: String) {
+fun FamilyChatScreen(conversationId: String, title: String, peer: String? = null) {
+    val avatarDeps = LocalDeps.current
+    LaunchedEffect(Unit) { org.jellyfin.mobile.nflix.family.MiraAvatars.load(avatarDeps.api, force = true) }
     val deps = LocalDeps.current
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
@@ -1114,7 +1117,8 @@ fun FamilyChatScreen(conversationId: String, title: String) {
                 Modifier.fillMaxWidth().background(Nflix.Surface).statusBarsPadding().padding(start = 64.dp, end = 16.dp, top = 10.dp, bottom = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Box(Modifier.size(40.dp).clip(CircleShape).background(Brush.linearGradient(listOf(Nflix.Red, Nflix.RedDeep))), contentAlignment = Alignment.Center) {
+                if (peer != null) UserBubble(peer, title, true, 40)
+                else Box(Modifier.size(40.dp).clip(CircleShape).background(Brush.linearGradient(listOf(Nflix.Red, Nflix.RedDeep))), contentAlignment = Alignment.Center) {
                     Text(FamilyFormat.initials(title), color = Color.White, fontWeight = FontWeight.Bold)
                 }
                 Spacer(Modifier.width(12.dp))
