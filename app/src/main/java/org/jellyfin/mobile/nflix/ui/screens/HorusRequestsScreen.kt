@@ -369,7 +369,7 @@ private fun DownloadRow(download: HorusDownload) {
             Text(download.progress?.let { "${(it * 100).toInt()} %" } ?: "—", style = MaterialTheme.typography.labelLarge, color = Nflix.Text)
         }
         Spacer(Modifier.height(6.dp))
-        val animated by animateFloatAsState((download.progress ?: 0f).coerceIn(0f, 1f), tween(600), label = "dl-item")
+        val animated by animateFloatAsState((download.progress ?: 0f).coerceIn(0f, 1f), tween(900), label = "dl-item")
         Box(Modifier.fillMaxWidth().height(4.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.1f))) {
             Box(Modifier.fillMaxHeight().fillMaxWidth(animated).clip(CircleShape).background(Nflix.Info))
         }
@@ -416,7 +416,7 @@ internal fun formatDuration(duration: Duration): String {
     }
 }
 
-/** Polls qBittorrent (through Butler) every 2 s for the downloads on screen; stops with the screen. */
+/** Polls qBittorrent (through Butler) every second for the downloads on screen; stops with the screen. */
 @Composable
 internal fun LiveTorrentPoller(requests: List<HorusRequest>) {
     val deps = LocalDeps.current
@@ -425,7 +425,7 @@ internal fun LiveTorrentPoller(requests: List<HorusRequest>) {
         if (hashes.isEmpty()) return@LaunchedEffect
         while (true) {
             org.jellyfin.mobile.nflix.data.LiveTorrents.refresh(deps.api, hashes)
-            delay(2_000)
+            delay(1_000)
         }
     }
 }
