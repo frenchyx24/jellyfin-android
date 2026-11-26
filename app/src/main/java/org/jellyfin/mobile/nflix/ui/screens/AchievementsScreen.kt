@@ -72,17 +72,27 @@ fun AchievementsScreen() {
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var revision by remember { mutableIntStateOf(0) }
-    var filter by rememberSaveable { mutableStateOf("Tous") }
-    var category by rememberSaveable { mutableStateOf<String?>(null) }
+    val browser = rememberBadgeBrowserState()
+    // Swipe order of the full-screen badge sheet: the filtered grid when opened from it, else the badge alone.
+    var selectedList by remember { mutableStateOf<List<AchievementBadge>>(emptyList()) }
     var selected by remember { mutableStateOf<AchievementBadge?>(null) }
     var saving by remember { mutableStateOf(false) }
     var actionError by remember { mutableStateOf<String?>(null) }
-    var query by rememberSaveable { mutableStateOf("") }
     val hub = remember(deps.api) { org.jellyfin.mobile.nflix.data.AchievementHub(deps.api) }
     val publicConfig = org.jellyfin.mobile.nflix.ui.rememberLoad("ab-config") { hub.publicConfig() }.let { (it as? org.jellyfin.mobile.nflix.ui.Load.Ready)?.value }
         ?: org.jellyfin.mobile.nflix.data.AchievementPublicConfig()
     var bank by remember { mutableStateOf<org.jellyfin.mobile.nflix.data.AchievementBank?>(null) }
     LaunchedEffect(hub, revision) { bank = runCatching { hub.bank() }.getOrNull() }
+    var recommendations by remember { mutableStateOf<List<org.jellyfin.mobile.nflix.data.BadgeRecommendation>>(emptyList()) }
+    LaunchedEffect(hub, revision) {
+        recommendations = try {
+            hub.recommendations()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            recommendations
+        }
+    }
     // Level, XP, streak, next/recent and seasonal data; null on older plugins (classic header then).
     var extra by remember { mutableStateOf<NflixAchievements?>(null) }
     LaunchedEffect(hub, revision) {
@@ -128,17 +138,6 @@ fun AchievementsScreen() {
         }
     }
 
-    val visibleFor: (AchievementProfile) -> List<AchievementBadge> = { data ->
-        data.badges.filter { badge ->
-            (category == null || badge.category == category) &&
-                (query.isBlank() || badge.title.contains(query.trim(), ignoreCase = true) || badge.description.contains(query.trim(), ignoreCase = true)) && when (filter) {
-                "Débloqués" -> badge.unlocked
-                "En cours" -> !badge.unlocked && badge.currentValue > 0
-                "Verrouillés" -> !badge.unlocked
-                else -> true
-            }
-        }.sortedWith(compareByDescending<AchievementBadge> { it.unlocked }.thenByDescending { it.progress }.thenBy { it.title })
-    }
 
     Box(Modifier.fillMaxSize()) {
         if (loading && profile == null) {
@@ -159,7 +158,7 @@ fun AchievementsScreen() {
                         SectionTitle("Prochains succès", "Vos objectifs les plus proches")
                         LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             itemsIndexed(next, key = { _, it -> "nx-${it.id}" }) { index, badge ->
-                                NextBadgeCard(badge, Modifier.achievementAppear(index)) { selected = badge; actionError = null }
+                                NextBadgeCard(badge, Modifier.achievementAppear(index)) { selected = badge; selectedList = emptyList(); actionError = null }
                             }
                         }
                     }
@@ -168,7 +167,7 @@ fun AchievementsScreen() {
                         SectionTitle("Récemment débloqués", "${recent.size} dernier(s)")
                         LazyRow(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             itemsIndexed(recent, key = { _, it -> "rc-${it.id}" }) { index, badge ->
-                                RecentBadgeCard(badge, fresh = badge.id in freshIds, modifier = Modifier.achievementAppear(index)) { selected = badge; actionError = null }
+                                RecentBadgeCard(badge, fresh = badge.id in freshIds, modifier = Modifier.achievementAppear(index)) { selected = badge; selectedList = emptyList(); actionError = null }
                             }
                         }
                     }
@@ -198,7 +197,7 @@ fun AchievementsScreen() {
                                 itemsIndexed(data.equipped, key = { _, it -> "eq-${it.id}" }) { index, badge ->
                                     val full = data.badges.find { it.id == badge.id } ?: badge
                                     Column(
-                                        Modifier.width(96.dp).achievementAppear(index).clip(RoundedCornerShape(14.dp)).clickable { selected = full; actionError = null }.padding(vertical = 6.dp),
+                                        Modifier.width(96.dp).achievementAppear(index).clip(RoundedCornerShape(14.dp)).clickable { selected = full; selectedList = emptyList(); actionError = null }.padding(vertical = 6.dp),
                                         horizontalAlignment = Alignment.CenterHorizontally,
                                     ) {
                                         Medallion(full, 64.dp)
@@ -216,7 +215,7 @@ fun AchievementsScreen() {
                             itemsIndexed(almost, key = { _, it -> "al-${it.id}" }) { index, badge ->
                                 Column(
                                     Modifier.width(220.dp).achievementAppear(index).clip(RoundedCornerShape(16.dp)).background(Nflix.Surface)
-                                        .clickable { selected = badge; actionError = null }.padding(14.dp),
+                                        .clickable { selected = badge; selectedList = emptyList(); actionError = null }.padding(14.dp),
                                 ) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Medallion(badge, 40.dp)
@@ -234,45 +233,11 @@ fun AchievementsScreen() {
                             }
                         }
                     }
-                    item("filters") {
-                        SectionTitle("Tous les succès", "${data.summary.unlocked} sur ${data.summary.total}")
-                        androidx.compose.material3.OutlinedTextField(
-                            query, { query = it.take(60) }, singleLine = true,
-                            label = { Text("Rechercher un succès") },
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp).fillMaxWidth(),
-                        )
-                        LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            val counts = mapOf(
-                                "Tous" to data.badges.size,
-                                "Débloqués" to data.badges.count { it.unlocked },
-                                "En cours" to data.badges.count { !it.unlocked && it.currentValue > 0 },
-                                "Verrouillés" to data.badges.count { !it.unlocked },
-                            )
-                            items(counts.keys.toList(), key = { it }) { label -> NChip("$label · ${counts[label]}", filter == label) { filter = label } }
-                        }
-                        LazyRow(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            item { NChip("Toutes catégories", category == null) { category = null } }
-                            items(data.badges.map { it.category }.distinct().sortedBy { categoryName(it) }, key = { "cat-$it" }) { value ->
-                                NChip(categoryName(value), category == value) { category = value }
-                            }
-                        }
-                    }
-                    val visible = visibleFor(data)
-                    if (visible.isEmpty()) item("empty") {
-                        Text("Aucun succès ne correspond à ces filtres.", color = Nflix.Muted, modifier = Modifier.padding(20.dp))
-                    }
-                    itemsIndexed(visible.chunked(2), key = { _, row -> "row-" + row.joinToString("-") { it.id } }) { index, row ->
-                        Row(Modifier.achievementAppear(index).padding(horizontal = 16.dp, vertical = 5.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            row.forEach { badge ->
-                                key(badge.id) {
-                                    BadgeTile(badge, data.rarityStats[badge.id], data.equipped.any { it.id == badge.id }, Modifier.weight(1f), fresh = badge.id in freshIds) {
-                                        selected = badge; actionError = null
-                                    }
-                                }
-                            }
-                            if (row.size == 1) Spacer(Modifier.weight(1f))
-                        }
-                    }
+                    val visible = browser.visible(data.badges)
+                    achievementBadgeBrowser(
+                        browser, data.badges, visible, "${data.summary.unlocked} sur ${data.summary.total}",
+                        data.rarityStats, data.equipped.map { it.id }.toSet(), freshIds,
+                    ) { badge -> selected = badge; selectedList = visible; actionError = null }
                 }
             }
         }
@@ -284,51 +249,28 @@ fun AchievementsScreen() {
     }
 
     if (celebrate.isNotEmpty()) {
-        AchievementCelebration(
+        AchievementUnlockOverlay(
             celebrate,
             onOpen = { badge ->
                 celebrate = emptyList()
                 selected = profile?.badges?.find { it.id == badge.id } ?: badge
+                selectedList = emptyList()
                 actionError = null
             },
             onDismiss = { celebrate = emptyList() },
         )
     }
 
-    selected?.let { badge ->
-        val equipped = profile?.equipped?.any { it.id == badge.id } == true
-        val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-        ModalBottomSheet(onDismissRequest = { if (!saving) selected = null }, sheetState = sheet, containerColor = Nflix.SurfaceHigh) {
-            Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 24.dp, vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                BadgeDetailHero(badge)
-                Spacer(Modifier.height(6.dp))
-                Text(badge.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
-                Spacer(Modifier.height(6.dp))
-                RarityPill(badge.rarity, badge.rarityLabel)
-                Spacer(Modifier.height(12.dp))
-                Text(badge.description, style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center, color = Nflix.Text.copy(alpha = 0.9f))
-                Spacer(Modifier.height(16.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    StatTile("Catégorie", categoryName(badge.category), Modifier.weight(1f))
-                    StatTile(
-                        "Membres",
-                        profile?.rarityStats?.get(badge.id)?.let { String.format(Locale.FRANCE, "%.1f %%", it) } ?: "—",
-                        Modifier.weight(1f),
-                    )
-                }
-                Spacer(Modifier.height(14.dp))
-                if (badge.unlocked) {
-                    Text("Débloqué${badge.unlockedAt?.let { " le ${achievementDate(it)}" }.orEmpty()}", color = Nflix.Success, style = MaterialTheme.typography.labelLarge)
-                } else if (badge.targetValue > 0) {
-                    BadgeProgress(badge)
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        "${badge.currentValue} / ${badge.targetValue} · encore ${(badge.targetValue - badge.currentValue).coerceAtLeast(0)}",
-                        style = MaterialTheme.typography.labelLarge, color = Nflix.Muted,
-                    )
-                } else {
-                    Text("Pas encore débloqué", style = MaterialTheme.typography.labelLarge, color = Nflix.Muted)
-                }
+    selected?.let { start ->
+        val list = (selectedList.takeIf { l -> l.any { it.id == start.id } } ?: listOf(start)).map { b -> profile?.badges?.find { it.id == b.id } ?: b }
+        AchievementBadgeSheet(
+            badges = list, startId = start.id, rarityStats = profile?.rarityStats.orEmpty(), recommendations = recommendations,
+            onDismiss = { if (!saving) selected = null },
+            onOpenItem = { id -> selected = null; navigator.open(org.jellyfin.mobile.nflix.ui.Route.Item(id)) },
+            onPageChange = { actionError = null },
+        ) { badge ->
+            val equipped = profile?.equipped?.any { it.id == badge.id } == true
+            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                 actionError?.let { Spacer(Modifier.height(8.dp)); Text(it, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center) }
                 Spacer(Modifier.height(18.dp))
                 if (badge.unlocked) {
