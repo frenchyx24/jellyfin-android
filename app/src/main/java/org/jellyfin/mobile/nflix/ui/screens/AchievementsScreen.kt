@@ -73,6 +73,11 @@ fun AchievementsScreen() {
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var revision by remember { mutableIntStateOf(0) }
+    var section by rememberSaveable { mutableIntStateOf(0) }
+    var familyMembers by remember { mutableStateOf<List<org.jellyfin.mobile.nflix.family.FamilyMemberInfo>>(emptyList()) }
+    LaunchedEffect(section) {
+        if (section == 1) familyMembers = runCatching { deps.family.me()?.family?.members }.getOrNull().orEmpty()
+    }
     val browser = rememberBadgeBrowserState()
     // Swipe order of the full-screen badge sheet: the filtered grid when opened from it, else the badge alone.
     var selectedList by remember { mutableStateOf<List<AchievementBadge>>(emptyList()) }
@@ -144,10 +149,27 @@ fun AchievementsScreen() {
     Box(Modifier.fillMaxSize()) {
         if (loading && profile == null) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Nflix.Red) }
+        } else if (section == 1) {
+            AchievementSocialTab(hub, familyMembers, onOpenBadge = { id -> profile?.badges?.firstOrNull { it.id == id }?.let { selected = it } })
+        } else if (section == 2) {
+            YearRecapScreen(hub, onClose = { section = 0 })
         } else {
             LazyColumn(contentPadding = PaddingValues(bottom = ContentBottomPadding)) {
                 val data = profile
                 val nflix = extra
+                item("section") {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("Succès", "Social", "Rétrospective").forEachIndexed { index, label ->
+                            val active = section == index
+                            Text(
+                                label, fontSize = 13.sp, fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
+                                color = if (active) Color.Black else Nflix.Muted,
+                                modifier = Modifier.clip(RoundedCornerShape(50)).background(if (active) Color.White else Nflix.Surface)
+                                    .clickable { section = index }.padding(horizontal = 12.dp, vertical = 6.dp),
+                            )
+                        }
+                    }
+                }
                 item("rank") {
                     val heroContext = LocalContext.current
                     if (data != null && nflix != null) NflixHero(data, nflix, loading, onShare = {
