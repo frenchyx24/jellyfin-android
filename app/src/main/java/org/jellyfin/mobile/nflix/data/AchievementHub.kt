@@ -296,6 +296,20 @@ class AchievementHub internal constructor(
 
     // --- Member features -----------------------------------------------------------------------
 
+    /**
+     * Aggregated Nflix view (level, XP, streak, next and recent badges, seasonal event).
+     * Null when the server is too old (404, or no Level block), so the classic screen still works.
+     */
+    suspend fun nflix(): NflixAchievements? {
+        val o = try {
+            get("users/$me/nflix") as? JsonObject
+        } catch (missing: AchievementPluginMissingException) {
+            null
+        } ?: return null
+        return NflixAchievements.parse(o)
+    }
+
+
     suspend fun publicConfig(): AchievementPublicConfig = AchievementPublicConfig.parse(get("public-config") as? JsonObject)
 
     suspend fun bank(): AchievementBank = AchievementBank.parse(get("users/$me/bank") as? JsonObject)
@@ -553,4 +567,78 @@ class AchievementHub internal constructor(
             else -> kind
         }
     }
+}
+
+
+@Immutable
+data class NflixLevel(val level: Int, val xp: Int, val xpIntoLevel: Int, val xpForNextLevel: Int, val title: String) {
+    val progress: Float get() = if (xpForNextLevel > 0) (xpIntoLevel.toFloat() / xpForNextLevel).coerceIn(0f, 1f) else 0f
+}
+
+@Immutable
+data class NflixStreak(val current: Int, val best: Int)
+
+@Immutable
+data class NflixSeasonal(val active: Boolean, val name: String?, val endsAt: String?)
+
+@Immutable
+data class NflixAchievements(
+    val level: NflixLevel,
+    val streak: NflixStreak,
+    val recent: List<AchievementBadge>,
+    val next: List<AchievementBadge>,
+    val seasonal: NflixSeasonal,
+    val tierLabel: String?,
+    val unlocked: Int,
+    val total: Int,
+) {
+    companion object {
+        internal fun parse(o: JsonObject): NflixAchievements? {
+            val level = PJ.obj(o, "Level") ?: return null
+            val summary = PJ.obj(o, "Summary")
+            val streak = PJ.obj(o, "Streak")
+            val seasonal = PJ.obj(o, "Seasonal")
+            val badges = PJ.objects(o, "Badges").mapNotNull(::parseNflixBadge)
+            val lvl = PJ.int(level, "Level").coerceAtLeast(1)
+            return NflixAchievements(
+                level = NflixLevel(
+                    level = lvl,
+                    xp = PJ.int(level, "Xp"),
+                    xpIntoLevel = PJ.int(level, "XpIntoLevel").coerceAtLeast(0),
+                    xpForNextLevel = PJ.int(level, "XpForNextLevel").takeIf { it > 0 } ?: (100 * lvl),
+                    title = PJ.str(level, "Title") ?: "Spectateur",
+                ),
+                streak = NflixStreak(
+                    current = if (streak != null) PJ.int(streak, "Current") else PJ.int(summary, "CurrentWatchStreak"),
+                    best = if (streak != null) PJ.int(streak, "Best") else PJ.int(summary, "BestWatchStreak"),
+                ),
+                recent = PJ.objects(o, "Recent").mapNotNull(::parseNflixBadge).take(10),
+                next = PJ.objects(o, "Next").mapNotNull(::parseNflixBadge).take(6),
+                seasonal = NflixSeasonal(PJ.bool(seasonal, "Active"), PJ.str(seasonal, "Name"), PJ.str(seasonal, "EndsAt")),
+                tierLabel = PJ.str(PJ.obj(PJ.obj(o, "Rank"), "Tier"), "Label"),
+                unlocked = PJ.field(summary, "Unlocked")?.let { PJ.int(summary, "Unlocked") } ?: badges.count { it.unlocked },
+                total = PJ.field(summary, "Total")?.let { PJ.int(summary, "Total") } ?: badges.size,
+            )
+        }
+    }
+}
+
+/** Lenient badge read; entries may also wrap the badge as {Badge: {...}}. */
+internal fun parseNflixBadge(element: JsonObject): AchievementBadge? {
+    val o = PJ.obj(element, "Badge") ?: element
+    val id = PJ.str(o, "Id") ?: return null
+    return AchievementBadge(
+        id = id,
+        key = PJ.str(o, "Key"),
+        title = PJ.str(o, "Title") ?: id,
+        description = PJ.str(o, "Description").orEmpty(),
+        icon = PJ.str(o, "Icon"),
+        category = PJ.str(o, "Category") ?: "General",
+        unlocked = PJ.bool(o, "Unlocked"),
+        unlockedAt = PJ.str(o, "UnlockedAt"),
+        currentValue = PJ.long(o, "CurrentValue"),
+        targetValue = PJ.long(o, "TargetValue"),
+        rarity = PJ.str(o, "Rarity") ?: "Common",
+        rarityLabel = PJ.str(o, "RarityLabel"),
+    )
 }

@@ -1,6 +1,12 @@
 package org.jellyfin.mobile.nflix.ui.screens
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -35,6 +41,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -48,6 +55,8 @@ import org.jellyfin.mobile.nflix.ui.ContentBottomPadding
 import org.jellyfin.mobile.nflix.ui.LocalDeps
 import org.jellyfin.mobile.nflix.ui.LocalNavigator
 import org.jellyfin.mobile.nflix.ui.Nflix
+import org.jellyfin.mobile.nflix.ui.rememberAmbientMotionAllowed
+import org.jellyfin.mobile.nflix.data.NflixAchievements
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -74,6 +83,17 @@ fun AchievementsScreen() {
         ?: org.jellyfin.mobile.nflix.data.AchievementPublicConfig()
     var bank by remember { mutableStateOf<org.jellyfin.mobile.nflix.data.AchievementBank?>(null) }
     LaunchedEffect(hub, revision) { bank = runCatching { hub.bank() }.getOrNull() }
+    // Level, XP, streak, next/recent and seasonal data; null on older plugins (classic header then).
+    var extra by remember { mutableStateOf<NflixAchievements?>(null) }
+    LaunchedEffect(hub, revision) {
+        extra = try {
+            hub.nflix()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            extra
+        }
+    }
     val context = LocalContext.current
     val userKey = deps.session.userId.orEmpty()
     // Badges unlocked since the last visit: celebrated once, then tagged "Nouveau" for this session.
@@ -126,9 +146,32 @@ fun AchievementsScreen() {
         } else {
             LazyColumn(contentPadding = PaddingValues(bottom = ContentBottomPadding)) {
                 val data = profile
+                val nflix = extra
                 item("rank") {
-                    if (data != null) RankHeader(data, loading) { revision++ }
+                    if (data != null && nflix != null) NflixHero(data, nflix, loading) { revision++ }
+                    else if (data != null) RankHeader(data, loading) { revision++ }
                     else Spacer(Modifier.statusBarsPadding().height(64.dp))
+                }
+                if (data != null && nflix != null) {
+                    item("streak") { StreakAndSeason(nflix) }
+                    val next = nflix.next.map { b -> data.badges.find { it.id == b.id }?.let { it.copy(rarityLabel = it.rarityLabel ?: b.rarityLabel) } ?: b }
+                    if (next.isNotEmpty()) item("next") {
+                        SectionTitle("Prochains succès", "Vos objectifs les plus proches")
+                        LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            itemsIndexed(next, key = { _, it -> "nx-${it.id}" }) { index, badge ->
+                                NextBadgeCard(badge, Modifier.achievementAppear(index)) { selected = badge; actionError = null }
+                            }
+                        }
+                    }
+                    val recent = nflix.recent.map { b -> data.badges.find { it.id == b.id }?.let { it.copy(rarityLabel = it.rarityLabel ?: b.rarityLabel) } ?: b }
+                    if (recent.isNotEmpty()) item("recent") {
+                        SectionTitle("Récemment débloqués", "${recent.size} dernier(s)")
+                        LazyRow(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            itemsIndexed(recent, key = { _, it -> "rc-${it.id}" }) { index, badge ->
+                                RecentBadgeCard(badge, fresh = badge.id in freshIds, modifier = Modifier.achievementAppear(index)) { selected = badge; actionError = null }
+                            }
+                        }
+                    }
                 }
                 error?.let { message ->
                     item("error") {
@@ -166,7 +209,7 @@ fun AchievementsScreen() {
                         }
                     }
                     val almost = data.badges.filter { !it.unlocked && it.targetValue > 0 && it.currentValue > 0 }.sortedByDescending { it.progress }.take(10)
-                    if (almost.isNotEmpty()) item("almost") {
+                    if (almost.isNotEmpty() && nflix?.next.isNullOrEmpty()) item("almost") {
                         SectionTitle("Presque débloqués", "Vos prochains objectifs")
                         LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             itemsIndexed(almost, key = { _, it -> "al-${it.id}" }) { index, badge ->
@@ -260,7 +303,7 @@ fun AchievementsScreen() {
                 Spacer(Modifier.height(6.dp))
                 Text(badge.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
                 Spacer(Modifier.height(6.dp))
-                RarityPill(badge.rarity)
+                RarityPill(badge.rarity, badge.rarityLabel)
                 Spacer(Modifier.height(12.dp))
                 Text(badge.description, style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center, color = Nflix.Text.copy(alpha = 0.9f))
                 Spacer(Modifier.height(16.dp))
@@ -566,10 +609,10 @@ private fun BadgeProgress(badge: AchievementBadge) {
 }
 
 @Composable
-internal fun RarityPill(rarity: String) {
+internal fun RarityPill(rarity: String, label: String? = null) {
     val color = rarityColor(rarity)
     Text(
-        rarityName(rarity).uppercase(Locale.FRANCE),
+        (label ?: rarityName(rarity)).uppercase(Locale.FRANCE),
         style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = color,
         modifier = Modifier.clip(CircleShape).background(color.copy(alpha = 0.15f)).padding(horizontal = 10.dp, vertical = 3.dp),
     )
@@ -578,10 +621,20 @@ internal fun RarityPill(rarity: String) {
 @Composable
 private fun BadgeTile(badge: AchievementBadge, membersPercent: Double?, equipped: Boolean, modifier: Modifier, fresh: Boolean = false, onClick: () -> Unit) {
     val color = rarityColor(badge.rarity)
+    val shape = RoundedCornerShape(18.dp)
+    val label = badge.rarityLabel ?: rarityName(badge.rarity)
     Column(
-        modifier.clip(RoundedCornerShape(16.dp)).background(Nflix.Surface)
-            .then(if (badge.unlocked) Modifier.background(Brush.verticalGradient(listOf(color.copy(alpha = 0.10f), Color.Transparent))) else Modifier)
-            .border(1.dp, if (fresh) color.copy(alpha = 0.8f) else if (badge.unlocked) color.copy(alpha = 0.35f) else Nflix.Outline, RoundedCornerShape(16.dp))
+        modifier.clip(shape)
+            .background(
+                if (badge.unlocked) Brush.verticalGradient(listOf(color.copy(alpha = 0.22f), Nflix.Surface, Nflix.Surface))
+                else Brush.verticalGradient(listOf(Color(0xFF1A1A1C), Color(0xFF141416))),
+            )
+            .border(
+                if (fresh) 2.dp else 1.dp,
+                if (badge.unlocked) Brush.linearGradient(listOf(color, color.copy(alpha = 0.25f), color.copy(alpha = 0.7f)))
+                else Brush.linearGradient(listOf(Color.White.copy(alpha = 0.10f), Color.White.copy(alpha = 0.04f))),
+                shape,
+            )
             .clickable(onClick = onClick).padding(12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -591,20 +644,294 @@ private fun BadgeTile(badge: AchievementBadge, membersPercent: Double?, equipped
             if (fresh) NewBadgeTag(Modifier.align(Alignment.BottomCenter).offset(y = 6.dp))
         }
         Spacer(Modifier.height(8.dp))
-        Text(badge.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.height(40.dp))
-        Text(badge.description, style = MaterialTheme.typography.labelSmall, color = Nflix.Muted, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.height(30.dp))
+        Text(
+            badge.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
+            color = if (badge.unlocked) Nflix.Text else Nflix.Text.copy(alpha = 0.6f),
+            maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.height(40.dp),
+        )
+        Text(badge.description, style = MaterialTheme.typography.labelSmall, color = Nflix.Muted.copy(alpha = if (badge.unlocked) 1f else 0.7f), textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.height(30.dp))
         Spacer(Modifier.height(8.dp))
         if (badge.unlocked) {
             Text(
-                listOfNotNull(rarityName(badge.rarity), membersPercent?.let { String.format(Locale.FRANCE, "%.0f %% des membres", it) }).joinToString(" · "),
-                style = MaterialTheme.typography.labelSmall, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                listOfNotNull(label, membersPercent?.let { String.format(Locale.FRANCE, "%.0f %% des membres", it) }).joinToString(" · "),
+                style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
         } else if (badge.targetValue > 0) {
-            BadgeProgress(badge)
+            AchievementProgressBar(badge.progress, color.copy(alpha = 0.55f))
             Spacer(Modifier.height(4.dp))
-            Text("${badge.currentValue} / ${badge.targetValue}", style = MaterialTheme.typography.labelSmall, color = Nflix.Muted)
+            Row(Modifier.fillMaxWidth()) {
+                Text("${badge.currentValue} / ${badge.targetValue}", style = MaterialTheme.typography.labelSmall, color = Nflix.Muted, modifier = Modifier.weight(1f))
+                Text("${(badge.progress * 100).toInt()} %", style = MaterialTheme.typography.labelSmall, color = Nflix.Muted)
+            }
         } else {
-            Text(rarityName(badge.rarity), style = MaterialTheme.typography.labelSmall, color = Nflix.Muted)
+            Text(label, style = MaterialTheme.typography.labelSmall, color = Nflix.Muted)
+        }
+    }
+}
+
+/** Hero of the Nflix view: animated XP ring with the level, title, XP, tier and unlocked count. */
+@Composable
+private fun NflixHero(data: AchievementProfile, extra: NflixAchievements, loading: Boolean, onRefresh: () -> Unit) {
+    val level = extra.level
+    val tier = tierColor(data.rank.tier.color)
+    val motion = rememberMotionEnabled()
+    val ambient = rememberAmbientMotionAllowed() && motion
+    val ring = rememberAchievementProgress(level.progress, delayMs = 250, durationMs = 1400)
+    val shownLevel = achievementCountUp(level.level, durationMs = 900)
+    val xp = achievementCountUp(level.xpIntoLevel, durationMs = 1300)
+    val pulse = if (ambient) {
+        rememberInfiniteTransition(label = "hero").animateFloat(
+            0.35f, 0.75f,
+            infiniteRepeatable(tween(2200, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "pulse",
+        ).value
+    } else 0.5f
+    val accent = Nflix.Red
+    Box(
+        Modifier.fillMaxWidth()
+            .background(Brush.verticalGradient(listOf(accent.copy(alpha = 0.38f), Nflix.RedDeep.copy(alpha = 0.16f), Nflix.Night))),
+    ) {
+        Column(Modifier.statusBarsPadding().fillMaxWidth().padding(top = 8.dp, bottom = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Row(Modifier.fillMaxWidth().padding(start = 60.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Succès", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                IconButton(onClick = onRefresh, enabled = !loading) {
+                    if (loading) CircularProgressIndicator(Modifier.size(20.dp), color = accent, strokeWidth = 2.dp) else Icon(Icons.Rounded.Refresh, "Actualiser")
+                }
+            }
+            Column(
+                Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth().clip(RoundedCornerShape(28.dp))
+                    .background(Brush.linearGradient(listOf(Color(0xFF221012), Nflix.Surface, Color(0xFF120C0D))))
+                    .border(1.dp, Brush.linearGradient(listOf(accent.copy(alpha = 0.7f), Color.White.copy(alpha = 0.06f), tier.copy(alpha = 0.5f))), RoundedCornerShape(28.dp))
+                    .padding(vertical = 20.dp, horizontal = 16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Box(Modifier.size(184.dp), contentAlignment = Alignment.Center) {
+                    Canvas(Modifier.fillMaxSize()) {
+                        val stroke = 14.dp.toPx()
+                        val inset = stroke / 2 + 6.dp.toPx()
+                        val arcSize = androidx.compose.ui.geometry.Size(size.width - inset * 2, size.height - inset * 2)
+                        val topLeft = androidx.compose.ui.geometry.Offset(inset, inset)
+                        drawCircle(
+                            Brush.radialGradient(listOf(accent.copy(alpha = 0.22f * pulse * 2f), Color.Transparent)),
+                            radius = size.minDimension / 2,
+                        )
+                        drawArc(Color.White.copy(alpha = 0.08f), 0f, 360f, false, topLeft, arcSize, style = Stroke(stroke, cap = StrokeCap.Round))
+                        val sweep = 360f * ring.value
+                        if (sweep > 0.5f) {
+                            drawArc(
+                                Brush.sweepGradient(listOf(Nflix.RedDeep, accent, Color(0xFFFF8A65), accent)),
+                                -90f, sweep, false, topLeft, arcSize, style = Stroke(stroke, cap = StrokeCap.Round),
+                            )
+                            val angle = Math.toRadians((sweep - 90f).toDouble())
+                            val r = arcSize.width / 2
+                            val c = androidx.compose.ui.geometry.Offset(size.width / 2 + (r * kotlin.math.cos(angle)).toFloat(), size.height / 2 + (r * kotlin.math.sin(angle)).toFloat())
+                            drawCircle(Color.White.copy(alpha = 0.9f), radius = stroke * 0.32f, center = c)
+                            drawCircle(accent.copy(alpha = 0.35f * pulse * 2f), radius = stroke * 0.9f, center = c)
+                        }
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("NIVEAU", style = MaterialTheme.typography.labelMedium, color = Nflix.Muted, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+                        Text("$shownLevel", style = MaterialTheme.typography.displayLarge, fontWeight = FontWeight.Black, color = Color.White)
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
+                Text(level.title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    "$xp / ${level.xpForNextLevel} XP",
+                    style = MaterialTheme.typography.titleSmall, color = accent, fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    "${(level.xpForNextLevel - level.xpIntoLevel).coerceAtLeast(0)} XP avant le niveau ${level.level + 1} · ${level.xp} XP au total",
+                    style = MaterialTheme.typography.labelSmall, color = Nflix.Muted, textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(14.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    HeroPill(
+                        achievementIcon(data.rank.tier.icon), tier, "Rang",
+                        extra.tierLabel ?: data.rank.tier.frenchName,
+                        data.rank.nextTier?.let { "${data.rank.score} pts · ${data.rank.progressToNext.coerceIn(0, 100)} %" } ?: "${data.rank.score} pts · max",
+                        Modifier.weight(1f),
+                    )
+                    val total = extra.total.takeIf { it > 0 } ?: data.summary.total
+                    val unlocked = if (extra.total > 0) extra.unlocked else data.summary.unlocked
+                    HeroPill(
+                        Icons.Rounded.EmojiEvents, Nflix.Warning, "Débloqués", "$unlocked / $total",
+                        if (total > 0) "${unlocked * 100 / total} %" else "—",
+                        Modifier.weight(1f),
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally)) {
+                    listOf("Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic").forEach { rarity ->
+                        val total = data.badges.count { it.rarity == rarity }
+                        if (total > 0) {
+                            val got = data.badges.count { it.rarity == rarity && it.unlocked }
+                            Row(
+                                Modifier.clip(CircleShape).background(rarityColor(rarity).copy(alpha = 0.14f)).padding(horizontal = 8.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Box(Modifier.size(7.dp).clip(CircleShape).background(rarityColor(rarity)))
+                                Spacer(Modifier.width(4.dp))
+                                Text("$got/$total", style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HeroPill(icon: ImageVector, color: Color, label: String, value: String, caption: String, modifier: Modifier = Modifier) {
+    Row(
+        modifier.clip(RoundedCornerShape(16.dp)).background(color.copy(alpha = 0.10f))
+            .border(1.dp, color.copy(alpha = 0.28f), RoundedCornerShape(16.dp)).padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(34.dp).clip(CircleShape).background(color.copy(alpha = 0.18f)), contentAlignment = Alignment.Center) {
+            Icon(icon, null, tint = color, modifier = Modifier.size(20.dp))
+        }
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.labelSmall, color = Nflix.Muted, maxLines = 1)
+            Text(value, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(caption, style = MaterialTheme.typography.labelSmall, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+/** Flame streak chip and, during a seasonal event, its banner. */
+@Composable
+private fun StreakAndSeason(extra: NflixAchievements) {
+    val ambient = rememberAmbientMotionAllowed() && rememberMotionEnabled()
+    val flame = if (ambient && extra.streak.current > 0) {
+        rememberInfiniteTransition(label = "flame").animateFloat(
+            0.9f, 1.12f, infiniteRepeatable(tween(900, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "flameScale",
+        ).value
+    } else 1f
+    val fire = Color(0xFFFF7A2F)
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp))
+                .background(Brush.horizontalGradient(listOf(fire.copy(alpha = if (extra.streak.current > 0) 0.22f else 0.08f), Nflix.Surface)))
+                .border(1.dp, fire.copy(alpha = if (extra.streak.current > 0) 0.45f else 0.15f), RoundedCornerShape(18.dp))
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Rounded.LocalFireDepartment, null,
+                tint = if (extra.streak.current > 0) fire else Nflix.Muted,
+                modifier = Modifier.size(30.dp).graphicsLayer { scaleX = flame; scaleY = flame },
+            )
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "🔥 ${extra.streak.current} ${if (extra.streak.current > 1) "jours" else "jour"}",
+                    style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    if (extra.streak.current > 0) "Série en cours, continuez demain !" else "Regardez un titre pour lancer une série",
+                    style = MaterialTheme.typography.labelSmall, color = Nflix.Muted,
+                )
+            }
+            Text(
+                "record ${extra.streak.best}",
+                style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = fire,
+                modifier = Modifier.clip(CircleShape).background(fire.copy(alpha = 0.14f)).padding(horizontal = 10.dp, vertical = 4.dp),
+            )
+        }
+        val season = extra.seasonal
+        if (season.active && !season.name.isNullOrBlank()) {
+            val (icon, tint) = when (season.name.lowercase(Locale.FRANCE)) {
+                "halloween" -> Icons.Rounded.NightsStay to Color(0xFFFF8C1A)
+                "noël", "noel" -> Icons.Rounded.AcUnit to Color(0xFF7FD3FF)
+                "été", "ete" -> Icons.Rounded.WbSunny to Color(0xFFFFC94D)
+                else -> Icons.Rounded.Celebration to Nflix.Red
+            }
+            val until = season.endsAt?.let { seasonEnd(it) }
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp))
+                    .background(Brush.horizontalGradient(listOf(tint.copy(alpha = 0.30f), Nflix.RedDeep.copy(alpha = 0.25f), Nflix.Surface)))
+                    .border(1.dp, tint.copy(alpha = 0.4f), RoundedCornerShape(18.dp))
+                    .padding(horizontal = 14.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(icon, null, tint = tint, modifier = Modifier.size(28.dp))
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "Saison ${season.name}${until?.let { " — jusqu'au $it" }.orEmpty()}",
+                        style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold,
+                    )
+                    Text("Des succès saisonniers sont à débloquer en ce moment.", style = MaterialTheme.typography.labelSmall, color = Nflix.Text.copy(alpha = 0.75f))
+                }
+            }
+        }
+    }
+}
+
+/** EndsAt is the first instant after the event: show the previous day. */
+private fun seasonEnd(value: String): String? = runCatching {
+    OffsetDateTime.parse(value).minusDays(1).format(DateTimeFormatter.ofPattern("d MMMM", Locale.FRANCE))
+}.getOrNull()
+
+@Composable
+private fun NextBadgeCard(badge: AchievementBadge, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val color = rarityColor(badge.rarity)
+    val percent = (badge.progress * 100).toInt()
+    Column(
+        modifier.width(210.dp).clip(RoundedCornerShape(18.dp))
+            .background(Brush.verticalGradient(listOf(color.copy(alpha = 0.12f), Nflix.Surface)))
+            .border(1.dp, color.copy(alpha = 0.32f), RoundedCornerShape(18.dp))
+            .clickable(onClick = onClick).padding(14.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Medallion(badge, 44.dp)
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(badge.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(badge.rarityLabel ?: rarityName(badge.rarity), style = MaterialTheme.typography.labelSmall, color = color, maxLines = 1)
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            AchievementProgressBar(badge.progress, color, Modifier.weight(1f), height = 7.dp)
+            Spacer(Modifier.width(8.dp))
+            Text("$percent %", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = color)
+        }
+        if (badge.targetValue > 0) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "${badge.currentValue} / ${badge.targetValue} · encore ${(badge.targetValue - badge.currentValue).coerceAtLeast(0)}",
+                style = MaterialTheme.typography.labelSmall, color = Nflix.Muted, maxLines = 1,
+            )
+        }
+    }
+}
+
+@Composable
+private fun RecentBadgeCard(badge: AchievementBadge, fresh: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val color = rarityColor(badge.rarity)
+    Column(
+        modifier.width(118.dp).clip(RoundedCornerShape(18.dp))
+            .background(Brush.radialGradient(listOf(color.copy(alpha = 0.30f), Nflix.Surface), radius = 260f))
+            .border(1.dp, Brush.linearGradient(listOf(color, color.copy(alpha = 0.2f))), RoundedCornerShape(18.dp))
+            .clickable(onClick = onClick).padding(vertical = 14.dp, horizontal = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box {
+            Medallion(badge, 64.dp)
+            if (fresh) NewBadgeTag(Modifier.align(Alignment.BottomCenter).offset(y = 6.dp))
+        }
+        Spacer(Modifier.height(10.dp))
+        Text(badge.title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, maxLines = 2, textAlign = TextAlign.Center, overflow = TextOverflow.Ellipsis)
+        Text(badge.rarityLabel ?: rarityName(badge.rarity), style = MaterialTheme.typography.labelSmall, color = color, maxLines = 1)
+        badge.unlockedAt?.let { at ->
+            Text(
+                runCatching { OffsetDateTime.parse(at).format(DateTimeFormatter.ofPattern("d MMM", Locale.FRANCE)) }.getOrDefault(""),
+                style = MaterialTheme.typography.labelSmall, color = Nflix.Muted, maxLines = 1,
+            )
         }
     }
 }

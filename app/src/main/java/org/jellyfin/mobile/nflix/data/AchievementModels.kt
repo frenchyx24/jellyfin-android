@@ -22,6 +22,7 @@ data class AchievementBadge(
     @SerialName("TargetValue") val targetValue: Long,
     @SerialName("Rarity") val rarity: String,
     @SerialName("EarnSource") val earnSource: JsonElement? = null,
+    @SerialName("RarityLabel") val rarityLabel: String? = null,
 ) {
     val progress: Float get() = if (unlocked) 1f else if (targetValue > 0) (currentValue.toDouble() / targetValue).toFloat().coerceIn(0f, 1f) else 0f
 }
