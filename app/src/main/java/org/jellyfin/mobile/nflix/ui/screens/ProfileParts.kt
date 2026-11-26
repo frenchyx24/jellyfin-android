@@ -122,15 +122,16 @@ internal fun ProfileHeader(
         Spacer(Modifier.height(16.dp))
         GlassCard(Modifier.fillMaxWidth()) {
             Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(64.dp).border(2.dp, ringColor.copy(alpha = 0.8f), CircleShape).padding(3.dp), contentAlignment = Alignment.Center) {
+                ProfileFrame(userId, 64.dp) { Box(Modifier.size(64.dp).border(2.dp, ringColor.copy(alpha = 0.8f), CircleShape).padding(3.dp), contentAlignment = Alignment.Center) {
                     Box(Modifier.size(58.dp).clip(CircleShape).background(Nflix.SurfaceHigh), contentAlignment = Alignment.Center) {
                         org.jellyfin.mobile.nflix.ui.ProfilePicture(userId, avatar, Modifier.size(58.dp).clip(CircleShape)) {
                             Text(initials, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = ringColor)
                         }
                     }
-                }
+                } }
                 Column(Modifier.weight(1f).padding(start = 14.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(displayName ?: "", fontSize = 19.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, color = Nflix.Text)
+                    ProfileTitleLine(userId)
                     ShowcaseMedals(userId)
                     if (email != null) Text(email, fontSize = 12.sp, color = Nflix.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     if (plan != MiraPlan.NONE) {

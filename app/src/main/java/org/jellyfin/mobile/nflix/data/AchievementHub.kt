@@ -253,6 +253,64 @@ data class WebhookConfig(val enabled: Boolean, val url: String?, val template: S
     val maskedUrl: String? get() = url?.let { runCatching { it.toHttpUrl().let { u -> "${u.scheme}://${u.host}/…" } }.getOrDefault("•••") }
 }
 
+@Immutable
+data class SecretHint(val id: String, val hint: String, val level: Int, val percent: Double)
+
+@Immutable
+data class CollectionProgress(
+    val id: String, val name: String, val total: Int, val watched: Int, val percent: Double,
+    val posterItemId: String?, val completed: Boolean,
+) {
+    val progress: Float get() = if (total > 0) (watched.toFloat() / total).coerceIn(0f, 1f) else (percent / 100.0).toFloat().coerceIn(0f, 1f)
+}
+
+@Immutable
+data class SeasonReward(val type: String, val id: String, val label: String)
+
+@Immutable
+data class SeasonTier(val tier: Int, val xpRequired: Long, val reward: SeasonReward?, val unlocked: Boolean)
+
+@Immutable
+data class SeasonPass(
+    val id: String, val name: String, val endsAt: String?, val currentTier: Int,
+    val seasonXp: Long, val xpPerTier: Int, val tiers: List<SeasonTier>,
+) {
+    val maxTier: Int get() = maxOf(30, tiers.maxOfOrNull { it.tier } ?: 0)
+    val complete: Boolean get() = currentTier >= maxTier
+    val xpIntoTier: Long get() = (seasonXp - currentTier.toLong() * xpPerTier).coerceIn(0L, xpPerTier.toLong())
+    val tierProgress: Float get() = if (complete || xpPerTier <= 0) 1f else (xpIntoTier.toFloat() / xpPerTier).coerceIn(0f, 1f)
+}
+
+@Immutable
+data class CosmeticOption(val id: String, val label: String, val unlocked: Boolean, val source: String?)
+
+@Immutable
+data class ProfileCosmetics(val frames: List<CosmeticOption>, val titles: List<CosmeticOption>, val equippedFrame: String?, val equippedTitle: String?) {
+    val equippedTitleLabel: String? get() = equippedTitle?.let { id -> titles.find { it.id == id }?.label ?: id }
+}
+
+@Immutable
+data class PublicCosmetics(val frame: String?, val title: String?, val titleLabel: String?)
+
+@Immutable
+data class DailyChallenge(
+    val id: String, val title: String, val description: String, val icon: String?,
+    val progress: Int, val target: Int, val rewardXp: Int, val completed: Boolean, val expiresAt: String?,
+)
+
+/** Equipped frame and title of other members, fetched once per user; equipping clears it. */
+internal object ProfileCosmeticsCache {
+    private val entries = java.util.concurrent.ConcurrentHashMap<String, PublicCosmetics>()
+    var version by androidx.compose.runtime.mutableIntStateOf(0)
+        private set
+    fun peek(userId: String): PublicCosmetics? = entries[userId]
+    fun put(userId: String, value: PublicCosmetics) { entries[userId] = value }
+    fun invalidate(userId: String? = null) {
+        if (userId == null) entries.clear() else entries.remove(userId)
+        version++
+    }
+}
+
 class AchievementHub internal constructor(
     private val userId: () -> String,
     private val request: suspend (String, String, String?) -> String,
@@ -327,6 +385,96 @@ class AchievementHub internal constructor(
 
 
     suspend fun publicConfig(): AchievementPublicConfig = AchievementPublicConfig.parse(get("public-config") as? JsonObject)
+
+    // --- Daily challenge, season pass, collections, secret hints, profile cosmetics -------------
+
+    suspend fun secretHints(): List<SecretHint> {
+        val element = get("users/$me/secret-hints")
+        val list = (element as? JsonArray) ?: (PJ.field(element as? JsonObject, "Hints") as? JsonArray) ?: JsonArray(emptyList())
+        return list.filterIsInstance<JsonObject>().mapNotNull { o ->
+            val id = PJ.str(o, "Id") ?: return@mapNotNull null
+            SecretHint(id, PJ.str(o, "Hint").orEmpty(), PJ.int(o, "HintLevel").coerceIn(0, 3), PJ.double(o, "Percent"))
+        }.filter { it.hint.isNotBlank() }
+    }
+
+    suspend fun collections(): List<CollectionProgress> {
+        val o = get("users/$me/collections") as? JsonObject
+        return PJ.objects(o, "Collections").mapNotNull { c ->
+            val id = PJ.str(c, "Id") ?: return@mapNotNull null
+            CollectionProgress(id, PJ.str(c, "Name") ?: "Collection", PJ.int(c, "Total"), PJ.int(c, "Watched"), PJ.double(c, "Percent"), PJ.str(c, "PosterItemId"), PJ.bool(c, "Completed"))
+        }
+    }
+
+    /** Null when no season is running (404). */
+    suspend fun seasonPass(): SeasonPass? {
+        val o = try {
+            get("users/$me/season-pass") as? JsonObject
+        } catch (missing: AchievementPluginMissingException) {
+            null
+        } ?: return null
+        val season = PJ.obj(o, "Season")
+        fun date(value: String?) = value?.takeIf { runCatching { java.time.OffsetDateTime.parse(it) }.isSuccess }
+        val tiers = PJ.objects(o, "Tiers").map { t ->
+            val r = PJ.obj(t, "Reward")
+            val reward = PJ.str(r, "Id")?.let { id -> SeasonReward(PJ.str(r, "Type").orEmpty().lowercase(), id, PJ.str(r, "Label") ?: id) }
+            SeasonTier(PJ.int(t, "Tier"), PJ.long(t, "XpRequired"), reward, PJ.bool(t, "Unlocked"))
+        }
+        return SeasonPass(
+            PJ.str(o, "Id") ?: PJ.str(season, "Id").orEmpty(),
+            PJ.str(o, "Name") ?: PJ.str(season, "Name") ?: "Saison",
+            date(PJ.str(o, "EndsAt")) ?: date(PJ.str(season, "EndsAt")),
+            PJ.int(o, "CurrentTier"), PJ.long(o, "SeasonXp"), PJ.int(o, "XpPerTier").takeIf { it > 0 } ?: 200,
+            tiers.sortedBy { it.tier },
+        )
+    }
+
+    suspend fun profileCosmetics(): ProfileCosmetics {
+        val o = get("users/$me/profile-cosmetics") as? JsonObject
+        fun options(key: String) = PJ.objects(o, key).mapNotNull { f ->
+            PJ.str(f, "Id")?.let { CosmeticOption(it, PJ.str(f, "Label") ?: it, PJ.bool(f, "Unlocked"), PJ.str(f, "Source")) }
+        }
+        return ProfileCosmetics(options("Frames"), options("Titles"), cosmeticId(o, "EquippedFrame"), cosmeticId(o, "EquippedTitle"))
+    }
+
+    private fun cosmeticId(o: JsonObject?, key: String): String? = PJ.str(o, key) ?: PJ.str(PJ.obj(o, key), "Id")
+
+    /** Null clears the slot. A locked cosmetic is refused with a 400 {Message}. */
+    suspend fun equipCosmetics(frame: String?, title: String?): ActionResult =
+        action("POST", "users/$me/profile-cosmetics/equip", buildJsonObject { put("Frame", frame); put("Title", title) }, "Cosmétique verrouillé.")
+            .also { if (it.success) ProfileCosmeticsCache.invalidate() }
+
+    /** Equipped frame and title of any member; cached, errors give an empty result. */
+    suspend fun publicCosmetics(targetUserId: String): PublicCosmetics {
+        ProfileCosmeticsCache.peek(targetUserId)?.let { return it }
+        val value = try {
+            val o = get("profiles/${safe(targetUserId)}/cosmetics") as? JsonObject
+            val title = cosmeticId(o, "EquippedTitle")
+            val self = targetUserId.replace("-", "").equals(me.replace("-", ""), ignoreCase = true)
+            val label = PJ.str(o, "EquippedTitleLabel") ?: PJ.str(o, "TitleLabel") ?: PJ.str(PJ.obj(o, "EquippedTitle"), "Label")
+                ?: (if (title != null && self) runCatching { profileCosmetics().titles.find { it.id == title }?.label }.getOrNull() else null)
+            PublicCosmetics(cosmeticId(o, "EquippedFrame"), title, label)
+        } catch (cancel: kotlin.coroutines.cancellation.CancellationException) {
+            throw cancel
+        } catch (error: Exception) {
+            PublicCosmetics(null, null, null)
+        }
+        ProfileCosmeticsCache.put(targetUserId, value)
+        return value
+    }
+
+    /** Null when there is no challenge today (404). */
+    suspend fun dailyChallenge(): DailyChallenge? {
+        val o = try {
+            get("users/$me/daily-challenge") as? JsonObject
+        } catch (missing: AchievementPluginMissingException) {
+            null
+        } ?: return null
+        val id = PJ.str(o, "Id") ?: return null
+        return DailyChallenge(
+            id, PJ.str(o, "Title") ?: "Défi du jour", PJ.str(o, "Description").orEmpty(), PJ.str(o, "Icon"),
+            PJ.int(o, "Progress"), PJ.int(o, "Target").coerceAtLeast(1), PJ.int(o, "RewardXp"), PJ.bool(o, "Completed"), PJ.str(o, "ExpiresAt"),
+        )
+    }
 
     suspend fun bank(): AchievementBank = AchievementBank.parse(get("users/$me/bank") as? JsonObject)
 

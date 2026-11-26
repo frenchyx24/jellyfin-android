@@ -84,6 +84,7 @@ fun AchievementsScreen() {
         ?: org.jellyfin.mobile.nflix.data.AchievementPublicConfig()
     var bank by remember { mutableStateOf<org.jellyfin.mobile.nflix.data.AchievementBank?>(null) }
     LaunchedEffect(hub, revision) { bank = runCatching { hub.bank() }.getOrNull() }
+    LaunchedEffect(hub, revision) { runCatching { hub.secretHints() }.onSuccess { SecretHintStore.replace(it) } }
     var recommendations by remember { mutableStateOf<List<org.jellyfin.mobile.nflix.data.BadgeRecommendation>>(emptyList()) }
     LaunchedEffect(hub, revision) {
         recommendations = try {
@@ -157,6 +158,9 @@ fun AchievementsScreen() {
                     else if (data != null) RankHeader(data, loading) { revision++ }
                     else Spacer(Modifier.statusBarsPadding().height(64.dp))
                 }
+                item("profile-cosmetics") { ProfileCosmeticsStrip(hub, deps.api.userId, deps.session.userName, revision) }
+                item("daily-challenge") { DailyChallengeSection(hub, revision) }
+                item("season-pass") { SeasonPassSection(hub, revision) { navigator.open(org.jellyfin.mobile.nflix.ui.Route.SeasonPass) } }
                 if (data != null && nflix != null) {
                     item("streak") { StreakAndSeason(nflix) }
                     val next = nflix.next.map { b -> data.badges.find { it.id == b.id }?.let { it.copy(rarityLabel = it.rarityLabel ?: b.rarityLabel) } ?: b }
@@ -191,6 +195,7 @@ fun AchievementsScreen() {
                 if (data != null) {
                     item("my-stats") { MyStatsCard { navigator.open(org.jellyfin.mobile.nflix.ui.Route.AchievementStats) } }
                     item("hub") { HubShortcuts(publicConfig, bank) { navigator.open(org.jellyfin.mobile.nflix.ui.Route.AchievementHub(it)) } }
+                    item("collections") { CollectionsSection(hub, revision) { navigator.open(org.jellyfin.mobile.nflix.ui.Route.Item(it)) } }
                     item("showcase") {
                         SectionTitle("Votre vitrine", "${data.equipped.size} exposé(s)")
                         if (data.equipped.isEmpty()) {

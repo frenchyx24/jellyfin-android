@@ -259,6 +259,7 @@ private fun Screen(route: Route) {
         Route.AlertSettings -> org.jellyfin.mobile.nflix.ui.screens.AlertSettingsScreen()
         is Route.AchievementHub -> org.jellyfin.mobile.nflix.ui.screens.AchievementHubScreen(route.tab)
         Route.AchievementStats -> org.jellyfin.mobile.nflix.ui.screens.AchievementStatsScreen()
+        Route.SeasonPass -> org.jellyfin.mobile.nflix.ui.screens.SeasonPassScreen()
         Route.Badges -> AchievementsScreen()
         is Route.Distributor -> org.jellyfin.mobile.nflix.ui.screens.DistributorScreen(route.id)
         Route.Admin -> org.jellyfin.mobile.nflix.ui.screens.AdminScreen()
