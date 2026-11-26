@@ -184,6 +184,7 @@ fun AchievementsScreen() {
                     }
                 }
                 if (data != null) {
+                    item("my-stats") { MyStatsCard { navigator.open(org.jellyfin.mobile.nflix.ui.Route.AchievementStats) } }
                     item("hub") { HubShortcuts(publicConfig, bank) { navigator.open(org.jellyfin.mobile.nflix.ui.Route.AchievementHub(it)) } }
                     item("showcase") {
                         SectionTitle("Votre vitrine", "${data.equipped.size} exposé(s)")

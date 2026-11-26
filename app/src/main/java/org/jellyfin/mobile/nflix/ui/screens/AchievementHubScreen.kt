@@ -112,6 +112,7 @@ fun achievementAdmin(jellyfinAdmin: Boolean, method: String?, miraGroups: Set<St
 @Composable
 fun AchievementHubScreen(start: String) {
     val deps = LocalDeps.current
+    val navigator = org.jellyfin.mobile.nflix.ui.LocalNavigator.current
     val hub = remember(deps.api) { AchievementHub(deps.api) }
     val config = rememberLoad("ab-config") { hub.publicConfig() }.value ?: AchievementPublicConfig()
     val jellyfinAdmin = rememberLoad("is-admin") { deps.admin.isAdmin(it) }.value == true
@@ -122,9 +123,12 @@ fun AchievementHubScreen(start: String) {
     val tab = tabs.getOrNull(index) ?: HubTab.Shop
     Box(Modifier.fillMaxSize().background(Nflix.Night)) {
         Column(Modifier.fillMaxSize()) {
-            Column(Modifier.statusBarsPadding().padding(start = 60.dp, top = 10.dp)) {
-                Text("Succès", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
-                if (config.welcome.isNotBlank()) Text(config.welcome, style = MaterialTheme.typography.bodySmall, color = Nflix.Muted, maxLines = 2)
+            Row(Modifier.statusBarsPadding().padding(start = 60.dp, top = 10.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Succès", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+                    if (config.welcome.isNotBlank()) Text(config.welcome, style = MaterialTheme.typography.bodySmall, color = Nflix.Muted, maxLines = 2)
+                }
+                MyStatsPill { navigator.open(org.jellyfin.mobile.nflix.ui.Route.AchievementStats) }
             }
             ScrollableTabRow(
                 selectedTabIndex = index, edgePadding = 12.dp, containerColor = Color.Transparent, contentColor = Nflix.Text, divider = {},
@@ -352,7 +356,7 @@ private fun ComparePicker(hub: AchievementHub, onPick: (String) -> Unit) {
 }
 
 @Composable
-private fun CompareDialog(hub: AchievementHub, other: String, onDismiss: () -> Unit) {
+internal fun CompareDialog(hub: AchievementHub, other: String, onDismiss: () -> Unit) {
     val load = rememberLoad("compare", other) { hub.compare(other) }
     val profile = rememberLoad("public-profile", other) { hub.publicProfile(other) }.value
     AlertDialog(

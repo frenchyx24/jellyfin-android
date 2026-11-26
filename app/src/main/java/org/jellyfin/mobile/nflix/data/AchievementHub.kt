@@ -332,6 +332,54 @@ class AchievementHub internal constructor(
         .mapNotNull { o -> PJ.str(o, "Id")?.let { Member(it, PJ.str(o, "Name") ?: "Membre") } }
         .filter { !it.id.replace("-", "").equals(me.replace("-", ""), ignoreCase = true) }
 
+    // "Mes stats" (Achievement Badges 3.0). Lenient reads: unknown or missing fields give empty values.
+
+    suspend fun streakCalendar(): StreakCalendar = StreakCalendar.parse(get("users/$me/streak-calendar") as? JsonObject)
+
+    suspend fun records(): StatRecords = StatRecords.parse(get("users/$me/records") as? JsonObject)
+
+    /** [period] is week, month or year; servers that ignore it answer with their default period. */
+    suspend fun recap(period: String): StatRecap = StatRecap.parse(get("users/$me/recap?period=${safe(period)}") as? JsonObject)
+
+    suspend fun smartGoals(): List<SmartGoal> {
+        val element = get("users/$me/smart-goals")
+        val list = (element as? JsonArray)?.filterIsInstance<JsonObject>() ?: PJ.objects(element as? JsonObject, "Goals")
+        return list.mapNotNull(SmartGoal::parse)
+    }
+
+    suspend fun badgeEta(): List<BadgeEta> {
+        val element = get("users/$me/badge-eta")
+        val list = (element as? JsonArray)?.filterIsInstance<JsonObject>() ?: PJ.objects(element as? JsonObject, "Etas")
+        return list.mapNotNull(BadgeEta::parse)
+    }
+
+    suspend fun categoryProgress(): List<CategoryProgress> {
+        val element = get("users/$me/category-progress")
+        val list = (element as? JsonArray)?.filterIsInstance<JsonObject>() ?: PJ.objects(element as? JsonObject, "Categories")
+        return list.mapNotNull(CategoryProgress::parse)
+    }
+
+    suspend fun libraryCompletion(): List<LibraryCompletion> {
+        val o = get("users/$me/library-completion") as? JsonObject
+        val map = PJ.obj(o, "LibraryCompletionPercents") ?: return emptyList()
+        return map.entries.mapNotNull { (name, value) ->
+            val percent = (value as? JsonPrimitive)?.let { it.doubleOrNull } ?: (value as? JsonObject)?.let { PJ.double(it, "Percent") }
+            percent?.let { LibraryCompletion(name, it.toInt().coerceIn(0, 100)) }
+        }
+    }
+
+    suspend fun recommendations(): List<BadgeRecommendation> {
+        val element = get("users/$me/recommendations")
+        val list = (element as? JsonArray)?.filterIsInstance<JsonObject>() ?: PJ.objects(element as? JsonObject, "BadgeTargets")
+        return list.mapNotNull(BadgeRecommendation::parse)
+    }
+
+    suspend fun compareHistory(): List<CompareHistoryEntry> {
+        val element = get("users/$me/compare-history")
+        val list = (element as? JsonArray)?.filterIsInstance<JsonObject>() ?: PJ.objects(element as? JsonObject, "History")
+        return list.mapNotNull(CompareHistoryEntry::parse)
+    }
+
     /** Null with a message when the server refuses (feature off, privacy, user hidden). */
     suspend fun compare(other: String): Pair<Comparison?, String?> {
         val o = get("compare/$me/${safe(other)}") as? JsonObject
@@ -641,4 +689,170 @@ internal fun parseNflixBadge(element: JsonObject): AchievementBadge? {
         rarity = PJ.str(o, "Rarity") ?: "Common",
         rarityLabel = PJ.str(o, "RarityLabel"),
     )
+}
+
+// ---- "Mes stats" models (Achievement Badges 3.0) ----
+
+/** One day of the streak calendar; [count] is 1 for a plain "watched" flag. */
+@Immutable
+data class StreakDay(val date: String, val watched: Boolean, val count: Int)
+
+@Immutable
+data class StreakCalendar(val weeks: Int, val days: List<StreakDay>) {
+    companion object {
+        fun parse(o: JsonObject?): StreakCalendar = StreakCalendar(
+            weeks = PJ.int(o, "Weeks").takeIf { it > 0 } ?: 53,
+            days = PJ.objects(o, "Days").mapNotNull { d ->
+                val date = PJ.str(d, "D") ?: PJ.str(d, "Date") ?: return@mapNotNull null
+                val raw = PJ.field(d, "W") ?: PJ.field(d, "Watched")
+                val primitive = raw as? JsonPrimitive
+                val flag = primitive?.booleanOrNull
+                val count = PJ.int(d, "C").takeIf { it > 0 } ?: PJ.int(d, "Count").takeIf { it > 0 } ?: primitive?.longOrNull?.toInt() ?: if (flag == true) 1 else 0
+                StreakDay(date.take(10), flag ?: (count > 0), if (flag == true) count.coerceAtLeast(1) else count)
+            },
+        )
+    }
+}
+
+/** Every numeric field of the records object, read case-insensitively. */
+@Immutable
+data class StatRecords(val values: Map<String, Long>) {
+    operator fun get(key: String): Long? = values[key] ?: values.entries.firstOrNull { it.key.equals(key, ignoreCase = true) }?.value
+
+    companion object {
+        fun parse(o: JsonObject?): StatRecords = StatRecords(
+            o?.entries.orEmpty().mapNotNull { (key, value) ->
+                val p = value as? JsonPrimitive ?: return@mapNotNull null
+                if (p is JsonNull || p.isString) return@mapNotNull null
+                (p.longOrNull ?: p.doubleOrNull?.toLong())?.let { key to it }
+            }.toMap(),
+        )
+    }
+}
+
+@Immutable
+data class RankedName(val name: String, val count: Int)
+
+@Immutable
+data class RecapBadge(val id: String, val title: String, val rarity: String?, val unlockedAt: String?)
+
+@Immutable
+data class StatRecap(
+    val period: String?,
+    val days: Int,
+    val movies: Int,
+    val episodes: Int,
+    val total: Int,
+    val daysWatched: Int,
+    val badgesUnlocked: Int,
+    val badges: List<RecapBadge>,
+    val topGenres: List<RankedName>,
+    val topDirectors: List<RankedName>,
+    val topActors: List<RankedName>,
+) {
+    val isEmpty: Boolean get() = total == 0 && movies == 0 && episodes == 0 && badges.isEmpty() && topGenres.isEmpty() && topDirectors.isEmpty() && topActors.isEmpty()
+
+    companion object {
+        private fun ranked(o: JsonObject?, key: String) = PJ.objects(o, key).mapNotNull { r -> PJ.str(r, "Name")?.let { RankedName(it, PJ.int(r, "Count")) } }
+
+        fun parse(o: JsonObject?): StatRecap {
+            val badges = PJ.objects(o, "BadgesList").mapNotNull { b ->
+                val id = PJ.str(b, "Id") ?: PJ.str(b, "BadgeId") ?: return@mapNotNull null
+                RecapBadge(id, PJ.str(b, "Title") ?: id, PJ.str(b, "Rarity"), PJ.str(b, "UnlockedAt"))
+            }
+            return StatRecap(
+                period = PJ.str(o, "Period"),
+                days = PJ.int(o, "Days"),
+                movies = PJ.int(o, "MoviesWatched"),
+                episodes = PJ.int(o, "EpisodesWatched"),
+                total = PJ.int(o, "TotalItems"),
+                daysWatched = PJ.int(o, "DaysWatched"),
+                badgesUnlocked = PJ.int(o, "BadgesUnlocked").takeIf { it > 0 } ?: badges.size,
+                badges = badges,
+                topGenres = ranked(o, "TopGenres"),
+                topDirectors = ranked(o, "TopDirectors"),
+                topActors = ranked(o, "TopActors"),
+            )
+        }
+    }
+}
+
+@Immutable
+data class SmartGoal(val badgeId: String, val title: String, val action: String?, val current: Long, val target: Long, val rarity: String?) {
+    val progress: Float get() = if (target > 0) (current.toFloat() / target).coerceIn(0f, 1f) else 0f
+
+    companion object {
+        fun parse(o: JsonObject): SmartGoal? {
+            val id = PJ.str(o, "BadgeId") ?: PJ.str(o, "Id") ?: return null
+            return SmartGoal(id, PJ.str(o, "Title") ?: id, PJ.str(o, "Action"), PJ.long(o, "Current"), PJ.long(o, "Target"), PJ.str(o, "Rarity"))
+        }
+    }
+}
+
+@Immutable
+data class BadgeEta(val badgeId: String, val title: String, val current: Long, val target: Long, val daysRemaining: Int?, val velocity: Double?) {
+    val progress: Float get() = if (target > 0) (current.toFloat() / target).coerceIn(0f, 1f) else 0f
+
+    companion object {
+        fun parse(o: JsonObject): BadgeEta? {
+            val id = PJ.str(o, "BadgeId") ?: PJ.str(o, "Id") ?: return null
+            val days = (PJ.field(o, "DaysRemaining") as? JsonPrimitive)?.let { it.longOrNull ?: it.doubleOrNull?.toLong() }?.toInt()
+            val velocity = (PJ.field(o, "Velocity") as? JsonPrimitive)?.doubleOrNull
+            return BadgeEta(id, PJ.str(o, "Title") ?: id, PJ.long(o, "Current"), PJ.long(o, "Target"), days?.takeIf { it >= 0 }, velocity)
+        }
+    }
+}
+
+@Immutable
+data class CategoryProgress(val category: String, val label: String, val total: Int, val unlocked: Int, val percent: Int) {
+    companion object {
+        fun parse(o: JsonObject): CategoryProgress? {
+            val category = PJ.str(o, "Category") ?: return null
+            val total = PJ.int(o, "Total")
+            val unlocked = PJ.int(o, "Unlocked")
+            val percent = (PJ.field(o, "Percent") as? JsonPrimitive)?.doubleOrNull?.toInt() ?: if (total > 0) unlocked * 100 / total else 0
+            return CategoryProgress(category, PJ.str(o, "CategoryLabel") ?: category, total, unlocked, percent.coerceIn(0, 100))
+        }
+    }
+}
+
+@Immutable
+data class LibraryCompletion(val name: String, val percent: Int)
+
+@Immutable
+data class RecommendedItem(val id: String, val name: String, val type: String?, val year: Int, val runTimeMinutes: Int)
+
+@Immutable
+data class BadgeRecommendation(val badgeId: String, val title: String, val current: Long, val target: Long, val items: List<RecommendedItem>) {
+    val progress: Float get() = if (target > 0) (current.toFloat() / target).coerceIn(0f, 1f) else 0f
+
+    companion object {
+        /** Null for entries without items: nothing to suggest. */
+        fun parse(o: JsonObject): BadgeRecommendation? {
+            val items = PJ.objects(o, "Items").mapNotNull { i ->
+                val id = PJ.str(i, "Id") ?: return@mapNotNull null
+                RecommendedItem(id, PJ.str(i, "Name") ?: "", PJ.str(i, "Type"), PJ.int(i, "Year"), PJ.int(i, "RunTimeMinutes"))
+            }
+            if (items.isEmpty()) return null
+            val id = PJ.str(o, "BadgeId") ?: ""
+            val progress = PJ.obj(o, "Progress")
+            return BadgeRecommendation(
+                badgeId = id,
+                title = PJ.str(o, "BadgeTitle") ?: PJ.str(o, "Title") ?: id.ifBlank { "Suggestions" },
+                current = if (progress != null) PJ.long(progress, "Current") else PJ.long(o, "Current"),
+                target = if (progress != null) PJ.long(progress, "Target") else PJ.long(o, "Target"),
+                items = items,
+            )
+        }
+    }
+}
+
+@Immutable
+data class CompareHistoryEntry(val otherUserId: String, val otherUserName: String, val at: String?) {
+    companion object {
+        fun parse(o: JsonObject): CompareHistoryEntry? {
+            val id = PJ.str(o, "OtherUserId") ?: PJ.str(o, "UserId") ?: return null
+            return CompareHistoryEntry(id, PJ.str(o, "OtherUserName") ?: PJ.str(o, "UserName") ?: "Membre", PJ.str(o, "At"))
+        }
+    }
 }

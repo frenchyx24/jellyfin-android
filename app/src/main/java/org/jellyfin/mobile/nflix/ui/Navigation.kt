@@ -64,6 +64,8 @@ sealed class Route(val key: String) {
     data object Releases : Route("releases")
     data object AlertSettings : Route("alert-settings")
     data class AchievementHub(val tab: String = "Quests") : Route("achievement-hub/$tab")
+    /** "Mes stats": activity heatmap, records, recap, goals, categories, suggestions, comparisons. */
+    data object AchievementStats : Route("achievement-stats")
 
     val isTab: Boolean get() = this is Tab
 }
