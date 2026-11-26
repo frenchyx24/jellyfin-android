@@ -544,6 +544,39 @@ class AchievementHub internal constructor(
         return list.mapNotNull(CompareHistoryEntry::parse)
     }
 
+    // ---------------------------------------------------------------- Lot 4 (plugin 3.2): social
+
+    /** Weekly XP board of the given accounts (usually the family), best first. */
+    suspend fun weeklyBoard(ids: Collection<String>): List<WeeklyRow> {
+        val q = java.net.URLEncoder.encode(idsParam(ids), "UTF-8").replace("+", "%20")
+        return (get("users/$me/weekly-board?ids=$q") as? JsonArray).objects().mapNotNull { o ->
+            val id = PJ.str(o, "UserId") ?: return@mapNotNull null
+            WeeklyRow(id, PJ.str(o, "Name") ?: "Membre", PJ.long(o, "WeekXp"), PJ.int(o, "Level"), PJ.str(o, "Title") ?: "", PJ.int(o, "Rank"))
+        }
+    }
+
+    suspend fun duels(): List<Duel> = (get("users/$me/duels") as? JsonArray).objects().mapNotNull(Duel::parse)
+
+    suspend fun createDuel(opponentId: String, kind: String, target: Int, days: Int): ActionResult =
+        action("POST", "users/$me/duels", duelBody(opponentId, kind, target, days), fallback = "Défi refusé par le serveur.")
+
+    suspend fun respondDuel(id: String, accept: Boolean): ActionResult =
+        action("POST", "users/$me/duels/$id/${if (accept) "accept" else "decline"}", fallback = "Défi introuvable.")
+
+    suspend fun unlockFeed(ids: Collection<String>): List<UnlockItem> {
+        val q = java.net.URLEncoder.encode(idsParam(ids), "UTF-8").replace("+", "%20")
+        return (get("users/$me/unlock-feed?ids=$q") as? JsonArray).objects().mapNotNull(UnlockItem::parse)
+    }
+
+    suspend fun reactToUnlock(key: String, emoji: String): ActionResult =
+        action("POST", "users/$me/unlock-feed/react", reactBody(key, emoji), fallback = "Réaction impossible.")
+
+    suspend fun progressAlerts(): List<ProgressAlert> {
+        val element = get("users/$me/progress-alerts")
+        val list = (element as? JsonArray)?.filterIsInstance<JsonObject>() ?: PJ.objects(element as? JsonObject, "Alerts")
+        return list.mapNotNull(ProgressAlert::parse)
+    }
+
     /** Null with a message when the server refuses (feature off, privacy, user hidden). */
     suspend fun compare(other: String): Pair<Comparison?, String?> {
         val o = get("compare/$me/${safe(other)}") as? JsonObject
