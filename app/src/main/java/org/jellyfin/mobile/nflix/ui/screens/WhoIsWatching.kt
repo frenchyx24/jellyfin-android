@@ -241,6 +241,7 @@ fun WhoIsWatchingScreen(me: FamilyMe, onDone: () -> Unit) {
                             if (member.isKid) Pill("Enfant", Brush.horizontalGradient(listOf(Color(0xFFFFB347), Color(0xFFFF5FA2))), Color.White)
                             if (member.isHead) Pill("Principal", Brush.linearGradient(listOf(Color.White.copy(alpha = .1f), Color.White.copy(alpha = .1f))), Color(0xFFDDDDDD))
                             if (isMe) Pill("En cours", Brush.linearGradient(listOf(Nflix.BrandRed, Nflix.BrandRed)), Color.White)
+                            ShowcaseMedals(member.userId)
                         },
                     )
                 }

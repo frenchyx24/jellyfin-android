@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import androidx.compose.material.icons.rounded.Share
 import kotlinx.coroutines.launch
 import org.jellyfin.mobile.nflix.data.AchievementBadge
 import org.jellyfin.mobile.nflix.data.AchievementPluginMissingException
@@ -147,7 +148,12 @@ fun AchievementsScreen() {
                 val data = profile
                 val nflix = extra
                 item("rank") {
-                    if (data != null && nflix != null) NflixHero(data, nflix, loading) { revision++ }
+                    val heroContext = LocalContext.current
+                    if (data != null && nflix != null) NflixHero(data, nflix, loading, onShare = {
+                        (data.equipped.firstOrNull() ?: data.badges.filter { it.unlocked }.maxByOrNull { rarityRank(it.rarity) })?.let { best ->
+                            shareBadge(heroContext, best, deps.session.userName, "Niveau ${nflix.level.level} · ${nflix.level.title}")
+                        }
+                    }) { revision++ }
                     else if (data != null) RankHeader(data, loading) { revision++ }
                     else Spacer(Modifier.statusBarsPadding().height(64.dp))
                 }
@@ -270,17 +276,20 @@ fun AchievementsScreen() {
             onPageChange = { actionError = null },
         ) { badge ->
             val equipped = profile?.equipped?.any { it.id == badge.id } == true
+            val showcaseFull = !equipped && (profile?.equipped?.size ?: 0) >= 3
+            val shareContext = LocalContext.current
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                 actionError?.let { Spacer(Modifier.height(8.dp)); Text(it, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center) }
                 Spacer(Modifier.height(18.dp))
                 if (badge.unlocked) {
                     Button(
-                        enabled = !saving && !loading,
+                        enabled = !saving && !loading && !showcaseFull,
                         onClick = {
                             saving = true
                             scope.launch {
                                 try {
                                     repository.setEquipped(badge, !equipped)
+                                    org.jellyfin.mobile.nflix.data.BadgeShowcaseCache.invalidate()
                                     revision++
                                     selected = null
                                 } catch (cancelled: CancellationException) {
@@ -297,7 +306,19 @@ fun AchievementsScreen() {
                         modifier = Modifier.fillMaxWidth().height(50.dp),
                     ) {
                         Icon(Icons.Rounded.PushPin, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp))
-                        Text(if (saving) "Enregistrement…" else if (equipped) "Retirer de la vitrine" else "Exposer dans la vitrine", fontWeight = FontWeight.SemiBold)
+                        Text(
+                            if (saving) "Enregistrement…" else if (equipped) "Retirer de la vitrine" else if (showcaseFull) "Vitrine pleine (3/3)" else "Exposer dans la vitrine",
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    androidx.compose.material3.OutlinedButton(
+                        onClick = { shareBadge(shareContext, badge, deps.session.userName, extra?.level?.let { "Niveau ${it.level} · ${it.title}" }) },
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth().height(50.dp),
+                    ) {
+                        Icon(Icons.Rounded.Share, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp))
+                        Text("Partager", fontWeight = FontWeight.SemiBold)
                     }
                 }
                 if (badge.unlocked) {
@@ -493,10 +514,7 @@ internal fun Medallion(badge: AchievementBadge, size: androidx.compose.ui.unit.D
                 ),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(
-                if (locked && badge.category == "Hidden") Icons.Rounded.Lock else achievementIcon(badge.icon), null,
-                tint = if (locked) Nflix.Muted.copy(alpha = 0.45f) else Color.White, modifier = Modifier.size(size * 0.48f),
-            )
+            MedalMotifArt(badge, locked, Modifier.size(size * 0.56f))
         }
         if (locked && badge.category != "Hidden") {
             Box(
@@ -614,7 +632,7 @@ private fun BadgeTile(badge: AchievementBadge, membersPercent: Double?, equipped
 
 /** Hero of the Nflix view: animated XP ring with the level, title, XP, tier and unlocked count. */
 @Composable
-private fun NflixHero(data: AchievementProfile, extra: NflixAchievements, loading: Boolean, onRefresh: () -> Unit) {
+private fun NflixHero(data: AchievementProfile, extra: NflixAchievements, loading: Boolean, onShare: (() -> Unit)? = null, onRefresh: () -> Unit) {
     val level = extra.level
     val tier = tierColor(data.rank.tier.color)
     val motion = rememberMotionEnabled()
@@ -702,6 +720,12 @@ private fun NflixHero(data: AchievementProfile, extra: NflixAchievements, loadin
                         if (total > 0) "${unlocked * 100 / total} %" else "—",
                         Modifier.weight(1f),
                     )
+                }
+                if (onShare != null && data.badges.any { it.unlocked }) {
+                    androidx.compose.material3.TextButton(onClick = onShare, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+                        Icon(Icons.Rounded.Share, null, Modifier.size(16.dp), tint = Nflix.Text); Spacer(Modifier.width(6.dp))
+                        Text("Partager", color = Nflix.Text)
+                    }
                 }
                 Spacer(Modifier.height(12.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally)) {

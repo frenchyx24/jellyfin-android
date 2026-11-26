@@ -1,6 +1,8 @@
 package org.jellyfin.mobile.nflix.data
 
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -27,6 +29,20 @@ import java.net.URLEncoder
  */
 
 /** Case-insensitive, null-safe reads on plugin JSON. */
+/** In-memory cache of members' showcased badges; [version] bumps on invalidation so tiles refetch. */
+internal object BadgeShowcaseCache {
+    private val entries = java.util.concurrent.ConcurrentHashMap<String, List<AchievementBadge>>()
+    var version by androidx.compose.runtime.mutableIntStateOf(0)
+        private set
+
+    fun peek(userId: String): List<AchievementBadge>? = entries[userId]
+    fun put(userId: String, badges: List<AchievementBadge>) { entries[userId] = badges }
+    fun invalidate(userId: String? = null) {
+        if (userId == null) entries.clear() else entries.remove(userId)
+        version++
+    }
+}
+
 internal object PJ {
     fun field(o: JsonObject?, key: String): JsonElement? = o?.get(key) ?: o?.entries?.firstOrNull { it.key.equals(key, ignoreCase = true) }?.value
 
@@ -431,6 +447,31 @@ class AchievementHub internal constructor(
             "Avatar" to "EquippedAvatarId", "Background" to "EquippedBackgroundId", "ProfileBorder" to "EquippedProfileBorderId")
             .associate { (kind, key) -> kind to PJ.str(o, key) }
         return Cosmetics(PJ.strings(o, "Owned").toSet(), equipped, PJ.int(o, "ScoreBank"), PJ.int(o, "LifetimeScore"))
+    }
+
+    /** Showcased badges of any member (own route for me, public route otherwise), cached in memory; errors give an empty list. */
+    suspend fun showcase(targetUserId: String): List<AchievementBadge> {
+        BadgeShowcaseCache.peek(targetUserId)?.let { return it }
+        val list = try {
+            val id = safe(targetUserId)
+            val root = get(if (targetUserId.equals(me, ignoreCase = true)) "users/$id/equipped?lang=fr" else "profiles/$id/equipped?lang=fr")
+            val items = (root as? JsonArray)?.filterIsInstance<JsonObject>()
+                ?: listOf("Equipped", "Badges", "Items").firstNotNullOfOrNull { k -> PJ.objects(root as? JsonObject, k).takeIf { it.isNotEmpty() } }.orEmpty()
+            items.mapNotNull { o ->
+                val badgeId = PJ.str(o, "Id") ?: PJ.str(o, "BadgeId") ?: return@mapNotNull null
+                AchievementBadge(
+                    id = badgeId, title = PJ.str(o, "Title") ?: PJ.str(o, "Name") ?: badgeId, description = PJ.str(o, "Description").orEmpty(),
+                    icon = PJ.str(o, "Icon"), category = PJ.str(o, "Category").orEmpty(), unlocked = true,
+                    currentValue = 0, targetValue = 0, rarity = PJ.str(o, "Rarity") ?: "Common",
+                )
+            }.take(3)
+        } catch (cancelled: kotlin.coroutines.cancellation.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            emptyList()
+        }
+        BadgeShowcaseCache.put(targetUserId, list)
+        return list
     }
 
     suspend fun equip(cosmeticId: String): ActionResult = action("POST", "users/$me/cosmetics/equip", buildJsonObject { put("CosmeticId", cosmeticId) })

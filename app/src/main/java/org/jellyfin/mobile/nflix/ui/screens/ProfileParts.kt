@@ -131,6 +131,7 @@ internal fun ProfileHeader(
                 }
                 Column(Modifier.weight(1f).padding(start = 14.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(displayName ?: "", fontSize = 19.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, color = Nflix.Text)
+                    ShowcaseMedals(userId)
                     if (email != null) Text(email, fontSize = 12.sp, color = Nflix.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     if (plan != MiraPlan.NONE) {
                         Spacer(Modifier.height(4.dp))

@@ -579,11 +579,8 @@ private fun BadgePage(
 internal fun rarityPalette(color: Color): List<Color> =
     listOf(color, lerp(color, Color.White, 0.45f), lerp(color, Color.Black, 0.25f), Color.White, lerp(color, Color(0xFFFFE08A), 0.5f))
 
-internal fun shareBadge(context: Context, badge: AchievementBadge) {
-    val send = Intent(Intent.ACTION_SEND).setType("text/plain")
-        .putExtra(Intent.EXTRA_TEXT, "J'ai débloqué « ${badge.title} » sur Nflix !")
-    runCatching { context.startActivity(Intent.createChooser(send, "Partager").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-}
+internal fun shareBadge(context: Context, badge: AchievementBadge, userName: String? = null, levelLine: String? = null) =
+    shareBadgeImage(context, badge, userName, levelLine)
 
 @Composable
 internal fun AchievementUnlockOverlay(badges: List<AchievementBadge>, onOpen: (AchievementBadge) -> Unit, onDismiss: () -> Unit) {

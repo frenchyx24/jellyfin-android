@@ -655,6 +655,7 @@ private fun ProfileTile(member: FamilyMemberInfo, isMe: Boolean, index: Int, onC
         }
         Spacer(Modifier.height(8.dp))
         Text(member.displayName, color = if (light) Color.White else Nflix.Text, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        ShowcaseMedals(member.userId)
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (member.isHead) Icon(Icons.Rounded.Star, null, tint = Color(0xFFFFC35A), modifier = Modifier.size(12.dp).padding(end = 2.dp))
             Text(if (isMe) "Vous" else FamilyFormat.roleLabel(member), color = if (member.isHead) Color(0xFFFFC35A) else Nflix.Muted, fontSize = 11.sp)
